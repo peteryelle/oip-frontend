@@ -34,6 +34,7 @@ export default function App() {
               <Route path="settings/team" element={<TeamPage />} />
               <Route path="settings/subscriptions" element={<SubscriptionsPage />} />
               <Route path="settings/runs" element={<RunHistoryPage />} />
+              <Route path="settings/integrations" element={<IntegrationsPage />} />
               <Route path="account" element={<AccountPage />} />
               <Route path="help" element={<HelpPage />} />
             </Route>
@@ -272,7 +273,7 @@ function HelpRequestModal({ prefill, onClose }) {
             />
             <div style={{ fontSize: 12, color: 'var(--ink-faint)', marginBottom: 20, fontFamily: "'IBM Plex Mono', monospace" }}>
               Sending as: {user.email}
-              {selectedOip && <> · {selectedOip.tenants?.name} · {selectedOip.name}</>}
+              {selectedOip && <> · {selectedOip.tenants?.name} · {selectedOip.verticals?.name}</>}
             </div>
             {err && <div className="auth-error">{err}</div>}
             <div style={{ display: 'flex', gap: 12 }}>
@@ -881,7 +882,7 @@ function HomePage() {
     <>
       <div className="hero" style={{ marginBottom: 20 }}>
         <div className="hero-eyebrow">
-          {selectedOip.tenants?.name} · {selectedOip.name}
+          {selectedOip.tenants?.name} · {selectedOip.verticals?.name}
         </div>
         <h1 className="hero-title" style={{ fontSize: 34 }}>Where to act this week.<HelpIcon topic="home" /></h1>
       </div>
@@ -2574,7 +2575,12 @@ function SettingsPage() {
         <Link to="/settings/subscriptions" className="us-card" style={{ textDecoration: 'none', color: 'inherit' }}>
           <div className="us-eyebrow">Subscription</div>
           <div className="us-title">States & tier</div>
-          <div className="us-body">Manage which states this OIP scrapes; current subscription tier.</div>
+          <div className="us-body">Manage which states or verticals this OIP scrapes.</div>
+        </Link>
+        <Link to="/settings/integrations" className="us-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="us-eyebrow">Integrations</div>
+          <div className="us-title">API keys</div>
+          <div className="us-body">Connect external data sources (SAM.gov and future verticals).</div>
         </Link>
         <Link to="/settings/runs" className="us-card" style={{ textDecoration: 'none', color: 'inherit' }}>
           <div className="us-eyebrow">Operations</div>
@@ -2749,10 +2755,34 @@ function InviteModal({ tenantId, onClose }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// SUBSCRIPTIONS
+// SUBSCRIPTIONS — vertical-aware: SAM gets a different view than SLED
 // ────────────────────────────────────────────────────────────────────────────
 
 function SubscriptionsPage() {
+  const { selectedOip } = useOip()
+  const [verticalSlug, setVerticalSlug] = useState(null)
+  const [loadingVertical, setLoadingVertical] = useState(true)
+
+  useEffect(() => {
+    if (!selectedOip?.vertical_id) return
+    setLoadingVertical(true)
+    supabase
+      .from('verticals')
+      .select('slug')
+      .eq('id', selectedOip.vertical_id)
+      .single()
+      .then(({ data }) => {
+        setVerticalSlug(data?.slug ?? null)
+        setLoadingVertical(false)
+      })
+  }, [selectedOip?.vertical_id])
+
+  if (loadingVertical) return <SectionLoader />
+  if (verticalSlug === 'sam') return <SamSubscriptionsView />
+  return <SledSubscriptionsView />
+}
+
+function SledSubscriptionsView() {
   const { selectedOip } = useOip()
   const [subs, setSubs] = useState([])
   const [tier, setTier] = useState(null)
@@ -2810,9 +2840,6 @@ function SubscriptionsPage() {
 
   if (loading) return <SectionLoader />
   const activeStates = subs.filter(s => s.is_active).map(s => s.state)
-
-  // Build a "coverage map" — for each subscribed state, what grouping
-  // does it belong to, when did it last scrape, and when is it next?
   const coverage = buildCoverageView(activeStates, groupings, recentRuns)
 
   return (
@@ -2824,7 +2851,6 @@ function SubscriptionsPage() {
         Currently subscribed to <strong>{activeStates.length}</strong> state{activeStates.length === 1 ? '' : 's'}.
       </p>
 
-      {/* Coverage view: active states + next scheduled */}
       <Block label="Coverage schedule">
         {coverage.length === 0 ? (
           <div style={{ color: 'var(--ink-fade)', fontSize: 14 }}>No active subscriptions yet. Toggle a state below to start.</div>
@@ -2908,6 +2934,310 @@ function SubscriptionsPage() {
         </table>
         <p style={{ marginTop: 12, fontSize: 13, color: 'var(--ink-fade)' }}>
           Need a different tier? Contact support.
+        </p>
+      </Block>
+    </div>
+  )
+}
+
+function SamSubscriptionsView() {
+  const { selectedOip } = useOip()
+  const { memberships } = useAuth()
+  const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
+  const canManage = ['owner', 'admin'].includes(myRole)
+  const [sub, setSub] = useState(null)
+  const [apiKey, setApiKey] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [toggling, setToggling] = useState(false)
+
+  const reload = async () => {
+    if (!selectedOip) return
+    setLoading(true)
+    const [{ data: s }, { data: k }] = await Promise.all([
+      supabase.from('sam_subscriptions').select('id, is_active').eq('oip_id', selectedOip.id).maybeSingle(),
+      supabase.from('tenant_api_keys')
+        .select('key_hint, expires_at, updated_at')
+        .eq('tenant_id', selectedOip.tenant_id)
+        .eq('vertical_id', selectedOip.vertical_id)
+        .maybeSingle(),
+    ])
+    setSub(s); setApiKey(k); setLoading(false)
+  }
+
+  useEffect(() => { reload() }, [selectedOip])
+
+  const toggleActive = async () => {
+    if (!canManage) return
+    setToggling(true)
+    const newActive = !(sub?.is_active ?? false)
+    if (sub) {
+      await supabase.from('sam_subscriptions').update({ is_active: newActive }).eq('id', sub.id)
+    } else {
+      await supabase.from('sam_subscriptions').insert({ oip_id: selectedOip.id, is_active: true })
+    }
+    await reload()
+    setToggling(false)
+  }
+
+  if (loading) return <SectionLoader />
+
+  const isActive = sub?.is_active ?? false
+  const expiresAt = apiKey?.expires_at ? new Date(apiKey.expires_at) : null
+  const daysUntilExpiry = expiresAt ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 86400000)) : null
+  const isExpired = expiresAt && expiresAt <= new Date()
+  const isWarn = !isExpired && daysUntilExpiry !== null && daysUntilExpiry <= 14
+
+  return (
+    <div className="detail-section">
+      <div className="detail-eyebrow">Subscription · Federal (SAM.gov)</div>
+      <h2 className="detail-title">Federal procurement coverage</h2>
+      <p className="detail-body" style={{ marginBottom: 24 }}>
+        SAM.gov is a national feed — not partitioned by state. When active, this OIP
+        fetches federal opportunities matching the NAICS codes and filters in your profile.
+      </p>
+
+      <Block label="Federal (SAM.gov) coverage">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <button
+            onClick={toggleActive}
+            disabled={!canManage || toggling}
+            style={{
+              padding: '10px 20px',
+              border: '1px solid ' + (isActive ? 'var(--primary)' : 'var(--rule-strong)'),
+              background: isActive ? 'var(--primary-soft)' : 'var(--paper)',
+              color: isActive ? 'var(--primary-dark)' : 'var(--ink-light)',
+              borderRadius: 3, cursor: canManage ? 'pointer' : 'default',
+              fontWeight: 600, fontSize: 14,
+            }}>
+            {toggling ? '…' : isActive ? '✓ Active' : 'Inactive'}
+          </button>
+          <span style={{ fontSize: 13, color: 'var(--ink-fade)' }}>
+            {isActive
+              ? 'This OIP is subscribed to SAM.gov federal opportunities.'
+              : 'Toggle to enable SAM.gov scraping for this OIP.'}
+          </span>
+        </div>
+        {!canManage && (
+          <p style={{ marginTop: 12, fontSize: 12, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+            Only admins can change subscriptions.
+          </p>
+        )}
+      </Block>
+
+      <Block label="SAM.gov API key">
+        {apiKey ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <code style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, background: 'var(--primary-soft)', padding: '4px 10px', borderRadius: 3 }}>
+                {apiKey.key_hint}
+              </code>
+              {isExpired && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#c0392b', background: '#fdecea', padding: '3px 8px', borderRadius: 3 }}>
+                  Expired — SAM scraping paused
+                </span>
+              )}
+              {isWarn && !isExpired && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--warn-border)', background: 'var(--warn-bg)', padding: '3px 8px', borderRadius: 3 }}>
+                  Expires in {daysUntilExpiry} day{daysUntilExpiry === 1 ? '' : 's'} — replace soon
+                </span>
+              )}
+              {!isWarn && !isExpired && (
+                <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>
+                  Expires {expiresAt?.toLocaleDateString()}
+                </span>
+              )}
+            </div>
+            <p style={{ marginTop: 10, fontSize: 13, color: 'var(--ink-fade)' }}>
+              To replace this key, go to{' '}
+              <Link to="/settings/integrations" style={{ color: 'var(--primary)' }}>Settings → Integrations</Link>.
+            </p>
+          </div>
+        ) : (
+          <p style={{ fontSize: 13, color: 'var(--ink-fade)' }}>
+            No SAM.gov API key on file. Add one in{' '}
+            <Link to="/settings/integrations" style={{ color: 'var(--primary)' }}>Settings → Integrations</Link>{' '}
+            before enabling this subscription.
+          </p>
+        )}
+      </Block>
+    </div>
+  )
+}
+
+function IntegrationsPage() {
+  const { selectedOip } = useOip()
+  const { memberships } = useAuth()
+  const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
+  const canManage = ['owner', 'admin'].includes(myRole)
+  const [samKey, setSamKey] = useState(null)
+  const [samVerticalId, setSamVerticalId] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [showKeyForm, setShowKeyForm] = useState(false)
+  const [keyInput, setKeyInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveErr, setSaveErr] = useState(null)
+  const [saveOk, setSaveOk] = useState(false)
+
+  const reload = async () => {
+    if (!selectedOip) return
+    setLoading(true)
+    const { data: v } = await supabase.from('verticals').select('id').eq('slug', 'sam').single()
+    const vid = v?.id ?? null
+    setSamVerticalId(vid)
+    if (vid) {
+      const { data: k } = await supabase
+        .from('tenant_api_keys')
+        .select('key_hint, expires_at, updated_at')
+        .eq('tenant_id', selectedOip.tenant_id)
+        .eq('vertical_id', vid)
+        .maybeSingle()
+      setSamKey(k ?? null)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { reload() }, [selectedOip])
+
+  const saveKey = async () => {
+    if (!keyInput.trim() || keyInput.trim().length < 10) {
+      setSaveErr('Key looks too short — paste your full SAM.gov API key.')
+      return
+    }
+    setSaving(true); setSaveErr(null); setSaveOk(false)
+    try {
+      const { data, error } = await supabase.functions.invoke('save-api-key', {
+        body: { vertical_slug: 'sam', key: keyInput.trim() },
+      })
+      if (error) throw error
+      if (data?.hint) {
+        setSaveOk(true); setKeyInput(''); setShowKeyForm(false)
+        await reload()
+      } else {
+        setSaveErr('Unexpected response from server. Try again.')
+      }
+    } catch (e) {
+      setSaveErr(e.message || 'Failed to save key.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <SectionLoader />
+
+  const expiresAt = samKey?.expires_at ? new Date(samKey.expires_at) : null
+  const daysUntilExpiry = expiresAt ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 86400000)) : null
+  const isExpired = expiresAt && expiresAt <= new Date()
+  const isWarn = !isExpired && daysUntilExpiry !== null && daysUntilExpiry <= 14
+
+  return (
+    <div className="detail-section">
+      <div className="detail-eyebrow">Settings · Integrations</div>
+      <h2 className="detail-title">API keys</h2>
+      <p className="detail-body" style={{ marginBottom: 28 }}>
+        Connect external data sources by providing your own API keys. Keys are encrypted
+        at rest and never displayed in full after saving.
+      </p>
+
+      <Block label="SAM.gov — Federal procurement">
+        {samKey ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+              <code style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, background: 'var(--primary-soft)', padding: '4px 10px', borderRadius: 3 }}>
+                {samKey.key_hint}
+              </code>
+              {isExpired && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#c0392b', background: '#fdecea', padding: '3px 8px', borderRadius: 3 }}>
+                  ⚠ Expired — SAM scraping is paused
+                </span>
+              )}
+              {isWarn && !isExpired && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--warn-border)', background: 'var(--warn-bg)', padding: '3px 8px', borderRadius: 3 }}>
+                  Expires in {daysUntilExpiry} day{daysUntilExpiry === 1 ? '' : 's'}
+                </span>
+              )}
+              {!isWarn && !isExpired && expiresAt && (
+                <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>
+                  Expires {expiresAt.toLocaleDateString()}
+                </span>
+              )}
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 12 }}>
+              SAM.gov API keys expire every 90 days.{" "}
+              <a href="https://sam.gov/profile/details" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>
+                Get a new key at sam.gov
+              </a>.
+            </p>
+            {canManage && !showKeyForm && (
+              <button onClick={() => { setShowKeyForm(true); setSaveOk(false) }}
+                style={{ padding: '8px 16px', border: '1px solid var(--rule-strong)', background: 'var(--paper)', borderRadius: 3, cursor: 'pointer', fontSize: 13 }}>
+                Replace key
+              </button>
+            )}
+          </div>
+        ) : (
+          <div>
+            <p style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 12 }}>
+              No SAM.gov API key on file. Paste your key below to enable federal procurement scraping.{" "}
+              <a href="https://sam.gov/profile/details" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>
+                Get your key at sam.gov →
+              </a>
+            </p>
+            {canManage && !showKeyForm && (
+              <button onClick={() => setShowKeyForm(true)}
+                style={{ padding: '8px 16px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                + Add SAM.gov key
+              </button>
+            )}
+          </div>
+        )}
+
+        {canManage && showKeyForm && (
+          <div style={{ marginTop: 16, padding: 16, background: 'var(--bg)', borderRadius: 4, border: '1px solid var(--rule)' }}>
+            <label style={{ display: 'block', marginBottom: 8 }}>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 6 }}>
+                SAM.gov API key
+              </div>
+              <input
+                type="password"
+                value={keyInput}
+                onChange={e => { setKeyInput(e.target.value); setSaveErr(null) }}
+                placeholder="Paste your SAM.gov API key…"
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--rule-strong)', borderRadius: 3, fontSize: 14, fontFamily: "'IBM Plex Mono', monospace", boxSizing: 'border-box' }}
+              />
+            </label>
+            {saveErr && <div style={{ fontSize: 13, color: '#c0392b', marginBottom: 8 }}>{saveErr}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={saveKey} disabled={saving || !keyInput.trim()}
+                style={{ padding: '9px 18px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
+                {saving ? 'Saving…' : 'Save key'}
+              </button>
+              <button onClick={() => { setShowKeyForm(false); setKeyInput(''); setSaveErr(null) }}
+                style={{ padding: '9px 14px', background: 'none', color: 'var(--ink-fade)', border: '1px solid var(--rule-strong)', borderRadius: 3, cursor: 'pointer', fontSize: 13 }}>
+                Cancel
+              </button>
+            </div>
+            <p style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-fade)' }}>
+              Your key is encrypted before storage and cannot be retrieved after saving.
+            </p>
+          </div>
+        )}
+
+        {saveOk && (
+          <div style={{ marginTop: 12, fontSize: 13, color: '#1a7f4b', fontWeight: 600 }}>
+            ✓ Key saved successfully.
+          </div>
+        )}
+
+        {!canManage && (
+          <p style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+            Only owners and admins can manage API keys.
+          </p>
+        )}
+      </Block>
+
+      <Block label="Future integrations">
+        <p style={{ fontSize: 13, color: 'var(--ink-fade)' }}>
+          Additional data sources will appear here as they become available.
         </p>
       </Block>
     </div>
