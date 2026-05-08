@@ -1169,19 +1169,7 @@ function MarketReviewPage() {
   const allStates = [...new Set(signals.map(s => s.signals?.state).filter(Boolean))].sort()
   const allGroups = [...new Set(signals.flatMap(s => s.matched_groups || []))].sort()
 
-  const filtered = signals.filter(s => {
-    if (tierFilter && s.signal_tier !== tierFilter) return false
-    if (stateFilter && s.signals?.state !== stateFilter) return false
-    if (groupFilter && !(s.matched_groups || []).includes(groupFilter)) return false
-    if (entityFilter && s.signals?.source_name !== entityFilter) return false
-    if (search) {
-      const q = search.toLowerCase()
-      const t = (s.signals?.title || '').toLowerCase()
-      const sn = (s.signals?.source_name || '').toLowerCase()
-      if (!t.includes(q) && !sn.includes(q)) return false
-    }
-    return true
-  })
+
 
   const updateStatus = async (signalId, newStatus) => {
     const { error } = await supabase
@@ -1219,6 +1207,7 @@ function MarketReviewPage() {
   }
 
   const isSam = selectedOip?.verticals?.slug === 'sam'
+  const [samTab, setSamTab] = useState('opportunities') // 'opportunities' | 'dib'
   const drawerProps = openSignal ? {
     os: openSignal,
     onClose: () => setOpenSignal(null),
@@ -1226,12 +1215,37 @@ function MarketReviewPage() {
     onPursue: () => { moveToPursued(openSignal); setOpenSignal(null) },
   } : null
 
+  // Split SAM signals into opportunities vs DIB prospects
+  const samOpportunities = isSam ? signals.filter(s => (s.signals?.metadata?.signal_type || 'opportunity') === 'opportunity') : signals
+  const samDib           = isSam ? signals.filter(s => s.signals?.metadata?.signal_type === 'award') : []
+  const activeSignals    = isSam ? (samTab === 'dib' ? samDib : samOpportunities) : signals
+
+  const filtered = activeSignals.filter(s => {
+    if (statusFilter && s.status !== statusFilter) return false
+    if (tierFilter && s.signal_tier !== tierFilter) return false
+    if (!isSam) {
+      if (stateFilter && s.signals?.state !== stateFilter) return false
+      if (groupFilter && !(s.matched_groups || []).includes(groupFilter)) return false
+      if (entityFilter && s.signals?.source_name !== entityFilter) return false
+    }
+    if (search) {
+      const q  = search.toLowerCase()
+      const t  = (s.signals?.title || '').toLowerCase()
+      const sn = (s.signals?.source_name || s.signals?.metadata?.company_name || '').toLowerCase()
+      const dept = (s.signals?.metadata?.department_name || '').toLowerCase()
+      if (!t.includes(q) && !sn.includes(q) && !dept.includes(q)) return false
+    }
+    return true
+  })
+
   return (
     <>
       <div className="hero" style={{ marginBottom: 16 }}>
-        <div className="hero-eyebrow">{isSam ? 'Opportunities' : 'Market Review'}</div>
+        <div className="hero-eyebrow">{isSam ? 'SAM.gov' : 'Market Review'}</div>
         <h1 className="hero-title" style={{ fontSize: 30 }}>
-          {isSam ? 'Federal Opportunities' : (entityFilter ? entityFilter : 'All signals')}
+          {isSam
+            ? (samTab === 'dib' ? 'DIB Prospects' : 'Federal Opportunities')
+            : (entityFilter ? entityFilter : 'All signals')}
         </h1>
         {entityFilter && !isSam && (
           <Link to="/market" style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -1239,6 +1253,33 @@ function MarketReviewPage() {
           </Link>
         )}
       </div>
+
+      {/* SAM tabs */}
+      {isSam && (
+        <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--rule)' }}>
+          {[
+            { key: 'opportunities', label: `Opportunities${samOpportunities.length ? ` (${samOpportunities.length})` : ''}` },
+            { key: 'dib', label: `DIB Prospects${samDib.length ? ` (${samDib.length})` : ''}` },
+          ].map(tab => (
+            <button key={tab.key} onClick={() => setSamTab(tab.key)} style={{
+              padding: '10px 20px',
+              background: 'none',
+              border: 'none',
+              borderBottom: samTab === tab.key ? '2px solid var(--primary)' : '2px solid transparent',
+              marginBottom: -2,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: samTab === tab.key ? 700 : 400,
+              color: samTab === tab.key ? 'var(--primary)' : 'var(--ink-fade)',
+              fontFamily: "'IBM Plex Mono', monospace",
+              textTransform: 'uppercase',
+              letterSpacing: '.08em',
+            }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Filters bar */}
       <div className="top10-controls" style={{ marginBottom: 20 }}>
@@ -1250,15 +1291,9 @@ function MarketReviewPage() {
           <option value="">All statuses</option>
         </select>
         {isSam ? (
-          <>
-            <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
-              <option value="">All recommendations</option>
-              <option value="tier1_strong">Pursue</option>
-              <option value="tier1">Consider</option>
-              <option value="tier2">Monitor</option>
-            </select>
-            <input type="search" placeholder="Search title or department…" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 240 }} />
-          </>
+          <input type="search"
+            placeholder={samTab === 'dib' ? 'Search company or agency…' : 'Search title or department…'}
+            value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 240 }} />
         ) : (
           <>
             <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
@@ -1283,10 +1318,19 @@ function MarketReviewPage() {
       {loading ? <SectionLoader /> : (
         <>
           <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
-            {filtered.length} of {signals.length} {isSam ? 'opportunities' : 'signals'}
+            {filtered.length} {isSam ? (samTab === 'dib' ? 'prospects' : 'opportunities') : 'signals'}
+            {filtered.length !== activeSignals.length && ` of ${activeSignals.length}`}
           </div>
           {filtered.length === 0 ? (
-            <EmptyMessage title="No results match your filters" message="Adjust filters above or run a new collect." />
+            <EmptyMessage
+              title={isSam && samTab === 'dib' && samDib.length === 0
+                ? 'No DIB prospects yet'
+                : 'No results match your filters'}
+              message={isSam && samTab === 'dib' && samDib.length === 0
+                ? 'Enable award notices (ptype=a) in your profile pull config and run a collect.'
+                : 'Adjust filters above or run a new collect.'} />
+          ) : isSam && samTab === 'dib' ? (
+            <DibProspectTable signals={filtered} onRowClick={setOpenSignal} />
           ) : isSam ? (
             <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal} />
           ) : (
@@ -1472,6 +1516,129 @@ function NoticeTypePill({ type }) {
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DIB PROSPECT TABLE
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DibProspectTable({ signals, onRowClick }) {
+  const [sortKey, setSortKey] = useState('scores.icp_fit')
+  const [sortDir, setSortDir] = useState('desc')
+
+  const getVal = (s, key) => {
+    if (key === 'scores.icp_fit') return s.scores?.icp_fit ?? s.scores?.technical_fit ?? -1
+    if (key === 'scores.engagement_risk') {
+      const order = { Low: 0, Medium: 1, High: 2 }
+      return order[s.scores?.engagement_risk || s.scores?.bid_risk] ?? 1
+    }
+    if (key === 'award_amount') return s.signals?.metadata?.award_amount ?? 0
+    if (key === 'award_date') {
+      const d = s.signals?.metadata?.award_date
+      return d ? new Date(d).getTime() : 0
+    }
+    if (key === 'company') return (s.signals?.metadata?.company_name || s.signals?.title || '').toLowerCase()
+    return 0
+  }
+
+  const sorted = [...signals].sort((a, b) => {
+    const av = getVal(a, sortKey), bv = getVal(b, sortKey)
+    if (av < bv) return sortDir === 'asc' ? -1 : 1
+    if (av > bv) return sortDir === 'asc' ? 1 : -1
+    return 0
+  })
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('desc') }
+  }
+
+  const SortTh = ({ label, k, style = {} }) => (
+    <th onClick={() => toggleSort(k)} style={{
+      ...thSam, cursor: 'pointer', userSelect: 'none',
+      color: sortKey === k ? 'var(--primary)' : 'var(--ink-fade)', ...style,
+    }}>
+      {label} {sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+    </th>
+  )
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr style={{ borderBottom: '2px solid var(--rule)' }}>
+            <SortTh label="Company" k="company" style={{ minWidth: 260, textAlign: 'left' }} />
+            <th style={thSam}>Agency</th>
+            <SortTh label="Award $" k="award_amount" />
+            <SortTh label="Award Date" k="award_date" />
+            <th style={thSam}>NAICS</th>
+            <SortTh label="ICP Fit" k="scores.icp_fit" />
+            <SortTh label="Risk" k="scores.engagement_risk" />
+            <th style={thSam}>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(s => {
+            const sig    = s.signals || {}
+            const meta   = sig.metadata || {}
+            const scores = s.scores || {}
+            const company = meta.company_name || sig.title || '—'
+            const dept    = (meta.department_full || meta.department_name || '').split('.')[0]
+            const amount  = meta.award_amount
+            const risk    = scores.engagement_risk || scores.bid_risk
+
+            return (
+              <tr key={s.signal_id}
+                onClick={() => onRowClick(s)}
+                style={{ borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-soft)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <td style={{ padding: '12px 8px' }}>
+                  <div style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 3 }}>
+                    {company.length > 45 ? company.slice(0, 45) + '…' : company}
+                  </div>
+                  <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                    {meta.uei && <span style={{ marginRight: 8 }}>UEI: {meta.uei.slice(0, 12)}</span>}
+                    {meta.company_state && <span>{meta.company_state}</span>}
+                  </div>
+                </td>
+                <td style={{ padding: '12px 8px', fontSize: 12, color: 'var(--ink-fade)', maxWidth: 160 }}>
+                  {dept.length > 30 ? dept.slice(0, 30) + '…' : dept || '—'}
+                </td>
+                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 12, whiteSpace: 'nowrap', fontWeight: 600 }}>
+                  {amount ? `$${amount >= 1e6 ? (amount/1e6).toFixed(1) + 'M' : (amount/1e3).toFixed(0) + 'K'}` : '—'}
+                </td>
+                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 12, whiteSpace: 'nowrap', color: 'var(--ink-fade)' }}>
+                  {meta.award_date ? new Date(meta.award_date).toLocaleDateString(undefined,
+                    { month: 'numeric', day: 'numeric', year: '2-digit' }) : '—'}
+                </td>
+                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 12, color: 'var(--ink-fade)' }}>
+                  {meta.naics_code || '—'}
+                </td>
+                <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                  <ScoreBadge score={scores.icp_fit ?? scores.technical_fit} />
+                </td>
+                <td style={{ padding: '12px 8px' }}>
+                  <RiskBadge risk={risk} />
+                </td>
+                <td style={{ padding: '12px 8px' }}>
+                  <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                    {scores.recommendation || '—'}
+                  </span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+
 function RiskBadge({ risk }) {
   if (!risk) return null
   const colors = {
@@ -1506,6 +1673,7 @@ function SignalCard({ os, onClick }) {
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
   const isSam  = !sig.state && sig.source_name === 'SAM.gov'
+  const isDib  = isSam && (meta.signal_type === 'award')
   const tierClass = os.signal_tier === 'tier1_strong' ? 'tier-strong' : os.signal_tier === 'tier1' ? 'tier-1' : 'tier-2'
 
   return (
