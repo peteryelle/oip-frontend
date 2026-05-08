@@ -1133,9 +1133,9 @@ function MarketReviewPage() {
         .from('oip_signals')
         .select(`
           oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
-          match_reason, text_excerpt, status, notes, scored_at,
+          match_reason, text_excerpt, status, notes, scored_at, scores,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
-                              meeting_date, scraped_at, full_text_storage_path, portal_id)
+                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata)
         `)
         .eq('oip_id', selectedOip.id)
         .order('scored_at', { ascending: false })
@@ -1291,31 +1291,81 @@ function MarketReviewPage() {
   )
 }
 
+function RiskBadge({ risk }) {
+  if (!risk) return null
+  const colors = {
+    Low:    { bg: '#e8f5e9', color: '#2e7d32', border: '#a5d6a7' },
+    Medium: { bg: '#fff8e1', color: '#f57f17', border: '#ffe082' },
+    High:   { bg: '#fdecea', color: '#c62828', border: '#ef9a9a' },
+  }
+  const s = colors[risk] || colors.Medium
+  return (
+    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 3,
+      background: s.bg, color: s.color, border: `1px solid ${s.border}`,
+      fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '.05em' }}>
+      {risk} Risk
+    </span>
+  )
+}
+
+function ScoreBadge({ score }) {
+  if (score == null) return null
+  const color = score >= 60 ? '#2e7d32' : score >= 35 ? '#f57f17' : '#c62828'
+  const bg    = score >= 60 ? '#e8f5e9' : score >= 35 ? '#fff8e1' : '#fdecea'
+  return (
+    <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 3,
+      background: bg, color, fontFamily: "'IBM Plex Mono', monospace" }}>
+      {score}
+    </span>
+  )
+}
+
 function SignalCard({ os, onClick }) {
-  const sig = os.signals || {}
+  const sig    = os.signals || {}
+  const meta   = sig.metadata || {}
+  const scores = os.scores || {}
+  const isSam  = !sig.state && sig.source_name === 'SAM.gov'
   const tierClass = os.signal_tier === 'tier1_strong' ? 'tier-strong' : os.signal_tier === 'tier1' ? 'tier-1' : 'tier-2'
+
   return (
     <div className="signal-card" onClick={onClick} style={{ cursor: 'pointer' }}>
       <div className="signal-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="signal-meta" style={{ display: 'flex', gap: 10, marginBottom: 6, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
-            <span>{sig.state}</span>
-            <span>·</span>
-            <span>{sig.source_name}</span>
-            {sig.meeting_date && <><span>·</span><span>{new Date(sig.meeting_date).toLocaleDateString()}</span></>}
+          <div className="signal-meta" style={{ display: 'flex', gap: 8, marginBottom: 6, fontSize: 11,
+            fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+            textTransform: 'uppercase', letterSpacing: '.1em', flexWrap: 'wrap', alignItems: 'center' }}>
+            {isSam ? (
+              <>
+                <span>{meta.notice_type || 'SAM.gov'}</span>
+                {meta.department_name && <><span>·</span><span>{meta.department_name}</span></>}
+                {meta.response_deadline && <><span>·</span><span>Due {new Date(meta.response_deadline).toLocaleDateString()}</span></>}
+              </>
+            ) : (
+              <>
+                <span>{sig.state}</span>
+                <span>·</span>
+                <span>{sig.source_name}</span>
+                {sig.meeting_date && <><span>·</span><span>{new Date(sig.meeting_date).toLocaleDateString()}</span></>}
+              </>
+            )}
             <span className={`tier-pill ${tierClass}`}>{tierLabel(os.signal_tier)}</span>
           </div>
           <div className="signal-title" style={{ fontFamily: "'Spectral', serif", fontSize: 16, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.3 }}>
             {sig.title}
           </div>
-          {os.matched_keywords?.length > 0 && (
-            <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {os.matched_keywords.slice(0, 6).map(k => (
-                <span key={k} className="kw-pill">{k}</span>
-              ))}
-              {os.matched_keywords.length > 6 && <span className="kw-pill">+{os.matched_keywords.length - 6}</span>}
-            </div>
-          )}
+          <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {isSam && scores.technical_fit != null && <ScoreBadge score={scores.technical_fit} />}
+            {isSam && scores.bid_risk && <RiskBadge risk={scores.bid_risk} />}
+            {isSam && scores.recommendation && (
+              <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                {scores.recommendation}
+              </span>
+            )}
+            {os.matched_keywords?.slice(0, 4).map(k => (
+              <span key={k} className="kw-pill">{k}</span>
+            ))}
+            {os.matched_keywords?.length > 4 && <span className="kw-pill">+{os.matched_keywords.length - 4}</span>}
+          </div>
         </div>
         <div className={`status-pill status-${os.status}`}>{os.status}</div>
       </div>
@@ -1328,36 +1378,169 @@ function tierLabel(t) {
 }
 
 function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
-  const sig = os.signals || {}
+  const sig    = os.signals || {}
+  const meta   = sig.metadata || {}
+  const scores = os.scores || {}
+  const isSam  = !sig.state && sig.source_name === 'SAM.gov'
+  const [aiSummary, setAiSummary] = React.useState(null)
+  const [aiLoading, setAiLoading] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!isSam) return
+    setAiSummary(null)
+    setAiLoading(true)
+    const prompt = `You are a federal business development analyst. Evaluate this SAM.gov opportunity for SMC Infrastructure Solutions (SMCiS), a WOSB/HUBZone-certified telecom infrastructure firm specializing in structured cabling, fiber optic/OSP construction, in-building wireless (DAS/Small Cell), and managed network services for federal and DoD clients.
+
+Opportunity:
+Title: ${sig.title}
+Type: ${meta.notice_type || 'Unknown'}
+Department: ${meta.department_full || meta.department_name || 'Unknown'}
+NAICS: ${meta.naics_code || 'Unknown'}
+Set-Aside: ${meta.set_aside_desc || meta.set_aside_code || 'None'}
+Due Date: ${meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString() : 'Unknown'}
+Matched Keywords: ${(os.matched_keywords || []).join(', ') || 'None'}
+Technical Fit Score: ${scores.technical_fit ?? 'N/A'}/100
+Bid Risk: ${scores.bid_risk || 'Unknown'}
+Recommendation: ${scores.recommendation || 'Unknown'}
+
+Write 2-4 sentences explaining why SMCiS should or should not pursue this opportunity. Be specific about capability match, set-aside eligibility, and any risks. Be direct and actionable.`
+
+    fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    })
+    .then(r => r.json())
+    .then(d => {
+      const txt = d.content?.find(b => b.type === 'text')?.text || ''
+      setAiSummary(txt)
+    })
+    .catch(() => setAiSummary('Unable to generate summary.'))
+    .finally(() => setAiLoading(false))
+  }, [os.signal_id])
+
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 100,
       display: 'flex', justifyContent: 'flex-end',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        background: 'var(--paper)', width: '100%', maxWidth: 640, height: '100%',
+        background: 'var(--paper)', width: '100%', maxWidth: 680, height: '100%',
         overflow: 'auto', padding: '32px 36px',
       }}>
         <button onClick={onClose} style={{
           background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
           color: 'var(--ink-fade)', float: 'right', marginRight: -10, marginTop: -10,
         }}>×</button>
-        <div className="signal-meta" style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
-          {sig.state} · {sig.source_name}
-          {sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}
+
+        {/* Header */}
+        <div className="signal-meta" style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+          color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
+          {isSam ? (
+            <>{meta.notice_type || 'SAM.GOV'} · {meta.department_name || 'Federal'}</>
+          ) : (
+            <>{sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
+          )}
         </div>
-        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 22, marginBottom: 12, lineHeight: 1.3 }}>
+        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 22, marginBottom: 16, lineHeight: 1.3 }}>
           {sig.title}
         </h2>
-        <div style={{ marginBottom: 16 }}>
-          <span className={`tier-pill tier-${os.signal_tier === 'tier1_strong' ? 'strong' : os.signal_tier === 'tier1' ? '1' : '2'}`}>
-            {tierLabel(os.signal_tier)}
-          </span>
-          <span style={{ marginLeft: 8, color: 'var(--ink-fade)', fontSize: 13 }}>
-            {os.match_reason}
-          </span>
-        </div>
 
+        {/* AI Summary */}
+        {isSam && (
+          <div style={{ marginBottom: 24, padding: 16, background: 'var(--primary-soft)',
+            borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0' }}>
+            <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+              color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>
+              WinQuest Analysis
+            </div>
+            {aiLoading ? (
+              <div style={{ fontSize: 14, color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing opportunity…</div>
+            ) : (
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--ink)' }}>{aiSummary}</div>
+            )}
+          </div>
+        )}
+
+        {/* Score Summary — SAM only */}
+        {isSam && (scores.technical_fit != null || scores.bid_risk) && (
+          <Block label="Score breakdown">
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+                  textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }}>Technical Fit</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ScoreBadge score={scores.technical_fit} />
+                  <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>/ 100</span>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+                  textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }}>Bid Risk</div>
+                <RiskBadge risk={scores.bid_risk} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+                  textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }}>Recommendation</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{scores.recommendation}</div>
+              </div>
+              {scores.days_to_deadline != null && (
+                <div>
+                  <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+                    textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }}>Days to Deadline</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: scores.days_to_deadline < 30 ? '#c62828' : 'var(--ink)' }}>
+                    {scores.days_to_deadline}
+                  </div>
+                </div>
+              )}
+            </div>
+            {scores.evidence?.length > 0 && (
+              <div style={{ fontSize: 13, color: 'var(--ink-light)' }}>
+                <strong>Scoring factors:</strong> {scores.evidence.join(' · ')}
+              </div>
+            )}
+            {scores.bid_risk_notes?.length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 13, color: 'var(--ink-light)' }}>
+                <strong>Risk notes:</strong> {scores.bid_risk_notes.join(' · ')}
+              </div>
+            )}
+          </Block>
+        )}
+
+        {/* Opportunity Detail — SAM only */}
+        {isSam && (
+          <Block label="Opportunity detail">
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <tbody>
+                {[
+                  ['Type',           meta.notice_type],
+                  ['Department',     meta.department_full || meta.department_name],
+                  ['NAICS',          meta.naics_code],
+                  ['Set-Aside',      meta.set_aside_desc || meta.set_aside_code || 'None'],
+                  ['Contract #',     meta.solicitation_number],
+                  ['Due Date',       meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString() : null],
+                  ['Posted',         sig.meeting_date ? new Date(sig.meeting_date).toLocaleDateString() : null],
+                  ['Modified',       meta.modified_date ? new Date(meta.modified_date).toLocaleDateString() : null],
+                  ['Archive Date',   meta.archive_date ? new Date(meta.archive_date).toLocaleDateString() : null],
+                ].filter(([, v]) => v).map(([label, value]) => (
+                  <tr key={label} style={{ borderBottom: '1px solid var(--rule)' }}>
+                    <td style={{ padding: '8px 0', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
+                      textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink-fade)', width: 130 }}>
+                      {label}
+                    </td>
+                    <td style={{ padding: '8px 0', color: 'var(--ink)' }}>{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Block>
+        )}
+
+        {/* Matched keywords */}
         {os.matched_keywords?.length > 0 && (
           <Block label="Matched keywords">
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1366,7 +1549,8 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
           </Block>
         )}
 
-        {os.text_excerpt && (
+        {/* SLED excerpt */}
+        {!isSam && os.text_excerpt && (
           <Block label="Excerpt">
             <div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--ink-light)', whiteSpace: 'pre-wrap' }}>
               {os.text_excerpt}
@@ -1374,45 +1558,39 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
           </Block>
         )}
 
+        {/* Source link */}
         {sig.doc_url && (
           <Block label="Source">
-            <a href={sig.doc_url} target="_blank" rel="noopener noreferrer" style={{ wordBreak: 'break-all' }}>{sig.doc_url}</a>
+            <a href={sig.doc_url} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 14, color: 'var(--primary)', wordBreak: 'break-all' }}>
+              View on SAM.gov →
+            </a>
           </Block>
         )}
 
+        {/* Status */}
         <Block label="Status">
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {['new', 'reviewed', 'pursuing', 'dismissed'].map(s => (
-              <button
-                key={s}
-                onClick={() => onUpdateStatus(s)}
-                style={{
-                  padding: '6px 12px',
-                  border: '1px solid ' + (os.status === s ? 'var(--primary)' : 'var(--rule-strong)'),
-                  borderRadius: 3,
-                  background: os.status === s ? 'var(--primary-soft)' : 'var(--paper)',
-                  color: os.status === s ? 'var(--primary-dark)' : 'var(--ink-light)',
-                  cursor: 'pointer',
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 12,
-                  textTransform: 'uppercase',
-                  letterSpacing: '.1em',
-                }}
-              >{s}</button>
+              <button key={s} onClick={() => onUpdateStatus(s)} style={{
+                padding: '6px 12px',
+                border: '1px solid ' + (os.status === s ? 'var(--primary)' : 'var(--rule-strong)'),
+                borderRadius: 3,
+                background: os.status === s ? 'var(--primary-soft)' : 'var(--paper)',
+                color: os.status === s ? 'var(--primary-dark)' : 'var(--ink-light)',
+                cursor: 'pointer',
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 12, textTransform: 'uppercase', letterSpacing: '.1em',
+              }}>{s}</button>
             ))}
           </div>
         </Block>
 
+        {/* Pursue */}
         <Block label="Pursue">
           <button onClick={onPursue} style={{
-            padding: '10px 18px',
-            background: 'var(--primary)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 3,
-            cursor: 'pointer',
-            fontSize: 13,
-            fontWeight: 600,
+            padding: '10px 18px', background: 'var(--primary)', color: 'white',
+            border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 13, fontWeight: 600,
           }}>
             Move to pursued pipeline →
           </button>
