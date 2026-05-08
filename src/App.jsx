@@ -1928,36 +1928,49 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
         {/* ── DIB Company Detail ── */}
         {isDib && <>
           <div style={{ marginBottom: 24 }}>
-            {lbl('Company Detail')}
+            {lbl('Company Details')}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 <DetailRow label="Legal Name"  value={displayMeta.entity_legal_name} />
                 <DetailRow label="Address"     value={addrStr} />
-                <DetailRow label="CAGE Code"   value={displayMeta.entity_cage_code || meta.uei} />
+                <DetailRow label="CAGE Code"   value={displayMeta.entity_cage_code} />
                 <DetailRow label="UEI"         value={meta.uei} />
-                <DetailRow label="NAICS Codes" value={(displayMeta.entity_naics_codes || []).slice(0,6).join(', ')} />
                 <DetailRow label="Certs"       value={(displayMeta.entity_certifications || []).join(', ')} />
                 <DetailRow label="Status"      value={displayMeta.entity_status} />
               </tbody>
             </table>
           </div>
 
-          {(poc.name || poc.email || poc.phone || (!meta.entity_enriched_at && !enriched)) && <>
-            {divider}
-            <div style={{ marginBottom: 24 }}>
-              {lbl('Point of Contact')}
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <tbody>
-                  <DetailRow label="Name"  value={poc.name} />
-                  <DetailRow label="Title" value={poc.title} />
-                  <DetailRow label="Email" value={poc.email
-                    ? <a href={`mailto:${poc.email}`} style={{ color: 'var(--primary)' }}>{poc.email}</a>
-                    : null} />
-                  <DetailRow label="Phone" value={poc.phone} />
-                </tbody>
-              </table>
-            </div>
-          </>}
+          {divider}
+
+          <div style={{ marginBottom: 24 }}>
+            {lbl('Point of Contact')}
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                <DetailRow label="Name"  value={displayMeta.entity_poc?.name || poc.name} />
+                <DetailRow label="Title" value={displayMeta.entity_poc?.title || poc.title} />
+                <DetailRow label="Phone" value={displayMeta.entity_poc?.phone || poc.phone} />
+                <DetailRow label="Email" value={(displayMeta.entity_poc?.email || poc.email)
+                  ? <a href={`mailto:${displayMeta.entity_poc?.email || poc.email}`}
+                      style={{ color: 'var(--primary)' }}>
+                      {displayMeta.entity_poc?.email || poc.email}
+                    </a>
+                  : null} />
+              </tbody>
+            </table>
+            {!displayMeta.entity_enriched_at && !enriched && (
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-fade)',
+                fontStyle: 'italic', fontFamily: "'IBM Plex Mono', monospace" }}>
+                Fetching contact details from SAM.gov…
+              </div>
+            )}
+            {displayMeta.entity_enriched_at && !poc.name && !poc.email && (
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-fade)',
+                fontStyle: 'italic', fontFamily: "'IBM Plex Mono', monospace" }}>
+                No POC on file in SAM registration
+              </div>
+            )}
+          </div>
 
           {divider}
 
@@ -1966,46 +1979,12 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 <DetailRow label="Agency"     value={deptDisplay} />
-                <DetailRow label="Amount"     value={meta.award_amount ? `$${(meta.award_amount/1e6).toFixed(2)}M` : null} />
+                <DetailRow label="Amount"     value={meta.award_amount ? `$${(parseFloat(meta.award_amount)/1e6).toFixed(2)}M` : null} />
                 <DetailRow label="Award Date" value={meta.award_date ? new Date(meta.award_date).toLocaleDateString() : null} />
                 <DetailRow label="Contract #" value={meta.contract_number || meta.solicitation_number} />
                 <DetailRow label="NAICS"      value={meta.naics_code} />
               </tbody>
             </table>
-          </div>
-
-          {divider}
-
-          <div style={{ marginBottom: 24 }}>
-            {lbl('Company Details')}
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <tbody>
-                <DetailRow label="Name"    value={displayMeta.entity_poc?.name || poc.name} />
-                <DetailRow label="Title"   value={displayMeta.entity_poc?.title || poc.title} />
-                <DetailRow label="Email"   value={(displayMeta.entity_poc?.email || poc.email)
-                  ? <a href={`mailto:${displayMeta.entity_poc?.email || poc.email}`}
-                      style={{ color: 'var(--primary)' }}>
-                      {displayMeta.entity_poc?.email || poc.email}
-                    </a>
-                  : null} />
-                <DetailRow label="Phone"   value={displayMeta.entity_poc?.phone || poc.phone} />
-                <DetailRow label="Website" value={(displayMeta.entity_website)
-                  ? <a href={displayMeta.entity_website.startsWith('http') ? displayMeta.entity_website : 'https://' + displayMeta.entity_website}
-                      target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>
-                      {displayMeta.entity_website}
-                    </a>
-                  : null} />
-                <DetailRow label="Street"  value={displayMeta.entity_address?.street} />
-                <DetailRow label="City"    value={displayMeta.entity_address?.city} />
-                <DetailRow label="State"   value={displayMeta.entity_address?.state} />
-              </tbody>
-            </table>
-            {!displayMeta.entity_enriched_at && (
-              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-fade)',
-                fontStyle: 'italic', fontFamily: "'IBM Plex Mono', monospace" }}>
-                Contact details will populate on next enrichment run
-              </div>
-            )}
           </div>
         </>}
 
