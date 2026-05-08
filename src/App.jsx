@@ -1207,7 +1207,8 @@ function MarketReviewPage() {
   }
 
   const isSam = selectedOip?.verticals?.slug === 'sam'
-  const [samTab, setSamTab] = useState('opportunities') // 'opportunities' | 'dib'
+  const isDibOip = selectedOip?.slug === 'sam-dib'
+  const [samTab, setSamTab] = useState(isDibOip ? 'dib' : 'opportunities')
   const drawerProps = openSignal ? {
     os: openSignal,
     onClose: () => setOpenSignal(null),
@@ -1218,6 +1219,8 @@ function MarketReviewPage() {
   // Split SAM signals into opportunities vs DIB prospects
   const samOpportunities = isSam ? signals.filter(s => (s.signals?.metadata?.signal_type || 'opportunity') === 'opportunity') : signals
   const samDib           = isSam ? signals.filter(s => s.signals?.metadata?.signal_type === 'award') : []
+  useEffect(() => { setSamTab(isDibOip ? 'dib' : 'opportunities') }, [selectedOip?.id])
+  const [naicsFilter, setNaicsFilter] = useState('')
   const activeSignals    = isSam ? (samTab === 'dib' ? samDib : samOpportunities) : signals
 
   const filtered = activeSignals.filter(s => {
@@ -1330,7 +1333,7 @@ function MarketReviewPage() {
                 ? 'Enable award notices (ptype=a) in your profile pull config and run a collect.'
                 : 'Adjust filters above or run a new collect.'} />
           ) : isSam && samTab === 'dib' ? (
-            <DibProspectTable signals={filtered} onRowClick={setOpenSignal} />
+            <DibProspectTable signals={filtered} onRowClick={setOpenSignal} naicsFilter={naicsFilter} setNaicsFilter={setNaicsFilter} />
           ) : isSam ? (
             <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal} />
           ) : (
@@ -1520,17 +1523,17 @@ function NoticeTypePill({ type }) {
 // DIB PROSPECT TABLE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DibProspectTable({ signals, onRowClick }) {
-  const [sortKey, setSortKey] = useState('scores.icp_fit')
+function DibProspectTable({ signals, onRowClick, naicsFilter, setNaicsFilter }) {
+  const [sortKey, setSortKey] = useState('award_amount')
   const [sortDir, setSortDir] = useState('desc')
+
+  // Collect unique NAICS codes for filter dropdown
+  const allNaics = [...new Set(signals.map(s => s.signals?.metadata?.naics_code).filter(Boolean))].sort()
 
   const getVal = (s, key) => {
     if (key === 'scores.icp_fit') return s.scores?.icp_fit ?? s.scores?.technical_fit ?? -1
-    if (key === 'scores.engagement_risk') {
-      const order = { Low: 0, Medium: 1, High: 2 }
-      return order[s.scores?.engagement_risk || s.scores?.bid_risk] ?? 1
-    }
-    if (key === 'award_amount') return s.signals?.metadata?.award_amount ?? 0
+    // Award amount: parse as float for correct numeric sort
+    if (key === 'award_amount') return parseFloat(s.signals?.metadata?.award_amount || 0)
     if (key === 'award_date') {
       const d = s.signals?.metadata?.award_date
       return d ? new Date(d).getTime() : 0
@@ -1539,7 +1542,11 @@ function DibProspectTable({ signals, onRowClick }) {
     return 0
   }
 
-  const sorted = [...signals].sort((a, b) => {
+  const filtered = naicsFilter
+    ? signals.filter(s => s.signals?.metadata?.naics_code === naicsFilter)
+    : signals
+
+  const sorted = [...filtered].sort((a, b) => {
     const av = getVal(a, sortKey), bv = getVal(b, sortKey)
     if (av < bv) return sortDir === 'asc' ? -1 : 1
     if (av > bv) return sortDir === 'asc' ? 1 : -1
@@ -1561,79 +1568,82 @@ function DibProspectTable({ signals, onRowClick }) {
   )
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid var(--rule)' }}>
-            <SortTh label="Company" k="company" style={{ minWidth: 260, textAlign: 'left' }} />
-            <th style={thSam}>Agency</th>
-            <SortTh label="Award $" k="award_amount" />
-            <SortTh label="Award Date" k="award_date" />
-            <th style={thSam}>NAICS</th>
-            <SortTh label="ICP Fit" k="scores.icp_fit" />
-            <SortTh label="Risk" k="scores.engagement_risk" />
-            <th style={thSam}>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map(s => {
-            const sig    = s.signals || {}
-            const meta   = sig.metadata || {}
-            const scores = s.scores || {}
-            const company = meta.company_name || sig.title || '—'
-            const dept    = (meta.department_full || meta.department_name || '').split('.')[0]
-            const amount  = meta.award_amount
-            const risk    = scores.engagement_risk || scores.bid_risk
+    <div>
+      {/* NAICS filter */}
+      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <select value={naicsFilter} onChange={e => setNaicsFilter(e.target.value)}
+          style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, padding: '6px 10px',
+            border: '1px solid var(--rule-strong)', borderRadius: 3, background: 'var(--paper)' }}>
+          <option value="">All NAICS</option>
+          {allNaics.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <span style={{ fontSize: 12, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
+          {sorted.length} prospects
+        </span>
+      </div>
 
-            return (
-              <tr key={s.signal_id}
-                onClick={() => onRowClick(s)}
-                style={{ borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-soft)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              >
-                <td style={{ padding: '12px 8px' }}>
-                  <div style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 3 }}>
-                    {company.length > 45 ? company.slice(0, 45) + '…' : company}
-                  </div>
-                  <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
-                    {meta.uei && <span style={{ marginRight: 8 }}>UEI: {meta.uei.slice(0, 12)}</span>}
-                    {meta.company_state && <span>{meta.company_state}</span>}
-                  </div>
-                </td>
-                <td style={{ padding: '12px 8px', fontSize: 12, color: 'var(--ink-fade)', maxWidth: 160 }}>
-                  {dept.length > 30 ? dept.slice(0, 30) + '…' : dept || '—'}
-                </td>
-                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 12, whiteSpace: 'nowrap', fontWeight: 600 }}>
-                  {amount ? `$${amount >= 1e6 ? (amount/1e6).toFixed(1) + 'M' : (amount/1e3).toFixed(0) + 'K'}` : '—'}
-                </td>
-                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 12, whiteSpace: 'nowrap', color: 'var(--ink-fade)' }}>
-                  {meta.award_date ? new Date(meta.award_date).toLocaleDateString(undefined,
-                    { month: 'numeric', day: 'numeric', year: '2-digit' }) : '—'}
-                </td>
-                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 12, color: 'var(--ink-fade)' }}>
-                  {meta.naics_code || '—'}
-                </td>
-                <td style={{ padding: '12px 8px', textAlign: 'center' }}>
-                  <ScoreBadge score={scores.icp_fit ?? scores.technical_fit} />
-                </td>
-                <td style={{ padding: '12px 8px' }}>
-                  <RiskBadge risk={risk} />
-                </td>
-                <td style={{ padding: '12px 8px' }}>
-                  <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
-                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                    {scores.recommendation || '—'}
-                  </span>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid var(--rule)' }}>
+              <SortTh label="Company" k="company" style={{ minWidth: 260, textAlign: 'left' }} />
+              <th style={thSam}>Agency</th>
+              <SortTh label="Award $" k="award_amount" />
+              <SortTh label="Award Date" k="award_date" />
+              <th style={thSam}>NAICS</th>
+              <SortTh label="ICP Fit" k="scores.icp_fit" />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(s => {
+              const sig    = s.signals || {}
+              const meta   = sig.metadata || {}
+              const scores = s.scores || {}
+              const company = meta.company_name || sig.title || '—'
+              const dept    = (meta.department_full || meta.department_name || '').split('.')[0]
+              const amount  = parseFloat(meta.award_amount || 0)
+
+              return (
+                <tr key={s.signal_id}
+                  onClick={() => onRowClick(s)}
+                  style={{ borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-soft)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <td style={{ padding: '12px 8px' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 3 }}>
+                      {company.length > 45 ? company.slice(0, 45) + '…' : company}
+                    </div>
+                    <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                      {meta.uei && <span style={{ marginRight: 8 }}>UEI: {meta.uei}</span>}
+                      {meta.company_state && <span>{meta.company_state}</span>}
+                    </div>
+                  </td>
+                  <td style={{ padding: '12px 8px', fontSize: 12, color: 'var(--ink-fade)', maxWidth: 160 }}>
+                    {dept.length > 30 ? dept.slice(0, 30) + '…' : dept || '—'}
+                  </td>
+                  <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 12, whiteSpace: 'nowrap', fontWeight: 600 }}>
+                    {amount > 0 ? `$${amount >= 1e6 ? (amount/1e6).toFixed(1) + 'M' : (amount/1e3).toFixed(0) + 'K'}` : '—'}
+                  </td>
+                  <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 12, whiteSpace: 'nowrap', color: 'var(--ink-fade)' }}>
+                    {meta.award_date ? new Date(meta.award_date).toLocaleDateString(undefined,
+                      { month: 'numeric', day: 'numeric', year: '2-digit' }) : '—'}
+                  </td>
+                  <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 12, color: 'var(--ink-fade)' }}>
+                    {meta.naics_code || '—'}
+                  </td>
+                  <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                    <ScoreBadge score={scores.icp_fit ?? scores.technical_fit} />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -1734,6 +1744,30 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const isDib  = isSam && meta.signal_type === 'award'
   const [aiSummary, setAiSummary] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
+  const [enriched, setEnriched] = useState(null)  // on-demand entity data
+
+  // On-demand enrichment — fetch company details if not already in metadata
+  useEffect(() => {
+    if (!isDib) return
+    const uei = meta.uei
+    if (!uei) return
+    // Already enriched — use what we have
+    if (meta.entity_enriched_at) {
+      setEnriched(meta)
+      return
+    }
+    // Fetch from Supabase Edge Function proxy to avoid CORS + key exposure
+    // Falls back gracefully if quota exceeded
+    fetch(`https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/enrich-entity?uei=${uei}`, {
+      headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY }
+    })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { if (d) setEnriched({ ...meta, ...d }) })
+    .catch(() => {})
+  }, [os.signal_id])
+
+  // Merge enriched data with meta — enriched takes precedence for entity fields
+  const displayMeta = enriched || meta
 
   const deptDisplay = (() => {
     const full = meta.department_full || ''
@@ -1811,8 +1845,8 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
     </tr>
   )
 
-  const poc = meta.entity_poc || {}
-  const addr = meta.entity_address || {}
+  const poc = displayMeta.entity_poc || {}
+  const addr = displayMeta.entity_address || {}
   const addrStr = [addr.street, addr.city, addr.state, addr.zip].filter(Boolean).join(', ')
 
   return (
@@ -1843,20 +1877,36 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
         {/* Title */}
         <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 22, marginBottom: 4,
           lineHeight: 1.3, color: 'var(--ink)', fontWeight: 600 }}>
-          {isDib ? (meta.company_name || sig.title) : sig.title}
+          {isDib ? (displayMeta.company_name || displayMeta.entity_legal_name || sig.title) : sig.title}
         </h2>
-        {isDib && meta.entity_website && (
-          <a href={meta.entity_website.startsWith('http') ? meta.entity_website : 'https://' + meta.entity_website}
-            target="_blank" rel="noopener noreferrer"
-            style={{ fontSize: 13, color: 'var(--primary)', textDecoration: 'none', marginBottom: 16, display: 'block' }}>
-            {meta.entity_website} →
-          </a>
+        {isDib && (
+          <div style={{ marginBottom: 12 }}>
+            {displayMeta.entity_website && (
+              <a href={displayMeta.entity_website.startsWith('http') ? displayMeta.entity_website : 'https://' + displayMeta.entity_website}
+                target="_blank" rel="noopener noreferrer"
+                style={{ fontSize: 13, color: 'var(--primary)', textDecoration: 'none', marginRight: 16 }}>
+                {displayMeta.entity_website} →
+              </a>
+            )}
+            {!meta.entity_enriched_at && !enriched && (
+              <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontStyle: 'italic',
+                fontFamily: "'IBM Plex Mono', monospace" }}>
+                Loading company details…
+              </span>
+            )}
+          </div>
+        )}
+        {isDib && (
+          <div style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 4,
+            fontFamily: "'IBM Plex Mono', monospace" }}>
+            {sig.title}
+          </div>
         )}
 
         {divider}
 
-        {/* WinQuest Analysis */}
-        {isSam && (
+        {/* WinQuest Analysis — opportunities only */}
+        {isSam && !isDib && (
           <div style={{ marginBottom: 24 }}>
             <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
               color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.12em', marginBottom: 10 }}>
@@ -1866,7 +1916,7 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
               borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
               fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
               {aiLoading
-                ? <span style={{ color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing{isDib ? ' prospect' : ' opportunity'}…</span>
+                ? <span style={{ color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing opportunity…</span>
                 : aiSummary || <span style={{ color: 'var(--ink-fade)' }}>—</span>
               }
             </div>
@@ -1881,17 +1931,18 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
             {lbl('Company Detail')}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
-                <DetailRow label="Legal Name"  value={meta.entity_legal_name} />
+                <DetailRow label="Legal Name"  value={displayMeta.entity_legal_name} />
                 <DetailRow label="Address"     value={addrStr} />
-                <DetailRow label="CAGE Code"   value={meta.entity_cage_code} />
-                <DetailRow label="NAICS Codes" value={(meta.entity_naics_codes || []).slice(0,6).join(', ')} />
-                <DetailRow label="Certs"       value={(meta.entity_certifications || []).join(', ')} />
-                <DetailRow label="Status"      value={meta.entity_status} />
+                <DetailRow label="CAGE Code"   value={displayMeta.entity_cage_code || meta.uei} />
+                <DetailRow label="UEI"         value={meta.uei} />
+                <DetailRow label="NAICS Codes" value={(displayMeta.entity_naics_codes || []).slice(0,6).join(', ')} />
+                <DetailRow label="Certs"       value={(displayMeta.entity_certifications || []).join(', ')} />
+                <DetailRow label="Status"      value={displayMeta.entity_status} />
               </tbody>
             </table>
           </div>
 
-          {(poc.name || poc.email || poc.phone) && <>
+          {(poc.name || poc.email || poc.phone || (!meta.entity_enriched_at && !enriched)) && <>
             {divider}
             <div style={{ marginBottom: 24 }}>
               {lbl('Point of Contact')}
@@ -1926,39 +1977,33 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
           {divider}
 
           <div style={{ marginBottom: 24 }}>
-            {lbl('Score')}
+            {lbl('Company Details')}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
-                <tr>
-                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
-                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>ICP Fit</td>
-                  <td style={{ padding: '7px 0 7px 16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ScoreBadge score={scores.icp_fit ?? scores.technical_fit} />
-                      <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>/ 100</span>
-                    </div>
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
-                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Engagement</td>
-                  <td style={{ padding: '7px 0 7px 16px' }}>
-                    <RiskBadge risk={scores.engagement_risk || scores.bid_risk} />
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
-                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Action</td>
-                  <td style={{ padding: '7px 0 7px 16px', fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
-                    {scores.recommendation}
-                  </td>
-                </tr>
+                <DetailRow label="Name"    value={displayMeta.entity_poc?.name || poc.name} />
+                <DetailRow label="Title"   value={displayMeta.entity_poc?.title || poc.title} />
+                <DetailRow label="Email"   value={(displayMeta.entity_poc?.email || poc.email)
+                  ? <a href={`mailto:${displayMeta.entity_poc?.email || poc.email}`}
+                      style={{ color: 'var(--primary)' }}>
+                      {displayMeta.entity_poc?.email || poc.email}
+                    </a>
+                  : null} />
+                <DetailRow label="Phone"   value={displayMeta.entity_poc?.phone || poc.phone} />
+                <DetailRow label="Website" value={(displayMeta.entity_website)
+                  ? <a href={displayMeta.entity_website.startsWith('http') ? displayMeta.entity_website : 'https://' + displayMeta.entity_website}
+                      target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>
+                      {displayMeta.entity_website}
+                    </a>
+                  : null} />
+                <DetailRow label="Street"  value={displayMeta.entity_address?.street} />
+                <DetailRow label="City"    value={displayMeta.entity_address?.city} />
+                <DetailRow label="State"   value={displayMeta.entity_address?.state} />
               </tbody>
             </table>
-            {scores.evidence?.length > 0 && (
-              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-light)',
-                fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.6 }}>
-                {scores.evidence.join(' · ')}
+            {!displayMeta.entity_enriched_at && (
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-fade)',
+                fontStyle: 'italic', fontFamily: "'IBM Plex Mono', monospace" }}>
+                Contact details will populate on next enrichment run
               </div>
             )}
           </div>
