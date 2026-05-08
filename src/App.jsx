@@ -2145,10 +2145,11 @@ function ProfilePage() {
 
       {/* Target Customer Profile — SAM/DIB only */}
       {isSam && (
-        <TargetCustomerProfile
-          data={data.target_customer || {}}
+        <ProfileFieldList
+          label="Target Customer Profile"
+          arr={data.target_customer || []}
           editing={editing}
-          onChange={tc => setDraft({ ...draft, target_customer: tc })}
+          onChange={a => setDraft({ ...draft, target_customer: a })}
         />
       )}
 
@@ -2183,53 +2184,6 @@ function ProfilePage() {
   )
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TARGET CUSTOMER PROFILE — DIB ICP block (SAM vertical only)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const TCP_FIELDS = [
-  { key: 'revenue_range',     label: 'Revenue Range',           placeholder: 'e.g. $150M - $750M' },
-  { key: 'target_industries', label: 'Target Industries',       placeholder: 'e.g. Defense Industrial Base, Aerospace' },
-  { key: 'compliance_reqs',  label: 'Compliance Requirements', placeholder: 'e.g. CMMC Level 2+, NIST 800-171, DFARS' },
-  { key: 'target_agencies',  label: 'Target Agencies',         placeholder: 'e.g. DoD, DHS, Intelligence Community' },
-  { key: 'company_size',     label: 'Company Size',            placeholder: 'e.g. 500 - 5,000 employees' },
-  { key: 'geo_focus',        label: 'Geographic Focus',        placeholder: 'e.g. CONUS, defense corridors' },
-  { key: 'award_min',        label: 'Min Award Size (proxy)',  placeholder: 'e.g. $5M screens out small companies' },
-  { key: 'hard_pass',        label: 'Hard Pass Criteria',      placeholder: 'e.g. No DoD exposure, civilian-only' },
-]
-
-function TargetCustomerProfile({ data, editing, onChange }) {
-  const update = (key, val) => onChange({ ...data, [key]: val })
-  return (
-    <Block label="Target Customer Profile">
-      <div style={{ fontSize: 12, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace",
-        marginBottom: 16, padding: '6px 10px', background: 'var(--primary-soft)',
-        borderLeft: '3px solid var(--primary)', borderRadius: '0 3px 3px 0' }}>
-        DIB PROSPECTING -- defines your ideal customer for the DIB Prospects tab
-      </div>
-      {TCP_FIELDS.map(({ key, label, placeholder }) => (
-        <div key={key} style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-            textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--ink-fade)', marginBottom: 4 }}>
-            {label}
-          </div>
-          {editing ? (
-            <input type="text" value={data[key] || ''} onChange={e => update(key, e.target.value)}
-              placeholder={placeholder}
-              style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--rule-strong)',
-                borderRadius: 3, fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box' }} />
-          ) : (
-            <div style={{ fontSize: 14, color: data[key] ? 'var(--ink)' : 'var(--ink-faint)',
-              fontStyle: data[key] ? 'normal' : 'italic' }}>
-              {data[key] || placeholder}
-            </div>
-          )}
-        </div>
-      ))}
-    </Block>
-  )
-}
 
 function ProfileFieldList({ label, arr, editing, onChange }) {
   if (!editing && (!arr || arr.length === 0)) return null
