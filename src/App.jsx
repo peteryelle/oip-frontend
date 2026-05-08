@@ -1218,14 +1218,22 @@ function MarketReviewPage() {
     else updateStatus(oipSignal.signal_id, 'pursuing')
   }
 
+  const isSam = selectedOip?.verticals?.slug === 'sam'
+  const drawerProps = openSignal ? {
+    os: openSignal,
+    onClose: () => setOpenSignal(null),
+    onUpdateStatus: (status) => { updateStatus(openSignal.signal_id, status); setOpenSignal(prev => ({ ...prev, status })) },
+    onPursue: () => { moveToPursued(openSignal); setOpenSignal(null) },
+  } : null
+
   return (
     <>
       <div className="hero" style={{ marginBottom: 16 }}>
-        <div className="hero-eyebrow">Market Review</div>
+        <div className="hero-eyebrow">{isSam ? 'Opportunities' : 'Market Review'}</div>
         <h1 className="hero-title" style={{ fontSize: 30 }}>
-          {entityFilter ? entityFilter : 'All signals'}
+          {isSam ? 'Federal Opportunities' : (entityFilter ? entityFilter : 'All signals')}
         </h1>
-        {entityFilter && (
+        {entityFilter && !isSam && (
           <Link to="/market" style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
             ← Clear entity filter
           </Link>
@@ -1241,53 +1249,226 @@ function MarketReviewPage() {
           <option value="dismissed">Dismissed</option>
           <option value="">All statuses</option>
         </select>
-        <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
-          <option value="">All tiers</option>
-          <option value="tier1_strong">Tier 1 Strong</option>
-          <option value="tier1">Tier 1</option>
-          <option value="tier2">Tier 2</option>
-        </select>
-        <select value={stateFilter} onChange={e => setStateFilter(e.target.value)}>
-          <option value="">All states</option>
-          {allStates.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}>
-          <option value="">All groups</option>
-          {allGroups.map(g => <option key={g} value={g}>{g}</option>)}
-        </select>
-        <input type="search" placeholder="Search title/source…" value={search} onChange={e => setSearch(e.target.value)} />
+        {isSam ? (
+          <>
+            <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
+              <option value="">All recommendations</option>
+              <option value="tier1_strong">Pursue</option>
+              <option value="tier1">Consider</option>
+              <option value="tier2">Monitor</option>
+            </select>
+            <input type="search" placeholder="Search title or department…" value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 240 }} />
+          </>
+        ) : (
+          <>
+            <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
+              <option value="">All tiers</option>
+              <option value="tier1_strong">Tier 1 Strong</option>
+              <option value="tier1">Tier 1</option>
+              <option value="tier2">Tier 2</option>
+            </select>
+            <select value={stateFilter} onChange={e => setStateFilter(e.target.value)}>
+              <option value="">All states</option>
+              {allStates.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}>
+              <option value="">All groups</option>
+              {allGroups.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <input type="search" placeholder="Search title/source…" value={search} onChange={e => setSearch(e.target.value)} />
+          </>
+        )}
       </div>
 
       {loading ? <SectionLoader /> : (
         <>
           <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
-            {filtered.length} of {signals.length} signals
+            {filtered.length} of {signals.length} {isSam ? 'opportunities' : 'signals'}
           </div>
           {filtered.length === 0 ? (
-            <EmptyMessage title="No signals match your filters" message="Adjust filters above or try a different status." />
+            <EmptyMessage title="No results match your filters" message="Adjust filters above or run a new collect." />
+          ) : isSam ? (
+            <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal} />
           ) : (
             <div>
               {filtered.map(s => (
-                <SignalCard
-                  key={s.signal_id}
-                  os={s}
-                  onClick={() => setOpenSignal(s)}
-                />
+                <SignalCard key={s.signal_id} os={s} onClick={() => setOpenSignal(s)} />
               ))}
             </div>
           )}
         </>
       )}
 
-      {openSignal && (
-        <SignalDrawer
-          os={openSignal}
-          onClose={() => setOpenSignal(null)}
-          onUpdateStatus={(status) => { updateStatus(openSignal.signal_id, status); setOpenSignal(prev => ({ ...prev, status })) }}
-          onPursue={() => { moveToPursued(openSignal); setOpenSignal(null) }}
-        />
-      )}
+      {openSignal && <SignalDrawer {...drawerProps} />}
     </>
+  )
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SAM OPPORTUNITY TABLE
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SamOpportunityTable({ signals, onRowClick }) {
+  const [sortKey, setSortKey] = useState('scores.technical_fit')
+  const [sortDir, setSortDir] = useState('desc')
+
+  const getVal = (s, key) => {
+    if (key === 'scores.technical_fit') return s.scores?.technical_fit ?? -1
+    if (key === 'scores.bid_risk') {
+      const order = { Low: 0, Medium: 1, High: 2, 'No Bid': 3 }
+      return order[s.scores?.bid_risk] ?? 1
+    }
+    if (key === 'deadline') {
+      const d = s.signals?.metadata?.response_deadline
+      return d ? new Date(d).getTime() : Infinity
+    }
+    if (key === 'modified') {
+      const d = s.signals?.metadata?.modified_date
+      return d ? new Date(d).getTime() : 0
+    }
+    if (key === 'title') return (s.signals?.title || '').toLowerCase()
+    return 0
+  }
+
+  const sorted = [...signals].sort((a, b) => {
+    const av = getVal(a, sortKey)
+    const bv = getVal(b, sortKey)
+    if (av < bv) return sortDir === 'asc' ? -1 : 1
+    if (av > bv) return sortDir === 'asc' ? 1 : -1
+    return 0
+  })
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('desc') }
+  }
+
+  const SortTh = ({ label, k, style = {} }) => (
+    <th onClick={() => toggleSort(k)} style={{
+      ...thSam, cursor: 'pointer', userSelect: 'none',
+      color: sortKey === k ? 'var(--primary)' : 'var(--ink-fade)',
+      ...style,
+    }}>
+      {label} {sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+    </th>
+  )
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr style={{ borderBottom: '2px solid var(--rule)' }}>
+            <SortTh label="Title" k="title" style={{ minWidth: 280, textAlign: 'left' }} />
+            <th style={thSam}>Type</th>
+            <SortTh label="Due Date" k="deadline" />
+            <SortTh label="Modified" k="modified" />
+            <SortTh label="Score" k="scores.technical_fit" />
+            <SortTh label="Risk" k="scores.bid_risk" />
+            <th style={thSam}>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(s => {
+            const sig    = s.signals || {}
+            const meta   = sig.metadata || {}
+            const scores = s.scores || {}
+            const dept   = (meta.department_full || meta.department_name || '').split('.')[0]
+            const isUpdated = meta.status_changed
+
+            return (
+              <tr key={s.signal_id}
+                onClick={() => onRowClick(s)}
+                style={{ borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-soft)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <td style={{ padding: '12px 8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    {isUpdated && (
+                      <span style={{ fontSize: 10, fontWeight: 700, background: '#fff8e1',
+                        color: '#f57f17', border: '1px solid #ffe082', padding: '2px 5px',
+                        borderRadius: 3, flexShrink: 0, marginTop: 2 }}>
+                        UPDATED
+                      </span>
+                    )}
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3, marginBottom: 3 }}>
+                        {(sig.title || '').length > 60 ? sig.title.slice(0, 60) + '…' : sig.title}
+                      </div>
+                      <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                        color: 'var(--ink-fade)', display: 'flex', gap: 8 }}>
+                        {meta.solicitation_number && <span>{meta.solicitation_number.slice(0, 20)}</span>}
+                        {dept && <span>{dept.slice(0, 35)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: '12px 8px', whiteSpace: 'nowrap' }}>
+                  <NoticeTypePill type={meta.notice_type} />
+                </td>
+                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 12, whiteSpace: 'nowrap', color: scores.days_to_deadline < 30 ? '#c62828' : 'var(--ink)' }}>
+                  {meta.response_deadline
+                    ? new Date(meta.response_deadline).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
+                    : '—'}
+                </td>
+                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 12, whiteSpace: 'nowrap', color: 'var(--ink-fade)' }}>
+                  {meta.modified_date
+                    ? new Date(meta.modified_date).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
+                    : '—'}
+                </td>
+                <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                  <ScoreBadge score={scores.technical_fit} />
+                </td>
+                <td style={{ padding: '12px 8px' }}>
+                  <RiskBadge risk={scores.bid_risk} />
+                </td>
+                <td style={{ padding: '12px 8px' }}>
+                  <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                    {scores.recommendation || '—'}
+                  </span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const thSam = {
+  padding: '10px 8px',
+  fontSize: 11,
+  fontFamily: "'IBM Plex Mono', monospace",
+  textTransform: 'uppercase',
+  letterSpacing: '.1em',
+  color: 'var(--ink-fade)',
+  textAlign: 'left',
+  fontWeight: 600,
+  whiteSpace: 'nowrap',
+}
+
+function NoticeTypePill({ type }) {
+  if (!type) return <span style={{ color: 'var(--ink-fade)', fontSize: 12 }}>—</span>
+  const colors = {
+    'Solicitation':     { bg: '#e3f2fd', color: '#1565c0' },
+    'Presolicitation':  { bg: '#e8f5e9', color: '#2e7d32' },
+    'Sources Sought':   { bg: '#fff8e1', color: '#f57f17' },
+    'Award Notice':     { bg: '#f3e5f5', color: '#6a1b9a' },
+    'Special Notice':   { bg: '#fce4ec', color: '#ad1457' },
+    'Justification':    { bg: '#fbe9e7', color: '#bf360c' },
+  }
+  const s = colors[type] || { bg: 'var(--bg)', color: 'var(--ink-fade)' }
+  return (
+    <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 3,
+      background: s.bg, color: s.color, whiteSpace: 'nowrap',
+      fontFamily: "'IBM Plex Mono', monospace" }}>
+      {type}
+    </span>
   )
 }
 
@@ -1385,6 +1566,15 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const [aiSummary, setAiSummary] = React.useState(null)
   const [aiLoading, setAiLoading] = React.useState(false)
 
+  // Build department display: top-level · office city
+  const deptDisplay = (() => {
+    const full = meta.department_full || ''
+    const parts = full.split('.')
+    const top = parts[0]?.trim() || meta.department_name || ''
+    const city = (meta.office_name || '').toUpperCase()
+    return city && city !== top ? `${top} · ${city}` : top
+  })()
+
   React.useEffect(() => {
     if (!isSam) return
     setAiSummary(null)
@@ -1396,14 +1586,15 @@ Title: ${sig.title}
 Type: ${meta.notice_type || 'Unknown'}
 Department: ${meta.department_full || meta.department_name || 'Unknown'}
 NAICS: ${meta.naics_code || 'Unknown'}
-Set-Aside: ${meta.set_aside_desc || meta.set_aside_code || 'None'}
+Set-Aside: ${meta.set_aside_desc || meta.set_aside_code || 'None specified'}
 Due Date: ${meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString() : 'Unknown'}
 Matched Keywords: ${(os.matched_keywords || []).join(', ') || 'None'}
-Technical Fit Score: ${scores.technical_fit ?? 'N/A'}/100
+Technical Fit: ${scores.technical_fit ?? 'N/A'}/100
 Bid Risk: ${scores.bid_risk || 'Unknown'}
 Recommendation: ${scores.recommendation || 'Unknown'}
+Evidence: ${(scores.evidence || []).join('; ') || 'None'}
 
-Write 2-4 sentences explaining why SMCiS should or should not pursue this opportunity. Be specific about capability match, set-aside eligibility, and any risks. Be direct and actionable.`
+Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capability match, set-aside eligibility, and the single most important risk or opportunity. Be direct and actionable — no hedging.`
 
     fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1423,157 +1614,187 @@ Write 2-4 sentences explaining why SMCiS should or should not pursue this opport
     .finally(() => setAiLoading(false))
   }, [os.signal_id])
 
+  const divider = <hr style={{ border: 'none', borderTop: '1px solid var(--rule)', margin: '20px 0' }} />
+  const label = (txt) => (
+    <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+      textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 10 }}>
+      {txt}
+    </div>
+  )
+
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 100,
       display: 'flex', justifyContent: 'flex-end',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        background: 'var(--paper)', width: '100%', maxWidth: 680, height: '100%',
+        background: 'var(--paper)', width: '100%', maxWidth: 660, height: '100%',
         overflow: 'auto', padding: '32px 36px',
       }}>
+
+        {/* Close */}
         <button onClick={onClose} style={{
           background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
           color: 'var(--ink-fade)', float: 'right', marginRight: -10, marginTop: -10,
         }}>×</button>
 
-        {/* Header */}
-        <div className="signal-meta" style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
-          color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
-          {isSam ? (
-            <>{meta.notice_type || 'SAM.GOV'} · {meta.department_name || 'Federal'}</>
-          ) : (
-            <>{sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
-          )}
+        {/* Eyebrow */}
+        <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+          textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>
+          {isSam
+            ? <>{meta.notice_type || 'SAM.GOV'} · {meta.department_name?.split('.')[0] || 'Federal'}</>
+            : <>{sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
+          }
         </div>
-        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 22, marginBottom: 16, lineHeight: 1.3 }}>
+
+        {/* Title */}
+        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 22, marginBottom: 20,
+          lineHeight: 1.3, color: 'var(--ink)', fontWeight: 600 }}>
           {sig.title}
         </h2>
 
-        {/* AI Summary */}
-        {isSam && (
-          <div style={{ marginBottom: 24, padding: 16, background: 'var(--primary-soft)',
-            borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0' }}>
+        {divider}
+
+        {/* ── SAM-specific content ── */}
+        {isSam && <>
+
+          {/* WinQuest Analysis */}
+          <div style={{ marginBottom: 24 }}>
             <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-              color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>
+              color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.12em', marginBottom: 10 }}>
               WinQuest Analysis
             </div>
-            {aiLoading ? (
-              <div style={{ fontSize: 14, color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing opportunity…</div>
-            ) : (
-              <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--ink)' }}>{aiSummary}</div>
-            )}
-          </div>
-        )}
-
-        {/* Score Summary — SAM only */}
-        {isSam && (scores.technical_fit != null || scores.bid_risk) && (
-          <Block label="Score breakdown">
-            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 12 }}>
-              <div>
-                <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
-                  textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }}>Technical Fit</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ScoreBadge score={scores.technical_fit} />
-                  <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>/ 100</span>
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
-                  textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }}>Bid Risk</div>
-                <RiskBadge risk={scores.bid_risk} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
-                  textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }}>Recommendation</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{scores.recommendation}</div>
-              </div>
-              {scores.days_to_deadline != null && (
-                <div>
-                  <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
-                    textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 4 }}>Days to Deadline</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: scores.days_to_deadline < 30 ? '#c62828' : 'var(--ink)' }}>
-                    {scores.days_to_deadline}
-                  </div>
-                </div>
-              )}
+            <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
+              borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
+              fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
+              {aiLoading
+                ? <span style={{ color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing opportunity…</span>
+                : aiSummary || <span style={{ color: 'var(--ink-fade)' }}>—</span>
+              }
             </div>
-            {scores.evidence?.length > 0 && (
-              <div style={{ fontSize: 13, color: 'var(--ink-light)' }}>
-                <strong>Scoring factors:</strong> {scores.evidence.join(' · ')}
-              </div>
-            )}
-            {scores.bid_risk_notes?.length > 0 && (
-              <div style={{ marginTop: 6, fontSize: 13, color: 'var(--ink-light)' }}>
-                <strong>Risk notes:</strong> {scores.bid_risk_notes.join(' · ')}
-              </div>
-            )}
-          </Block>
-        )}
+          </div>
 
-        {/* Opportunity Detail — SAM only */}
-        {isSam && (
-          <Block label="Opportunity detail">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          {divider}
+
+          {/* Opportunity Detail */}
+          <div style={{ marginBottom: 24 }}>
+            {label('Opportunity Detail')}
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 {[
-                  ['Type',           meta.notice_type],
-                  ['Department',     meta.department_full || meta.department_name],
-                  ['NAICS',          meta.naics_code],
-                  ['Set-Aside',      meta.set_aside_desc || meta.set_aside_code || 'None'],
-                  ['Contract #',     meta.solicitation_number],
-                  ['Due Date',       meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString() : null],
-                  ['Posted',         sig.meeting_date ? new Date(sig.meeting_date).toLocaleDateString() : null],
-                  ['Modified',       meta.modified_date ? new Date(meta.modified_date).toLocaleDateString() : null],
-                  ['Archive Date',   meta.archive_date ? new Date(meta.archive_date).toLocaleDateString() : null],
-                ].filter(([, v]) => v).map(([label, value]) => (
-                  <tr key={label} style={{ borderBottom: '1px solid var(--rule)' }}>
-                    <td style={{ padding: '8px 0', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
-                      textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink-fade)', width: 130 }}>
-                      {label}
+                  ['Type',       meta.notice_type],
+                  ['Department', deptDisplay],
+                  ['NAICS',      meta.naics_code],
+                  ['Set-Aside',  meta.set_aside_desc || meta.set_aside_code || 'None'],
+                  ['Due Date',   meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : null],
+                  ['Modified',   meta.modified_date ? new Date(meta.modified_date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : null],
+                  ['Contract #', meta.solicitation_number],
+                ].filter(([, v]) => v).map(([k, v]) => (
+                  <tr key={k}>
+                    <td style={{ padding: '7px 0', width: 110, fontSize: 12,
+                      fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+                      textTransform: 'uppercase', letterSpacing: '.06em', verticalAlign: 'top' }}>
+                      {k}
                     </td>
-                    <td style={{ padding: '8px 0', color: 'var(--ink)' }}>{value}</td>
+                    <td style={{ padding: '7px 0 7px 16px', fontSize: 14, color: 'var(--ink)' }}>{v}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </Block>
-        )}
+          </div>
 
-        {/* Matched keywords */}
+          {divider}
+
+          {/* Score Breakdown */}
+          <div style={{ marginBottom: 24 }}>
+            {label('Score Breakdown')}
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '7px 0', width: 110, fontSize: 12,
+                    fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+                    textTransform: 'uppercase', letterSpacing: '.06em' }}>Technical Fit</td>
+                  <td style={{ padding: '7px 0 7px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ScoreBadge score={scores.technical_fit} />
+                      <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>/ 100</span>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '7px 0', width: 110, fontSize: 12,
+                    fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+                    textTransform: 'uppercase', letterSpacing: '.06em' }}>Business Risk</td>
+                  <td style={{ padding: '7px 0 7px 16px' }}>
+                    <RiskBadge risk={scores.bid_risk} />
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '7px 0', width: 110, fontSize: 12,
+                    fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+                    textTransform: 'uppercase', letterSpacing: '.06em' }}>Recommendation</td>
+                  <td style={{ padding: '7px 0 7px 16px', fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
+                    {scores.recommendation}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            {scores.evidence?.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-light)',
+                fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.6 }}>
+                {scores.evidence.join(' · ')}
+              </div>
+            )}
+            {scores.bid_risk_notes?.length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--ink-fade)',
+                fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.6 }}>
+                {scores.bid_risk_notes.join(' · ')}
+              </div>
+            )}
+          </div>
+
+          {divider}
+        </>}
+
+        {/* Matched Keywords */}
         {os.matched_keywords?.length > 0 && (
-          <Block label="Matched keywords">
+          <div style={{ marginBottom: 20 }}>
+            {label('Matched Keywords')}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {os.matched_keywords.map(k => <span key={k} className="kw-pill">{k}</span>)}
             </div>
-          </Block>
+          </div>
         )}
 
         {/* SLED excerpt */}
         {!isSam && os.text_excerpt && (
-          <Block label="Excerpt">
+          <div style={{ marginBottom: 20 }}>
+            {label('Excerpt')}
             <div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--ink-light)', whiteSpace: 'pre-wrap' }}>
               {os.text_excerpt}
             </div>
-          </Block>
+          </div>
         )}
 
-        {/* Source link */}
-        {sig.doc_url && (
-          <Block label="Source">
+        {/* View on SAM.gov */}
+        {isSam && sig.doc_url && (
+          <div style={{ marginBottom: 20 }}>
             <a href={sig.doc_url} target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 14, color: 'var(--primary)', wordBreak: 'break-all' }}>
+              style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
               View on SAM.gov →
             </a>
-          </Block>
+          </div>
         )}
 
+        {divider}
+
         {/* Status */}
-        <Block label="Status">
+        <div style={{ marginBottom: 16 }}>
+          {label('Status')}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {['new', 'reviewed', 'pursuing', 'dismissed'].map(s => (
               <button key={s} onClick={() => onUpdateStatus(s)} style={{
-                padding: '6px 12px',
+                padding: '6px 14px',
                 border: '1px solid ' + (os.status === s ? 'var(--primary)' : 'var(--rule-strong)'),
                 borderRadius: 3,
                 background: os.status === s ? 'var(--primary-soft)' : 'var(--paper)',
@@ -1584,20 +1805,21 @@ Write 2-4 sentences explaining why SMCiS should or should not pursue this opport
               }}>{s}</button>
             ))}
           </div>
-        </Block>
+        </div>
 
         {/* Pursue */}
-        <Block label="Pursue">
+        <div style={{ marginBottom: 8 }}>
           <button onClick={onPursue} style={{
-            padding: '10px 18px', background: 'var(--primary)', color: 'white',
-            border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            padding: '10px 20px', background: 'var(--primary)', color: 'white',
+            border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 14, fontWeight: 600,
           }}>
             Move to pursued pipeline →
           </button>
           <p style={{ marginTop: 8, fontSize: 12, color: 'var(--ink-fade)' }}>
             Snapshots this signal so it's preserved if the source is later purged.
           </p>
-        </Block>
+        </div>
+
       </div>
     </div>
   )
