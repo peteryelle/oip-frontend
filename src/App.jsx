@@ -1731,14 +1731,13 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
   const isSam  = !sig.state && sig.source_name === 'SAM.gov'
+  const isDib  = isSam && meta.signal_type === 'award'
   const [aiSummary, setAiSummary] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
 
-  // Build department display: top-level · office city
   const deptDisplay = (() => {
     const full = meta.department_full || ''
-    const parts = full.split('.')
-    const top = parts[0]?.trim() || meta.department_name || ''
+    const top  = full.split('.')[0]?.trim() || meta.department_name || ''
     const city = (meta.office_name || '').toUpperCase()
     return city && city !== top ? `${top} · ${city}` : top
   })()
@@ -1747,7 +1746,23 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
     if (!isSam) return
     setAiSummary(null)
     setAiLoading(true)
-    const prompt = `You are a federal business development analyst. Evaluate this SAM.gov opportunity for SMC Infrastructure Solutions (SMCiS), a WOSB/HUBZone-certified telecom infrastructure firm specializing in structured cabling, fiber optic/OSP construction, in-building wireless (DAS/Small Cell), and managed network services for federal and DoD clients.
+
+    const prompt = isDib
+      ? `You are a B2B sales analyst. Evaluate this DoD contractor as a sales prospect for SMC Infrastructure Solutions (SMCiS), a WOSB/HUBZone-certified telecom infrastructure firm offering structured cabling, fiber optic/OSP construction, in-building wireless (DAS/Small Cell), and managed network services.
+
+Company: ${meta.company_name || sig.title}
+Legal Name: ${meta.entity_legal_name || 'Unknown'}
+Website: ${meta.entity_website || 'Unknown'}
+Agency: ${meta.department_full || meta.department_name || 'Unknown'}
+Award Amount: $${meta.award_amount ? (meta.award_amount/1e6).toFixed(1) + 'M' : 'Unknown'}
+Award Date: ${meta.award_date || 'Unknown'}
+NAICS: ${meta.naics_code || 'Unknown'}
+Certifications: ${(meta.entity_certifications || []).join(', ') || 'Unknown'}
+ICP Fit: ${scores.icp_fit ?? scores.technical_fit ?? 'N/A'}/100
+Engagement Risk: ${scores.engagement_risk || scores.bid_risk || 'Unknown'}
+
+Write 2-4 sentences on why SMCiS should or should not pursue this company as a customer. Cover: alignment with SMCiS services, CMMC/compliance buying trigger, and the best outreach angle. Be direct and actionable.`
+      : `You are a federal business development analyst. Evaluate this SAM.gov opportunity for SMC Infrastructure Solutions (SMCiS), a WOSB/HUBZone-certified telecom infrastructure firm specializing in structured cabling, fiber optic/OSP construction, in-building wireless (DAS/Small Cell), and managed network services for federal and DoD clients.
 
 Opportunity:
 Title: ${sig.title}
@@ -1774,21 +1789,31 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
       })
     })
     .then(r => r.json())
-    .then(d => {
-      const txt = d.content?.find(b => b.type === 'text')?.text || ''
-      setAiSummary(txt)
-    })
+    .then(d => setAiSummary(d.content?.find(b => b.type === 'text')?.text || ''))
     .catch(() => setAiSummary('Unable to generate summary.'))
     .finally(() => setAiLoading(false))
   }, [os.signal_id])
 
   const divider = <hr style={{ border: 'none', borderTop: '1px solid var(--rule)', margin: '20px 0' }} />
-  const label = (txt) => (
+  const lbl = (txt) => (
     <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
       textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 10 }}>
       {txt}
     </div>
   )
+  const DetailRow = ({ label, value }) => !value ? null : (
+    <tr>
+      <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+        color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em', verticalAlign: 'top' }}>
+        {label}
+      </td>
+      <td style={{ padding: '7px 0 7px 16px', fontSize: 14, color: 'var(--ink)' }}>{value}</td>
+    </tr>
+  )
+
+  const poc = meta.entity_poc || {}
+  const addr = meta.entity_address || {}
+  const addrStr = [addr.street, addr.city, addr.state, addr.zip].filter(Boolean).join(', ')
 
   return (
     <div onClick={onClose} style={{
@@ -1799,8 +1824,6 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
         background: 'var(--paper)', width: '100%', maxWidth: 660, height: '100%',
         overflow: 'auto', padding: '32px 36px',
       }}>
-
-        {/* Close */}
         <button onClick={onClose} style={{
           background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
           color: 'var(--ink-fade)', float: 'right', marginRight: -10, marginTop: -10,
@@ -1809,24 +1832,31 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
         {/* Eyebrow */}
         <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
           textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>
-          {isSam
-            ? <>{meta.notice_type || 'SAM.GOV'} · {meta.department_name?.split('.')[0] || 'Federal'}</>
-            : <>{sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
+          {isDib
+            ? <>DIB PROSPECT · {meta.department_name?.split('.')[0] || 'Federal'}</>
+            : isSam
+              ? <>{meta.notice_type || 'SAM.GOV'} · {meta.department_name?.split('.')[0] || 'Federal'}</>
+              : <>{sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
           }
         </div>
 
         {/* Title */}
-        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 22, marginBottom: 20,
+        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 22, marginBottom: 4,
           lineHeight: 1.3, color: 'var(--ink)', fontWeight: 600 }}>
-          {sig.title}
+          {isDib ? (meta.company_name || sig.title) : sig.title}
         </h2>
+        {isDib && meta.entity_website && (
+          <a href={meta.entity_website.startsWith('http') ? meta.entity_website : 'https://' + meta.entity_website}
+            target="_blank" rel="noopener noreferrer"
+            style={{ fontSize: 13, color: 'var(--primary)', textDecoration: 'none', marginBottom: 16, display: 'block' }}>
+            {meta.entity_website} →
+          </a>
+        )}
 
         {divider}
 
-        {/* ── SAM-specific content ── */}
-        {isSam && <>
-
-          {/* WinQuest Analysis */}
+        {/* WinQuest Analysis */}
+        {isSam && (
           <div style={{ marginBottom: 24 }}>
             <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
               color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.12em', marginBottom: 10 }}>
@@ -1836,52 +1866,130 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
               borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
               fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
               {aiLoading
-                ? <span style={{ color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing opportunity…</span>
+                ? <span style={{ color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing{isDib ? ' prospect' : ' opportunity'}…</span>
                 : aiSummary || <span style={{ color: 'var(--ink-fade)' }}>—</span>
               }
             </div>
           </div>
+        )}
+
+        {divider}
+
+        {/* ── DIB Company Detail ── */}
+        {isDib && <>
+          <div style={{ marginBottom: 24 }}>
+            {lbl('Company Detail')}
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                <DetailRow label="Legal Name"  value={meta.entity_legal_name} />
+                <DetailRow label="Address"     value={addrStr} />
+                <DetailRow label="CAGE Code"   value={meta.entity_cage_code} />
+                <DetailRow label="NAICS Codes" value={(meta.entity_naics_codes || []).slice(0,6).join(', ')} />
+                <DetailRow label="Certs"       value={(meta.entity_certifications || []).join(', ')} />
+                <DetailRow label="Status"      value={meta.entity_status} />
+              </tbody>
+            </table>
+          </div>
+
+          {(poc.name || poc.email || poc.phone) && <>
+            {divider}
+            <div style={{ marginBottom: 24 }}>
+              {lbl('Point of Contact')}
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  <DetailRow label="Name"  value={poc.name} />
+                  <DetailRow label="Title" value={poc.title} />
+                  <DetailRow label="Email" value={poc.email
+                    ? <a href={`mailto:${poc.email}`} style={{ color: 'var(--primary)' }}>{poc.email}</a>
+                    : null} />
+                  <DetailRow label="Phone" value={poc.phone} />
+                </tbody>
+              </table>
+            </div>
+          </>}
 
           {divider}
 
-          {/* Opportunity Detail */}
           <div style={{ marginBottom: 24 }}>
-            {label('Opportunity Detail')}
+            {lbl('Award Detail')}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
-                {[
-                  ['Type',       meta.notice_type],
-                  ['Department', deptDisplay],
-                  ['NAICS',      meta.naics_code],
-                  ['Set-Aside',  meta.set_aside_desc || meta.set_aside_code || 'None'],
-                  ['Due Date',   meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : null],
-                  ['Modified',   meta.modified_date ? new Date(meta.modified_date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : null],
-                  ['Contract #', meta.solicitation_number],
-                ].filter(([, v]) => v).map(([k, v]) => (
-                  <tr key={k}>
-                    <td style={{ padding: '7px 0', width: 110, fontSize: 12,
-                      fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
-                      textTransform: 'uppercase', letterSpacing: '.06em', verticalAlign: 'top' }}>
-                      {k}
-                    </td>
-                    <td style={{ padding: '7px 0 7px 16px', fontSize: 14, color: 'var(--ink)' }}>{v}</td>
-                  </tr>
-                ))}
+                <DetailRow label="Agency"     value={deptDisplay} />
+                <DetailRow label="Amount"     value={meta.award_amount ? `$${(meta.award_amount/1e6).toFixed(2)}M` : null} />
+                <DetailRow label="Award Date" value={meta.award_date ? new Date(meta.award_date).toLocaleDateString() : null} />
+                <DetailRow label="Contract #" value={meta.contract_number || meta.solicitation_number} />
+                <DetailRow label="NAICS"      value={meta.naics_code} />
               </tbody>
             </table>
           </div>
 
           {divider}
 
-          {/* Score Breakdown */}
           <div style={{ marginBottom: 24 }}>
-            {label('Score Breakdown')}
+            {lbl('Score')}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 <tr>
-                  <td style={{ padding: '7px 0', width: 110, fontSize: 12,
-                    fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
-                    textTransform: 'uppercase', letterSpacing: '.06em' }}>Technical Fit</td>
+                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>ICP Fit</td>
+                  <td style={{ padding: '7px 0 7px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ScoreBadge score={scores.icp_fit ?? scores.technical_fit} />
+                      <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>/ 100</span>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Engagement</td>
+                  <td style={{ padding: '7px 0 7px 16px' }}>
+                    <RiskBadge risk={scores.engagement_risk || scores.bid_risk} />
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Action</td>
+                  <td style={{ padding: '7px 0 7px 16px', fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
+                    {scores.recommendation}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            {scores.evidence?.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-light)',
+                fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.6 }}>
+                {scores.evidence.join(' · ')}
+              </div>
+            )}
+          </div>
+        </>}
+
+        {/* ── Opportunity content (non-DIB SAM) ── */}
+        {isSam && !isDib && <>
+          <div style={{ marginBottom: 24 }}>
+            {lbl('Opportunity Detail')}
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                <DetailRow label="Type"       value={meta.notice_type} />
+                <DetailRow label="Department" value={deptDisplay} />
+                <DetailRow label="NAICS"      value={meta.naics_code} />
+                <DetailRow label="Set-Aside"  value={meta.set_aside_desc || meta.set_aside_code || 'None'} />
+                <DetailRow label="Due Date"   value={meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString() : null} />
+                <DetailRow label="Modified"   value={meta.modified_date ? new Date(meta.modified_date).toLocaleDateString() : null} />
+                <DetailRow label="Contract #" value={meta.solicitation_number} />
+              </tbody>
+            </table>
+          </div>
+
+          {divider}
+
+          <div style={{ marginBottom: 24 }}>
+            {lbl('Score Breakdown')}
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Technical Fit</td>
                   <td style={{ padding: '7px 0 7px 16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <ScoreBadge score={scores.technical_fit} />
@@ -1890,17 +1998,13 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
                   </td>
                 </tr>
                 <tr>
-                  <td style={{ padding: '7px 0', width: 110, fontSize: 12,
-                    fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
-                    textTransform: 'uppercase', letterSpacing: '.06em' }}>Business Risk</td>
-                  <td style={{ padding: '7px 0 7px 16px' }}>
-                    <RiskBadge risk={scores.bid_risk} />
-                  </td>
+                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Business Risk</td>
+                  <td style={{ padding: '7px 0 7px 16px' }}><RiskBadge risk={scores.bid_risk} /></td>
                 </tr>
                 <tr>
-                  <td style={{ padding: '7px 0', width: 110, fontSize: 12,
-                    fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
-                    textTransform: 'uppercase', letterSpacing: '.06em' }}>Recommendation</td>
+                  <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Recommendation</td>
                   <td style={{ padding: '7px 0 7px 16px', fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
                     {scores.recommendation}
                   </td>
@@ -1920,14 +2024,12 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
               </div>
             )}
           </div>
-
-          {divider}
         </>}
 
         {/* Matched Keywords */}
         {os.matched_keywords?.length > 0 && (
           <div style={{ marginBottom: 20 }}>
-            {label('Matched Keywords')}
+            {lbl('Matched Keywords')}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {os.matched_keywords.map(k => <span key={k} className="kw-pill">{k}</span>)}
             </div>
@@ -1937,7 +2039,7 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
         {/* SLED excerpt */}
         {!isSam && os.text_excerpt && (
           <div style={{ marginBottom: 20 }}>
-            {label('Excerpt')}
+            {lbl('Excerpt')}
             <div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--ink-light)', whiteSpace: 'pre-wrap' }}>
               {os.text_excerpt}
             </div>
@@ -1958,7 +2060,7 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
 
         {/* Status */}
         <div style={{ marginBottom: 16 }}>
-          {label('Status')}
+          {lbl('Status')}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {['new', 'reviewed', 'pursuing', 'dismissed'].map(s => (
               <button key={s} onClick={() => onUpdateStatus(s)} style={{
