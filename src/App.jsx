@@ -1563,8 +1563,8 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
   const isSam  = !sig.state && sig.source_name === 'SAM.gov'
-  const [aiSummary, setAiSummary] = React.useState(null)
-  const [aiLoading, setAiLoading] = React.useState(false)
+  const [aiSummary, setAiSummary] = useState(null)
+  const [aiLoading, setAiLoading] = useState(false)
 
   // Build department display: top-level · office city
   const deptDisplay = (() => {
@@ -1575,7 +1575,7 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
     return city && city !== top ? `${top} · ${city}` : top
   })()
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isSam) return
     setAiSummary(null)
     setAiLoading(true)
