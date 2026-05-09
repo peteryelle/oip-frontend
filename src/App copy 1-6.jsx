@@ -1139,7 +1139,7 @@ function MarketReviewPage() {
         `)
         .eq('oip_id', selectedOip.id)
         .order('scored_at', { ascending: false })
-        .limit(2500)
+        .limit(500)
       if (statusFilter) q = q.eq('status', statusFilter)
       const { data } = await q
       if (cancelled) return
@@ -1414,7 +1414,6 @@ function SamOpportunityTable({ signals, onRowClick }) {
             <SortTh label="Risk" k="scores.bid_risk" />
             <th style={thSam}>Sentinel</th>
             <th style={thSam}>Action</th>
-            <th style={thSam}>Action</th>
           </tr>
         </thead>
         <tbody>
@@ -1474,17 +1473,12 @@ function SamOpportunityTable({ signals, onRowClick }) {
                 <td style={{ padding: '12px 8px' }}>
                   <RiskBadge risk={scores.bid_risk} />
                 </td>
-
-                 <td style={{ padding: '12px 8px' }}>
-                  <SentinelNames matched={s.matched_sentinels} />
-                </td>
                 <td style={{ padding: '12px 8px' }}>
                   <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
                     color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
                     {scores.recommendation || '—'}
                   </span>
                 </td>
-
               </tr>
             )
           })}
@@ -1710,65 +1704,6 @@ function SentinelNames({ matched }) {
           )}
         </span>
       ))}
-    </div>
-  )
-}
-
-const SAM_DEPARTMENTS = [
-  'DEPT OF AGRICULTURE','DEPT OF THE AIR FORCE','DEPT OF THE ARMY',
-  'DEPT OF COMMERCE','DEPT OF DEFENSE','DEPT OF EDUCATION','DEPT OF ENERGY',
-  'DEPT OF HEALTH AND HUMAN SERVICES','DEPT OF HOMELAND SECURITY',
-  'DEPT OF HOUSING AND URBAN DEVELOPMENT','DEPT OF THE INTERIOR',
-  'DEPT OF JUSTICE','DEPT OF LABOR','DEPT OF THE NAVY','DEPT OF STATE',
-  'DEPT OF THE TREASURY','DEPT OF TRANSPORTATION','DEPT OF VETERANS AFFAIRS',
-  'GENERAL SERVICES ADMINISTRATION',
-  'NATIONAL AERONAUTICS AND SPACE ADMINISTRATION',
-  'SMALL BUSINESS ADMINISTRATION','SOCIAL SECURITY ADMINISTRATION',
-]
-
-function DepartmentPicker({ selected, onChange }) {
-  const [open, setOpen] = useState(false)
-  const toggle = (dept) => {
-    if (selected.includes(dept)) onChange(selected.filter(d => d !== dept))
-    else onChange([...selected, dept])
-  }
-  return (
-    <div>
-      {selected.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-          {selected.map(d => (
-            <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 3, background: 'var(--primary-soft)', border: '1px solid var(--primary)', fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--primary-dark)', fontWeight: 600 }}>
-              {d}
-              <button onClick={() => toggle(d)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-      <button onClick={() => setOpen(o => !o)} style={{ padding: '8px 12px', border: '1px solid var(--rule-strong)', borderRadius: 3, background: 'var(--paper)', cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: 'var(--ink-light)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        {selected.length === 0 ? 'All departments (no filter)' : `${selected.length} selected`}
-        <span style={{ fontSize: 10 }}>{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 4, border: '1px solid var(--rule-strong)', borderRadius: 3, background: 'var(--paper)', maxHeight: 260, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,.08)' }}>
-          {SAM_DEPARTMENTS.map(dept => {
-            const isSel = selected.includes(dept)
-            return (
-              <div key={dept} onClick={() => toggle(dept)}
-                style={{ padding: '9px 14px', cursor: 'pointer', fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", display: 'flex', alignItems: 'center', gap: 10, background: isSel ? 'var(--primary-soft)' : 'transparent', color: isSel ? 'var(--primary-dark)' : 'var(--ink)', borderBottom: '1px solid var(--rule)' }}
-                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'var(--bg)' }}
-                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent' }}>
-                <span style={{ width: 14, height: 14, borderRadius: 2, flexShrink: 0, border: '1px solid ' + (isSel ? 'var(--primary)' : 'var(--rule-strong)'), background: isSel ? 'var(--primary)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: 'white' }}>
-                  {isSel && '✓'}
-                </span>
-                {dept}
-              </div>
-            )
-          })}
-        </div>
-      )}
-      {selected.length > 0 && (
-        <button onClick={() => onChange([])} style={{ marginTop: 8, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace", padding: 0, textDecoration: 'underline' }}>Clear all</button>
-      )}
     </div>
   )
 }
@@ -2831,7 +2766,6 @@ function SentinelPage() {
   const { selectedOip } = useOip()
   const [sentinel, setSentinel] = useState(null)
   const [sentinelName, setSentinelName] = useState('')
- const [pullConfig, setPullConfig] = useState({})
   const [keywords, setKeywords] = useState([])
   const [stats, setStats] = useState({})  // keyword -> {hit_count, strong_count, strong_rate, cooccur_count, cooccur_rate}
   const [editing, setEditing] = useState(false)
@@ -2848,15 +2782,12 @@ function SentinelPage() {
   const loadSentinel = async () => {
     const { data: s } = await supabase
       .from('sentinels')
-      .select('id, version, is_active, mode, match_fields, groups, name, pull_config')
+      .select('id, version, is_active, mode, match_fields, groups, name')
       .eq('oip_id', selectedOip.id)
       .eq('is_active', true)
       .single()
     setSentinel(s)
-  // PATCH 5b: set name state
     setSentinelName(s?.name || '')
-    setPullConfig(s?.pull_config || {})
-
     if (s) {
       const { data: kws } = await supabase
         .from('sentinel_keywords')
@@ -2886,7 +2817,7 @@ function SentinelPage() {
     await supabase.from('sentinels').update({ is_active: false }).eq('oip_id', selectedOip.id)
     // Insert new sentinel
     const newVersion = String(parseFloat(sentinel.version) + 0.1).slice(0, 4)
-      const { data: ns, error: nsErr } = await supabase.from('sentinels').insert({
+    const { data: ns, error: nsErr } = await supabase.from('sentinels').insert({
       oip_id: selectedOip.id,
       version: newVersion,
       is_active: true,
@@ -2894,7 +2825,6 @@ function SentinelPage() {
       match_fields: sentinel.match_fields,
       groups: sentinel.groups,
       name: sentinelName,
-      pull_config: pullConfig,
     }).select().single()
     if (nsErr) { alert(nsErr.message); setSaving(false); return }
     // Insert keywords
@@ -2959,11 +2889,11 @@ function SentinelPage() {
         {sentinelName || 'Keyword vocabulary'}
         <HelpIcon topic="sentinel" />
       </h2>
-      
-{editing && (
+      {editing && (
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'block' }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 6 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600,
+              textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 6 }}>
               Sentinel name
             </div>
             <input
@@ -2971,111 +2901,11 @@ function SentinelPage() {
               value={sentinelName}
               onChange={e => setSentinelName(e.target.value)}
               placeholder="e.g. Telecom Infrastructure"
-              style={{ padding: '8px 12px', border: '1px solid var(--rule-strong)', borderRadius: 3, fontSize: 15, width: 340, fontFamily: "'IBM Plex Sans', sans-serif" }}
+              style={{ padding: '8px 12px', border: '1px solid var(--rule-strong)', borderRadius: 3,
+                fontSize: 15, width: 340, fontFamily: "'IBM Plex Sans', sans-serif" }}
             />
           </label>
         </div>
-      )}
-
-      {/* Pull config — view mode summary */}
-      {!editing && (
-        <Block label="Collection config">
-          {(!pullConfig.naics_codes?.length && !pullConfig.agency_ids?.length && !pullConfig.notice_types?.length) ? (
-            <span style={{ color: 'var(--ink-faint)', fontSize: 13, fontStyle: 'italic' }}>
-              Not configured — uses profile-level pull settings. Click Edit keywords to configure.
-            </span>
-          ) : (
-            <div style={{ fontSize: 13, color: 'var(--ink-light)', lineHeight: 1.9, fontFamily: "'IBM Plex Mono', monospace" }}>
-              {pullConfig.naics_codes?.length > 0 && (
-                <div><span style={{ color: 'var(--ink-fade)', marginRight: 12 }}>NAICS</span>{pullConfig.naics_codes.join(', ')}</div>
-              )}
-              {pullConfig.agency_ids?.length > 0 && (
-                <div><span style={{ color: 'var(--ink-fade)', marginRight: 12 }}>Departments</span>{pullConfig.agency_ids.join(', ')}</div>
-              )}
-              {pullConfig.notice_types?.length > 0 && (
-                <div><span style={{ color: 'var(--ink-fade)', marginRight: 12 }}>Notice types</span>{pullConfig.notice_types.join(', ')}</div>
-              )}
-              <div><span style={{ color: 'var(--ink-fade)', marginRight: 12 }}>Min deadline</span>{pullConfig.min_deadline_days ?? 30} days</div>
-            </div>
-          )}
-        </Block>
-      )}
-
-      {/* Pull config — edit mode */}
-      {editing && (
-        <Block label="Collection config">
-          <p style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 16, lineHeight: 1.5 }}>
-            Controls what this sentinel fetches from SAM.gov. Each sentinel can target different agencies, NAICS codes, and notice types independently.
-          </p>
-
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 6 }}>
-              NAICS codes (one per line)
-            </div>
-            <textarea
-              className="form-textarea"
-              rows={4}
-              value={(pullConfig.naics_codes || []).join('\n')}
-              onChange={e => setPullConfig({ ...pullConfig, naics_codes: e.target.value.split('\n').map(l => l.trim()).filter(Boolean) })}
-              placeholder={'517312\n236220\n541330'}
-              style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13 }}
-            />
-          </div>
-
-<div style={{ marginBottom: 16 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 8 }}>
-              Department (leave blank for all)
-            </div>
-            <DepartmentPicker
-              selected={pullConfig.agency_ids || []}
-              onChange={depts => setPullConfig({ ...pullConfig, agency_ids: depts })}
-            />
-          </div>
-
-
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 8 }}>
-              Notice types
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {['Solicitation', 'Presolicitation', 'Sources Sought', 'Award Notice', 'Special Notice'].map(type => {
-                const selected = (pullConfig.notice_types || []).includes(type)
-                return (
-                  <button key={type} onClick={() => {
-                    const cur = pullConfig.notice_types || []
-                    setPullConfig({ ...pullConfig, notice_types: selected ? cur.filter(t => t !== type) : [...cur, type] })
-                  }} style={{
-                    padding: '6px 12px', borderRadius: 3, cursor: 'pointer',
-                    border: '1px solid ' + (selected ? 'var(--primary)' : 'var(--rule-strong)'),
-                    background: selected ? 'var(--primary-soft)' : 'var(--paper)',
-                    color: selected ? 'var(--primary-dark)' : 'var(--ink-light)',
-                    fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600,
-                  }}>
-                    {type}
-                  </button>
-                )
-              })}
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--ink-faint)', marginTop: 6 }}>
-              Leave all unselected to collect all notice types
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 6 }}>
-              Minimum deadline days
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <input
-                type="number" min={0} max={365}
-                value={pullConfig.min_deadline_days ?? 30}
-                onChange={e => setPullConfig({ ...pullConfig, min_deadline_days: parseInt(e.target.value, 10) || 0 })}
-                style={{ width: 72, padding: '8px 10px', border: '1px solid var(--rule-strong)', borderRadius: 3, fontSize: 15, fontFamily: "'IBM Plex Mono', monospace" }}
-              />
-              <span style={{ fontSize: 13, color: 'var(--ink-fade)' }}>days — only collect opportunities due at least this far out</span>
-            </div>
-          </div>
-        </Block>
       )}
 
 
