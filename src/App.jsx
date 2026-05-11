@@ -2186,12 +2186,12 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
           </div>
         )}
 
-        {/* View on SAM.gov */}
-        {isSam && sig.doc_url && (
+        {/* View source document */}
+        {sig.doc_url && (
           <div style={{ marginBottom: 20 }}>
             <a href={sig.doc_url} target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
-              View on SAM.gov →
+              {isSam ? 'View on SAM.gov →' : 'View source document →'}
             </a>
           </div>
         )}
