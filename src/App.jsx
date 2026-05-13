@@ -1597,9 +1597,9 @@ function EntityBoard({ signals }) {
         return (
           <div key={e.name} style={{
             background: 'var(--paper)',
-            border: '1px solid var(--rule)',
+            border: '2px solid var(--rule)',
             borderRadius: 4,
-            padding: '18px 20px',
+            padding: '20px 24px',
             marginBottom: 10,
             cursor: 'pointer',
           }}
@@ -1609,16 +1609,16 @@ function EntityBoard({ signals }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 {/* Meta row */}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6,
-                  fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
                   color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
                   <span>#{i + 1}</span>
                   <span>·</span>
                   <span>{e.state}</span>
                   <span>·</span>
                   {/* Score badge */}
-                  <span style={{ padding: '2px 8px', borderRadius: 3, fontSize: 11,
+                  <span style={{ padding: '3px 10px', borderRadius: 3, fontSize: 13,
                     fontWeight: 700, background: bg, color }}>
-                    {label}
+                    {label} · {e.score}
                   </span>
                   {/* Signal summary */}
                   <span>·</span>
@@ -1631,20 +1631,20 @@ function EntityBoard({ signals }) {
                   </span>
                 </div>
                 {/* Entity name */}
-                <div style={{ fontFamily: "'Spectral', serif", fontSize: 18, fontWeight: 600,
+                <div style={{ fontFamily: "'Spectral', serif", fontSize: 22, fontWeight: 600,
                   color: 'var(--ink)', lineHeight: 1.3, marginBottom: 6 }}>
                   {e.name}
                 </div>
                 {/* Teaser */}
                 {e.topReason && (
-                  <div style={{ fontSize: 13, color: 'var(--ink-light)', lineHeight: 1.5,
+                  <div style={{ fontSize: 15, color: 'var(--ink-light)', lineHeight: 1.6,
                     fontStyle: 'italic', maxWidth: 680 }}>
                     {e.topReason}
                   </div>
                 )}
               </div>
               {/* CTA */}
-              <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+              <div style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
                 color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap', paddingTop: 4 }}>
                 View Briefing →
               </div>
