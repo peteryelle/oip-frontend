@@ -807,15 +807,15 @@ function HomePage() {
         ;(os.matched_groups || []).forEach(g => e.allGroups.add(g))
         if (sig.scraped_at > e.latestAt) e.latestAt = sig.scraped_at
       })
-      const ranked = Array.from(entityMap.values())
-        .filter(e => e.signals > 0)
-        .sort((a, b) => {
-          // Primary: strong hits desc; secondary: total signals desc;
-          // tertiary: distinct groups desc (cross-cutting matters)
-          if (b.strongHits !== a.strongHits) return b.strongHits - a.strongHits
-          if (b.signals !== a.signals) return b.signals - a.signals
-          return b.allGroups.size - a.allGroups.size
-        })
+      const allEntities = Array.from(entityMap.values()).filter(e => e.signals > 0)
+      allEntities.forEach(e => {
+        const tier1 = e.signals - e.strongHits
+        const strongPts = Math.min(e.strongHits, 5) * 12
+        const tier1Pts  = Math.min(tier1, 3) * 8
+        const groupPts  = Math.min(e.allGroups.size, 5) * 3
+        e.score = Math.min(strongPts + tier1Pts + groupPts, 100)
+      })
+      const ranked = allEntities.sort((a, b) => b.score - a.score)
         .slice(0, 20)
         .map((e, i) => {
           const allKws = Array.from(e.allKws)
@@ -1325,12 +1325,37 @@ Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain
       </div>
 
       {/* Entity Intelligence Briefing */}
-      {entityFilter && !isSam && (briefingLoading || entityBriefing) && (
+      {entityFilter && !isSam && (briefingLoading || entityBriefing) && (() => {
+        const entitySignals = signals.filter(s => s.signals?.source_name === entityFilter)
+        const strong = entitySignals.filter(s => s.signal_tier === 'tier1_strong').length
+        const tier1  = entitySignals.filter(s => s.signal_tier === 'tier1').length
+        const groups = new Set(entitySignals.flatMap(s => s.matched_groups || []))
+        const score  = Math.min(
+          Math.min(strong, 5) * 12 +
+          Math.min(tier1,  3) * 8  +
+          Math.min(groups.size, 5) * 3,
+          100
+        )
+        const { label, color, bg } = score >= 75 ? { label: 'Priority', color: '#16a34a', bg: '#dcfce7' }
+          : score >= 50 ? { label: 'Strong',   color: '#2563eb', bg: '#dbeafe' }
+          : score >= 25 ? { label: 'Moderate', color: '#b45309', bg: '#fef3c7' }
+          :                { label: 'Watch',    color: '#dc2626', bg: '#fee2e2' }
+        return (
         <div style={{ margin: '0 0 24px 0', padding: '20px 24px',
           background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4 }}>
-          <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-            textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 14 }}>
-            Intelligence Briefing
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)' }}>
+              Intelligence Briefing
+            </div>
+            <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '.1em', padding: '3px 9px',
+              borderRadius: 3, background: bg, color }}>
+              {label} · {score}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
+              {strong > 0 && `${strong} strong · `}{tier1 > 0 && `${tier1} tier-1 · `}{entitySignals.length} total
+            </span>
           </div>
           {briefingLoading ? (
             <div style={{ fontSize: 15, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
@@ -1384,7 +1409,8 @@ Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain
             </div>
           )}
         </div>
-      )}
+        )
+      })()}
 
       {/* SAM tabs */}
       {isSam && (
