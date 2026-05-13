@@ -1192,12 +1192,20 @@ function MarketReviewPage() {
 SIGNALS:
 ${signalSummaries}
 
-Write three paragraphs with these exact labels on separate lines:
+Write three sections with these exact labels. Each section has exactly 3 bullet points starting with "•" followed by one prose paragraph with deeper context.
+
 OPPORTUNITY: Why this entity is a strong prospect — what the signals indicate, what buying trigger is present.
 CONCERNS: Risks, complexity, or fit issues the salesperson should know before engaging.
 GAPS: What is unknown or what additional intel would strengthen the pursuit.
 
-Write as a senior analyst briefing a sales director. Prose only, direct and actionable. No bullets.`
+Format each section exactly like this:
+OPPORTUNITY:
+• [bullet 1]
+• [bullet 2]
+• [bullet 3]
+[one paragraph of deeper context]
+
+Write as a senior analyst briefing a sales director. Be direct and actionable. Do NOT use markdown, headers, or asterisks — plain text only.`
     fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
       method: 'POST',
       headers: {
@@ -1207,7 +1215,7 @@ Write as a senior analyst briefing a sales director. Prose only, direct and acti
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 600,
+        max_tokens: 900,
         prompt,
       })
     })
@@ -1296,7 +1304,7 @@ Write as a senior analyst briefing a sales director. Prose only, direct and acti
         <h1 className="hero-title" style={{ fontSize: 30 }}>
           {isSam
             ? (samTab === 'dib' ? 'DIB Prospects' : 'Federal Opportunities')
-            : (entityFilter ? entityFilter : 'All signals')}
+            : (entityFilter ? entityFilter : 'Entity Board')}
         </h1>
         {entityFilter && !isSam && (
           <Link to="/market" style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -1314,29 +1322,53 @@ Write as a senior analyst briefing a sales director. Prose only, direct and acti
             Intelligence Briefing
           </div>
           {briefingLoading ? (
-            <div style={{ fontSize: 14, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+            <div style={{ fontSize: 15, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
               Generating briefing…
             </div>
           ) : (
-            <div style={{ fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
-              {(entityBriefing || '').split('\n').filter(Boolean).map((para, i) => {
+            <div style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--ink)' }}>
+              {(entityBriefing || '')
+                .split('\n')
+                .map(line => line
+                  .replace(/^#+\s*/, '')           // strip markdown headers
+                  .replace(/\*\*/g, '')             // strip bold markers
+                  .replace(/^INTELLIGENCE BRIEFING:.*$/i, '') // strip LLM title line
+                  .trim()
+                )
+                .filter(Boolean)
+                .map((para, i) => {
                 const labels = ['OPPORTUNITY:', 'CONCERNS:', 'GAPS:']
-                const matchedLabel = labels.find(l => para.startsWith(l))
+                const labelColors = { 'OPPORTUNITY:': 'var(--primary)', 'CONCERNS:': '#b45309', 'GAPS:': 'var(--ink-fade)' }
+                const matchedLabel = labels.find(l => para.toUpperCase().startsWith(l))
                 if (matchedLabel) {
                   const rest = para.slice(matchedLabel.length).trim()
-                  const labelColors = { 'OPPORTUNITY:': 'var(--primary)', 'CONCERNS:': '#b45309', 'GAPS:': 'var(--ink-fade)' }
                   return (
-                    <div key={i} style={{ marginBottom: 18 }}>
-                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 700,
+                    <div key={i} style={{ marginTop: i === 0 ? 0 : 28, marginBottom: 10 }}>
+                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 700,
                         textTransform: 'uppercase', letterSpacing: '.12em',
-                        color: labelColors[matchedLabel] || 'var(--ink-fade)', marginRight: 10 }}>
+                        color: labelColors[matchedLabel] || 'var(--ink-fade)' }}>
                         {matchedLabel.replace(':', '')}
                       </span>
-                      {rest}
+                      {rest && <span style={{ marginLeft: 10, fontSize: 15 }}>{rest}</span>}
                     </div>
                   )
                 }
-                return <div key={i} style={{ marginBottom: 12 }}>{para}</div>
+                if (para.startsWith('•') || para.startsWith('-')) {
+                  return (
+                    <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+                      <span style={{ color: 'var(--primary)', flexShrink: 0, fontWeight: 700, fontSize: 16 }}>•</span>
+                      <span style={{ fontSize: 15, lineHeight: 1.5, color: 'var(--ink)', fontWeight: 600 }}>
+                        {para.replace(/^[•\-]\s*/, '')}
+                      </span>
+                    </div>
+                  )
+                }
+                return (
+                  <div key={i} style={{ marginTop: 10, marginBottom: 6, fontSize: 14,
+                    color: 'var(--ink-light)', lineHeight: 1.7 }}>
+                    {para}
+                  </div>
+                )
               })}
             </div>
           )}
@@ -1406,34 +1438,184 @@ Write as a senior analyst briefing a sales director. Prose only, direct and acti
 
       {loading ? <SectionLoader /> : (
         <>
-          <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
-            {filtered.length} {isSam ? (samTab === 'dib' ? 'prospects' : 'opportunities') : 'signals'}
-            {filtered.length !== activeSignals.length && ` of ${activeSignals.length}`}
-          </div>
-          {filtered.length === 0 ? (
-            <EmptyMessage
-              title={isSam && samTab === 'dib' && samDib.length === 0
-                ? 'No DIB prospects yet'
-                : 'No results match your filters'}
-              message={isSam && samTab === 'dib' && samDib.length === 0
-                ? 'Enable award notices (ptype=a) in your profile pull config and run a collect.'
-                : 'Adjust filters above or run a new collect.'} />
-          ) : isSam && samTab === 'dib' ? (
-            <DibProspectTable signals={filtered} onRowClick={setOpenSignal} naicsFilter={naicsFilter} setNaicsFilter={setNaicsFilter} />
-          ) : isSam ? (
-            <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal} />
-          ) : (
-            <div>
-              {filtered.map(s => (
-                <SignalCard key={s.signal_id} os={s} onClick={() => setOpenSignal(s)} />
-              ))}
-            </div>
+          {/* SLED: Entity Board (no filter) or Entity drill-down (filter set) */}
+          {!isSam && !entityFilter && (
+            <EntityBoard signals={signals} />
+          )}
+          {!isSam && entityFilter && (
+            <>
+              <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                {filtered.length} signals
+              </div>
+              {filtered.length === 0 ? (
+                <EmptyMessage title="No signals" message="No signals found for this entity." />
+              ) : (
+                <div>
+                  {filtered
+                    .sort((a, b) => {
+                      const tierOrder = { tier1_strong: 0, tier1: 1, tier2: 2 }
+                      return (tierOrder[a.signal_tier] ?? 3) - (tierOrder[b.signal_tier] ?? 3)
+                    })
+                    .map(s => (
+                      <SignalCard key={s.signal_id} os={s} onClick={() => setOpenSignal(s)} />
+                    ))}
+                </div>
+              )}
+            </>
+          )}
+          {/* SAM unchanged */}
+          {isSam && (
+            <>
+              <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                {filtered.length} {samTab === 'dib' ? 'prospects' : 'opportunities'}
+                {filtered.length !== activeSignals.length && ` of ${activeSignals.length}`}
+              </div>
+              {filtered.length === 0 ? (
+                <EmptyMessage
+                  title={samTab === 'dib' && samDib.length === 0 ? 'No DIB prospects yet' : 'No results match your filters'}
+                  message={samTab === 'dib' && samDib.length === 0
+                    ? 'Enable award notices (ptype=a) in your profile pull config and run a collect.'
+                    : 'Adjust filters above or run a new collect.'} />
+              ) : samTab === 'dib' ? (
+                <DibProspectTable signals={filtered} onRowClick={setOpenSignal} naicsFilter={naicsFilter} setNaicsFilter={setNaicsFilter} />
+              ) : (
+                <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal} />
+              )}
+            </>
           )}
         </>
       )}
 
       {openSignal && <SignalDrawer {...drawerProps} />}
     </>
+  )
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTITY BOARD — ranked entity cards for Market Review
+// ─────────────────────────────────────────────────────────────────────────────
+
+function EntityBoard({ signals }) {
+  const navigate = useNavigate()
+  const [search, setSearch] = useState('')
+
+  // Group signals by entity and compute composite score
+  const entityMap = new Map()
+  for (const s of signals) {
+    const name = s.signals?.source_name || 'Unknown'
+    const state = s.signals?.state || ''
+    if (!entityMap.has(name)) {
+      entityMap.set(name, { name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '' })
+    }
+    const e = entityMap.get(name)
+    e.total++
+    if (s.signal_tier === 'tier1_strong') { e.strong++; if (!e.topReason) e.topReason = s.match_reason || '' }
+    else if (s.signal_tier === 'tier1')   { e.tier1++;  if (!e.topReason) e.topReason = s.match_reason || '' }
+    else                                  { e.tier2++;  if (!e.topReason) e.topReason = s.match_reason || '' }
+  }
+
+  // Compute raw scores and normalize
+  const entities = Array.from(entityMap.values()).map(e => ({
+    ...e,
+    rawScore: (e.strong * 3) + (e.tier1 * 1.5) + (e.tier2 * 0.5),
+  }))
+  const maxScore = Math.max(...entities.map(e => e.rawScore), 1)
+  const ranked = entities
+    .map(e => ({ ...e, score: Math.round((e.rawScore / maxScore) * 100) }))
+    .sort((a, b) => b.score - a.score)
+
+  // Score label + color
+  const scoreLabel = (score) => {
+    if (score >= 75) return { label: 'Priority',  color: '#16a34a', bg: '#dcfce7' }
+    if (score >= 50) return { label: 'Strong',    color: '#2563eb', bg: '#dbeafe' }
+    if (score >= 25) return { label: 'Moderate',  color: '#b45309', bg: '#fef3c7' }
+    return               { label: 'Watch',     color: '#dc2626', bg: '#fee2e2' }
+  }
+
+  const filtered = ranked.filter(e =>
+    !search || e.name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div>
+      {/* Search */}
+      <div style={{ marginBottom: 20 }}>
+        <input
+          type="search"
+          placeholder="Search entities…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ width: '100%', maxWidth: 360 }}
+        />
+      </div>
+
+      <div style={{ marginBottom: 12, fontSize: 13, color: 'var(--ink-fade)',
+        fontFamily: "'IBM Plex Mono', monospace" }}>
+        {filtered.length} entities · {signals.length} signals
+      </div>
+
+      {filtered.map((e, i) => {
+        const { label, color, bg } = scoreLabel(e.score)
+        return (
+          <div key={e.name} style={{
+            background: 'var(--paper)',
+            border: '1px solid var(--rule)',
+            borderRadius: 4,
+            padding: '18px 20px',
+            marginBottom: 10,
+            cursor: 'pointer',
+          }}
+            onClick={() => navigate(`/market?entity=${encodeURIComponent(e.name)}`)}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Meta row */}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6,
+                  fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                  color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
+                  <span>#{i + 1}</span>
+                  <span>·</span>
+                  <span>{e.state}</span>
+                  <span>·</span>
+                  {/* Score badge */}
+                  <span style={{ padding: '2px 8px', borderRadius: 3, fontSize: 11,
+                    fontWeight: 700, background: bg, color }}>
+                    {label}
+                  </span>
+                  {/* Signal summary */}
+                  <span>·</span>
+                  <span>
+                    {e.strong > 0 && `${e.strong} Strong`}
+                    {e.strong > 0 && (e.tier1 > 0 || e.tier2 > 0) && ' · '}
+                    {e.tier1 > 0 && `${e.tier1} Tier 1`}
+                    {e.tier1 > 0 && e.tier2 > 0 && ' · '}
+                    {e.tier2 > 0 && `${e.tier2} Tier 2`}
+                  </span>
+                </div>
+                {/* Entity name */}
+                <div style={{ fontFamily: "'Spectral', serif", fontSize: 18, fontWeight: 600,
+                  color: 'var(--ink)', lineHeight: 1.3, marginBottom: 6 }}>
+                  {e.name}
+                </div>
+                {/* Teaser */}
+                {e.topReason && (
+                  <div style={{ fontSize: 13, color: 'var(--ink-light)', lineHeight: 1.5,
+                    fontStyle: 'italic', maxWidth: 680 }}>
+                    {e.topReason}
+                  </div>
+                )}
+              </div>
+              {/* CTA */}
+              <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap', paddingTop: 4 }}>
+                View Briefing →
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
