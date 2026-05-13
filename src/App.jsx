@@ -1119,6 +1119,9 @@ function MarketReviewPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
   const [openSignal, setOpenSignal] = useState(null)
+  const [entityBriefing, setEntityBriefing] = useState(null)
+  const [briefingLoading, setBriefingLoading] = useState(false)
+  const [briefingEntity, setBriefingEntity] = useState(null)
 
   // Read entity filter from URL
   const params = new URLSearchParams(useLocation().search)
@@ -1168,6 +1171,51 @@ function MarketReviewPage() {
 
   const allStates = [...new Set(signals.map(s => s.signals?.state).filter(Boolean))].sort()
   const allGroups = [...new Set(signals.flatMap(s => s.matched_groups || []))].sort()
+
+  // Entity intelligence briefing — fires when drilling into an entity from Top 10
+  useEffect(() => {
+    if (!entityFilter || selectedOip?.verticals?.slug === 'sam') return
+    console.log('briefing effect firing', entityFilter, signals.length)
+    const entitySignals = signals.filter(s => s.signals?.source_name === entityFilter)
+
+    if (entitySignals.length === 0) return
+    if (briefingEntity === entityFilter) return
+    setBriefingLoading(true)
+    setEntityBriefing(null)
+    setBriefingEntity(entityFilter)
+
+    const signalSummaries = entitySignals.slice(0, 12).map((s, i) =>
+      `${i + 1}. [${s.signal_tier}] ${s.signals?.title || ''}\n   ${s.match_reason || ''}`
+    ).join('\n')
+    const prompt = `You are a senior BD analyst. Based on these ${entitySignals.length} procurement signals about ${entityFilter}, write an intelligence briefing.
+
+SIGNALS:
+${signalSummaries}
+
+Write three paragraphs with these exact labels on separate lines:
+OPPORTUNITY: Why this entity is a strong prospect — what the signals indicate, what buying trigger is present.
+CONCERNS: Risks, complexity, or fit issues the salesperson should know before engaging.
+GAPS: What is unknown or what additional intel would strengthen the pursuit.
+
+Write as a senior analyst briefing a sales director. Prose only, direct and actionable. No bullets.`
+    fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        prompt,
+      })
+    })
+    .then(r => r.json())
+    .then(d => setEntityBriefing(d.content?.find(b => b.type === 'text')?.text || ''))
+    .catch(() => setEntityBriefing('Unable to generate briefing.'))
+    .finally(() => setBriefingLoading(false))
+  }, [entityFilter, signals])
 
 
 
@@ -1256,6 +1304,44 @@ function MarketReviewPage() {
           </Link>
         )}
       </div>
+
+      {/* Entity Intelligence Briefing */}
+      {entityFilter && !isSam && (briefingLoading || entityBriefing) && (
+        <div style={{ margin: '0 0 24px 0', padding: '20px 24px',
+          background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4 }}>
+          <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 14 }}>
+            Intelligence Briefing
+          </div>
+          {briefingLoading ? (
+            <div style={{ fontSize: 14, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+              Generating briefing…
+            </div>
+          ) : (
+            <div style={{ fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
+              {(entityBriefing || '').split('\n').filter(Boolean).map((para, i) => {
+                const labels = ['OPPORTUNITY:', 'CONCERNS:', 'GAPS:']
+                const matchedLabel = labels.find(l => para.startsWith(l))
+                if (matchedLabel) {
+                  const rest = para.slice(matchedLabel.length).trim()
+                  const labelColors = { 'OPPORTUNITY:': 'var(--primary)', 'CONCERNS:': '#b45309', 'GAPS:': 'var(--ink-fade)' }
+                  return (
+                    <div key={i} style={{ marginBottom: 18 }}>
+                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 700,
+                        textTransform: 'uppercase', letterSpacing: '.12em',
+                        color: labelColors[matchedLabel] || 'var(--ink-fade)', marginRight: 10 }}>
+                        {matchedLabel.replace(':', '')}
+                      </span>
+                      {rest}
+                    </div>
+                  )
+                }
+                return <div key={i} style={{ marginBottom: 12 }}>{para}</div>
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* SAM tabs */}
       {isSam && (
