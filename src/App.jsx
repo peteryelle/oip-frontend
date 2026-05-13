@@ -1807,6 +1807,11 @@ function SignalCard({ os, onClick }) {
           <div className="signal-title" style={{ fontFamily: "'Spectral', serif", fontSize: 16, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.3 }}>
             {sig.title}
           </div>
+          {os.match_reason && (
+          <div style={{ marginTop: 6, fontSize: 13, color: 'var(--ink-light)', lineHeight: 1.5, fontStyle: 'italic' }}>
+          {os.match_reason}
+          </div>
+)}
           <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {isSam && scores.technical_fit != null && <ScoreBadge score={scores.technical_fit} />}
             {isSam && scores.bid_risk && <RiskBadge risk={scores.bid_risk} />}
@@ -2166,10 +2171,21 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
           </div>
         </>}
 
-        {/* Matched Keywords */}
+        {/* Why this signal matters */}
+        {os.match_reason && (
+          <div style={{ marginBottom: 20, padding: '12px 16px', background: 'var(--primary-soft)',
+       borderLeft: '3px solid var(--primary)', borderRadius: 2 }}>
+            {lbl('Why This Signal Matters')}
+            <div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--ink)' }}>
+              {os.match_reason}
+            </div>
+          </div>
+        )}
+
+        {/* Signal Categories */}
         {os.matched_keywords?.length > 0 && (
           <div style={{ marginBottom: 20 }}>
-            {lbl('Matched Keywords')}
+            {lbl('Signal Categories')}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {os.matched_keywords.map(k => <span key={k} className="kw-pill">{k}</span>)}
             </div>
