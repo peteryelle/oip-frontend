@@ -1192,20 +1192,31 @@ function MarketReviewPage() {
 SIGNALS:
 ${signalSummaries}
 
-Write three sections with these exact labels. Each section has exactly 3 bullet points starting with "•" followed by one prose paragraph with deeper context.
+Write three sections: OPPORTUNITY, CONCERNS, GAPS.
+Each section has exactly 3 bullets and one paragraph.
+STRICT RULE: Each bullet must be 8 words or fewer. No exceptions. Cut ruthlessly.
+One paragraph of analyst context follows the bullets (3-4 sentences max).
 
-OPPORTUNITY: Why this entity is a strong prospect — what the signals indicate, what buying trigger is present.
-CONCERNS: Risks, complexity, or fit issues the salesperson should know before engaging.
-GAPS: What is unknown or what additional intel would strengthen the pursuit.
-
-Format each section exactly like this:
+Format exactly:
 OPPORTUNITY:
-• [bullet 1]
-• [bullet 2]
-• [bullet 3]
-[one paragraph of deeper context]
+• [8 words max]
+• [8 words max]
+• [8 words max]
+[paragraph]
 
-Write as a senior analyst briefing a sales director. Be direct and actionable. Do NOT use markdown, headers, or asterisks — plain text only.`
+CONCERNS:
+• [8 words max]
+• [8 words max]
+• [8 words max]
+[paragraph]
+
+GAPS:
+• [8 words max]
+• [8 words max]
+• [8 words max]
+[paragraph]
+
+Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain text only.`
     fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
       method: 'POST',
       headers: {
