@@ -1452,6 +1452,7 @@ Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain
           <input type="search"
             placeholder={samTab === 'dib' ? 'Search company or agency…' : 'Search title or department…'}
             value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 240 }} />
+
         ) : (
           <>
             <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
@@ -1662,10 +1663,11 @@ function EntityBoard({ signals }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SamOpportunityTable({ signals, onRowClick }) {
-  const [sortKey, setSortKey] = useState('scores.technical_fit')
+  const [sortKey, setSortKey] = useState('scores.llm_relevance')
   const [sortDir, setSortDir] = useState('desc')
 
   const getVal = (s, key) => {
+    if (key === 'scores.llm_relevance') return s.scores?.llm_relevance ?? s.scores?.technical_fit ?? -1
     if (key === 'scores.technical_fit') return s.scores?.technical_fit ?? -1
     if (key === 'scores.bid_risk') {
       const order = { Low: 0, Medium: 1, High: 2, 'No Bid': 3 }
@@ -1715,6 +1717,7 @@ function SamOpportunityTable({ signals, onRowClick }) {
             <th style={thSam}>Type</th>
             <SortTh label="Due Date" k="deadline" />
             <SortTh label="Modified" k="modified" />
+            <SortTh label="LLM Score" k="scores.llm_relevance" />
             <SortTh label="Score" k="scores.technical_fit" />
             <SortTh label="Risk" k="scores.bid_risk" />
             <th style={thSam}>Sentinel</th>
@@ -1774,6 +1777,9 @@ function SamOpportunityTable({ signals, onRowClick }) {
                     : '—'}
                 </td>
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                  <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />
+                </td>
+                <td style={{ padding: '12px 8px', textAlign: 'center' }}>
                   <ScoreBadge score={scores.technical_fit} />
                 </td>
                 <td style={{ padding: '12px 8px' }}>
@@ -1786,7 +1792,7 @@ function SamOpportunityTable({ signals, onRowClick }) {
                 <td style={{ padding: '12px 8px' }}>
                   <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
                     color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                    {scores.recommendation || '—'}
+                    {scores.llm_recommendation || scores.recommendation || '—'}
                   </span>
                 </td>
 
@@ -2138,7 +2144,7 @@ function SignalCard({ os, onClick }) {
 }
 
 function tierLabel(t) {
-  return { tier1_strong: 'Strong', tier1: 'Tier 1', tier2: 'Tier 2' }[t] || t
+  return { tier1_strong: 'Strong', tier1: 'Tier 1', tier2: 'Tier 2', no_match: 'Collected' }[t] || t
 }
 
 function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
@@ -2320,7 +2326,13 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
             <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
               borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
               fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
-              {aiLoading
+              {scores.llm_reason && !aiLoading && !aiSummary ? (
+                <div>
+                  <div style={{ marginBottom: 8 }}>{scores.llm_reason}</div>
+                  <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--primary)', opacity: 0.7 }}>Pre-scored · click to refresh</div>
+                </div>
+              ) : aiLoading
                 ? <span style={{ color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing opportunity…</span>
                 : aiSummary || <span style={{ color: 'var(--ink-fade)' }}>—</span>
               }
@@ -2702,11 +2714,199 @@ function ProfilePage() {
         </Block>
       )}
 
+      {/* ── KEY STRENGTHS ── */}
+      <ProfileFieldList label="Key strengths" arr={data.key_strengths || []} editing={editing} onChange={a => setDraft({ ...draft, key_strengths: a })} />
+
+      {/* ── CERTIFICATIONS & STANDARDS ── */}
+      <ProfileFieldList
+        label="Certifications"
+        arr={data.certifications_and_standards?.certifications || []}
+        editing={editing}
+        onChange={a => setDraft({ ...draft, certifications_and_standards: { ...(draft.certifications_and_standards || {}), certifications: a } })}
+      />
+      <ProfileFieldList
+        label="Government construction standards"
+        arr={data.certifications_and_standards?.government_construction_standards || []}
+        editing={editing}
+        onChange={a => setDraft({ ...draft, certifications_and_standards: { ...(draft.certifications_and_standards || {}), government_construction_standards: a } })}
+      />
+
+      {/* ── CORE CAPABILITIES ── */}
+      {(data.core_capabilities?.length > 0 || editing) && (
+        <Block label="Core capabilities">
+          {editing ? (
+            <textarea
+              value={JSON.stringify(draft.core_capabilities || [], null, 2)}
+              onChange={e => { try { setDraft({ ...draft, core_capabilities: JSON.parse(e.target.value) }) } catch (_) {} }}
+              className="form-textarea" rows={14}
+              style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
+            />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {(data.core_capabilities || []).map((cap, i) => (
+                <div key={i}>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{cap.category}</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {(cap.competencies || []).map((c, j) => (
+                      <li key={j} style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 2 }}>{c}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </Block>
+      )}
+
+      {/* ── IDEAL CUSTOMER PROFILE ── */}
+      {(data.ideal_customer_profile || editing) && (
+        <Block label="Ideal customer profile">
+          {editing ? (
+            <textarea
+              value={draft.ideal_customer_profile || ''}
+              onChange={e => setDraft({ ...draft, ideal_customer_profile: e.target.value })}
+              className="form-textarea" rows={3}
+            />
+          ) : (
+            <p style={{ margin: 0, fontSize: 14 }}>{data.ideal_customer_profile}</p>
+          )}
+        </Block>
+      )}
+
+      {/* ── CONTRACT HISTORY ── */}
+      <ProfileFieldList label="Contract history" arr={data.contract_history || []} editing={editing} onChange={a => setDraft({ ...draft, contract_history: a })} />
+
+      {/* ── SUCCESSFUL PROJECTS ── */}
+      {(data.successful_projects?.length > 0 || editing) && (
+        <Block label="Successful projects">
+          {editing ? (
+            <textarea
+              value={JSON.stringify(draft.successful_projects || [], null, 2)}
+              onChange={e => { try { setDraft({ ...draft, successful_projects: JSON.parse(e.target.value) }) } catch (_) {} }}
+              className="form-textarea" rows={12}
+              style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
+            />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {(data.successful_projects || []).map((p, i) => (
+                <div key={i}>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{p.name}</div>
+                  <div style={{ fontSize: 13, color: 'var(--ink-fade)', lineHeight: 1.5 }}>{p.description}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Block>
+      )}
+
+      {/* ── TARGET CONTRACT CHARACTERISTICS ── */}
+      {(data.target_contract_characteristics || editing) && (
+        <Block label="Target contract characteristics">
+          {editing ? (
+            <textarea
+              value={JSON.stringify(draft.target_contract_characteristics || {}, null, 2)}
+              onChange={e => { try { setDraft({ ...draft, target_contract_characteristics: JSON.parse(e.target.value) }) } catch (_) {} }}
+              className="form-textarea" rows={10}
+              style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
+            />
+          ) : (
+            <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {data.target_contract_characteristics?.preferred_size && (
+                <div><strong>Size:</strong> {data.target_contract_characteristics.preferred_size.minimum} – {data.target_contract_characteristics.preferred_size.maximum}</div>
+              )}
+              {data.target_contract_characteristics?.ideal_duration && (
+                <div><strong>Duration:</strong> {data.target_contract_characteristics.ideal_duration.minimum} – {data.target_contract_characteristics.ideal_duration.maximum}</div>
+              )}
+              {data.target_contract_characteristics?.preferred_contract_types && (
+                <div><strong>Types:</strong> {data.target_contract_characteristics.preferred_contract_types.join(', ')}</div>
+              )}
+              {data.target_contract_characteristics?.preferred_acquisition_strategies && (
+                <div><strong>Acquisition:</strong> {data.target_contract_characteristics.preferred_acquisition_strategies.join(', ')}</div>
+              )}
+            </div>
+          )}
+        </Block>
+      )}
+
+      {/* ── VALUE CAPTURE METHODOLOGY ── */}
+      {(data.value_capture_methodology || editing) && (
+        <Block label="Value capture methodology">
+          {editing ? (
+            <textarea
+              value={JSON.stringify(draft.value_capture_methodology || {}, null, 2)}
+              onChange={e => { try { setDraft({ ...draft, value_capture_methodology: JSON.parse(e.target.value) }) } catch (_) {} }}
+              className="form-textarea" rows={10}
+              style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
+            />
+          ) : (
+            <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {data.value_capture_methodology?.overview && <div>{data.value_capture_methodology.overview}</div>}
+              {data.value_capture_methodology?.decision_framework && (
+                <div><strong>Decision:</strong> {data.value_capture_methodology.decision_framework}</div>
+              )}
+              {data.value_capture_methodology?.value_extraction_guidance && (
+                <div style={{ color: 'var(--ink-fade)', lineHeight: 1.5 }}>{data.value_capture_methodology.value_extraction_guidance}</div>
+              )}
+            </div>
+          )}
+        </Block>
+      )}
+
+      {/* ── COMPANY METRICS ── */}
+      {(data.company_metrics || editing) && (
+        <Block label="Company metrics">
+          {editing ? (
+            <textarea
+              value={JSON.stringify(draft.company_metrics || {}, null, 2)}
+              onChange={e => { try { setDraft({ ...draft, company_metrics: JSON.parse(e.target.value) }) } catch (_) {} }}
+              className="form-textarea" rows={12}
+              style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
+            />
+          ) : (
+            <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {Object.entries(data.company_metrics || {}).map(([k, v]) =>
+                typeof v !== 'object' ? (
+                  <div key={k}><strong>{k.replace(/_/g, ' ')}:</strong> {String(v)}</div>
+                ) : null
+              )}
+              {data.company_metrics?.clearance_capabilities && (
+                <div><strong>clearances:</strong> {Object.entries(data.company_metrics.clearance_capabilities).map(([k, v]) => `${k}: ${v}`).join(' · ')}</div>
+              )}
+            </div>
+          )}
+        </Block>
+      )}
+
+      {/* ── SOCIOECONOMIC STATUS ── */}
+      <ProfileFieldList
+        label="Socioeconomic certifications"
+        arr={
+          Array.isArray(data.socioeconomic_status)
+            ? data.socioeconomic_status
+            : (data.socioeconomic_status?.current_certifications || [])
+        }
+        editing={editing}
+        onChange={a => setDraft({
+          ...draft,
+          socioeconomic_status: typeof draft.socioeconomic_status === 'object' && !Array.isArray(draft.socioeconomic_status)
+            ? { ...draft.socioeconomic_status, current_certifications: a }
+            : a,
+        })}
+      />
+      {!editing && data.socioeconomic_status?.possible_entries_reference?.length > 0 && (
+        <Block label="Socioeconomic possible entries (reference)">
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {data.socioeconomic_status.possible_entries_reference.map((e, i) => (
+              <li key={i} style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 2 }}>{e}</li>
+            ))}
+          </ul>
+        </Block>
+      )}
+
+      {/* ── LEGACY FIELDS (v9 and earlier — render only if populated) ── */}
       <ProfileFieldList label="Focus areas" arr={data.focus_areas || []} editing={editing} onChange={a => setDraft({ ...draft, focus_areas: a })} />
       <ProfileFieldList label="Service capabilities" arr={data.service_capabilities || []} editing={editing} onChange={a => setDraft({ ...draft, service_capabilities: a })} />
       <ProfileFieldList label="Key funding programs" arr={data.key_funding_programs || []} editing={editing} onChange={a => setDraft({ ...draft, key_funding_programs: a })} />
-
-    {/* Target Customer Profile — SAM/DIB only */}
       {isSam && (
         <ProfileFieldList
           label="Target Customer Profile"
