@@ -2923,35 +2923,20 @@ function ProfilePage() {
         />
       )}
 
-      {/* Minimum deadline days — SAM only */}
+      {/* Minimum deadline days — SAM only, configured in Sentinel */}
       {isSam && (
-        <Block label="Minimum deadline days">
-          {editing ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <input
-                type="number"
-                min={0}
-                max={365}
-                value={draft.pull?.min_deadline_days ?? 30}
-                onChange={e => setDraft({
-                  ...draft,
-                  pull: { ...(draft.pull || {}), min_deadline_days: parseInt(e.target.value, 10) || 0 },
-                })}
-                style={{
-                  width: 72, padding: '8px 10px',
-                  border: '1px solid var(--rule-strong)', borderRadius: 3,
-                  fontSize: 15, fontFamily: "'IBM Plex Mono', monospace",
-                }}
-              />
-              <span style={{ fontSize: 13, color: 'var(--ink-fade)' }}>
-                days minimum — only collect opportunities due at least this many days out (default 30)
-              </span>
-            </div>
-          ) : (
+        <Block label="Minimum deadline (days)">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 14 }}>
               {data.pull?.min_deadline_days ?? 30} days
             </span>
-          )}
+            <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>
+              Configured in{' '}
+              <Link to="/sentinel" style={{ color: 'var(--primary)', textDecoration: 'none' }}>
+                Sentinel → Collection Config
+              </Link>
+            </span>
+          </div>
         </Block>
       )}
 
@@ -3357,34 +3342,43 @@ function humanizeKey(k) {
 
 function SentinelPage() {
   const { selectedOip } = useOip()
+  const [allSentinels, setAllSentinels] = useState([])
+  const [viewingId, setViewingId] = useState(null)   // which sentinel tab is open
   const [sentinel, setSentinel] = useState(null)
   const [sentinelName, setSentinelName] = useState('')
- const [pullConfig, setPullConfig] = useState({})
+  const [pullConfig, setPullConfig] = useState({})
   const [keywords, setKeywords] = useState([])
-  const [stats, setStats] = useState({})  // keyword -> {hit_count, strong_count, strong_rate, cooccur_count, cooccur_rate}
+  const [stats, setStats] = useState({})
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState([])
   const [saving, setSaving] = useState(false)
   const [rescoring, setRescoring] = useState(false)
   const [bulkAdd, setBulkAdd] = useState('')
-  const [analyticsView, setAnalyticsView] = useState('hit_count')  // sort key for top table
+  const [analyticsView, setAnalyticsView] = useState('hit_count')
   const [analyticsCollapsed, setAnalyticsCollapsed] = useState(false)
   const { memberships } = useAuth()
   const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
   const canEdit = ['owner', 'admin'].includes(myRole)
 
-  const loadSentinel = async () => {
-    const { data: s } = await supabase
+  const loadAllSentinels = async (selectId = null) => {
+    const { data: all } = await supabase
       .from('sentinels')
       .select('id, version, is_active, mode, match_fields, groups, name, pull_config')
       .eq('oip_id', selectedOip.id)
-      .eq('is_active', true)
-      .single()
+      .order('version', { ascending: false })
+    setAllSentinels(all || [])
+    const target = selectId
+      ? (all || []).find(s => s.id === selectId)
+      : (all || []).find(s => s.is_active) || (all || [])[0]
+    if (target) await _loadSentinelDetail(target)
+  }
+
+  const _loadSentinelDetail = async (s) => {
+    setViewingId(s.id)
     setSentinel(s)
-  // PATCH 5b: set name state
     setSentinelName(s?.name || '')
     setPullConfig(s?.pull_config || {})
-
+    setEditing(false)
     if (s) {
       const { data: kws } = await supabase
         .from('sentinel_keywords')
@@ -3392,7 +3386,6 @@ function SentinelPage() {
         .eq('sentinel_id', s.id)
         .order('tier').order('group_name').order('keyword')
       setKeywords(kws || [])
-      // Fetch analytics from the view
       const { data: statsRows } = await supabase
         .from('sentinel_keyword_stats')
         .select('keyword, hit_count, strong_count, strong_rate, cooccur_count, cooccur_rate')
@@ -3403,7 +3396,34 @@ function SentinelPage() {
     }
   }
 
-  useEffect(() => { if (selectedOip) loadSentinel() }, [selectedOip])
+  const loadSentinel = () => loadAllSentinels()
+
+  useEffect(() => { if (selectedOip) { loadAllSentinels(); } }, [selectedOip])
+
+  const activateSentinel = async (s) => {
+    if (s.is_active) return
+    if (!confirm(\`Activate "\${s.name || 'Sentinel v' + s.version}"? This deactivates all other sentinels for this OIP.\`)) return
+    // Deactivate all, then activate the selected
+    await supabase.from('sentinels').update({ is_active: false }).eq('oip_id', selectedOip.id)
+    await supabase.from('sentinels').update({ is_active: true }).eq('id', s.id)
+    await loadAllSentinels(s.id)
+  }
+
+  const createNewSentinel = async () => {
+    if (!confirm('Create a new blank sentinel? It will be inactive until you activate it.')) return
+    const maxV = allSentinels.reduce((m, s) => Math.max(m, parseFloat(s.version) || 0), 0)
+    const { data: ns, error } = await supabase.from('sentinels').insert({
+      oip_id: selectedOip.id,
+      version: String((maxV + 1).toFixed(1)),
+      is_active: false,
+      mode: 'ANY',
+      match_fields: ['title', 'full_text'],
+      name: 'New Sentinel',
+      pull_config: {},
+    }).select().single()
+    if (error) { alert(error.message); return }
+    await loadAllSentinels(ns.id)
+  }
 
   const startEdit = () => { setDraft(JSON.parse(JSON.stringify(keywords))); setEditing(true) }
 
@@ -3481,12 +3501,58 @@ function SentinelPage() {
 
   return (
     <div className="detail-section">
-      
-<div className="detail-eyebrow">Sentinel · v{sentinel.version} (active) · {keywords.length} keywords</div>
-      <h2 className="detail-title">
-        {sentinelName || 'Keyword vocabulary'}
-        <HelpIcon topic="sentinel" />
-      </h2>
+
+      {/* Sentinel selector tabs */}
+      {allSentinels.length > 0 && (
+        <div style={{ display: 'flex', gap: 0, marginBottom: 20,
+          borderBottom: '2px solid var(--rule)', flexWrap: 'wrap', alignItems: 'center' }}>
+          {allSentinels.map(s => (
+            <button key={s.id} onClick={() => _loadSentinelDetail(s)} style={{
+              padding: '8px 16px', background: 'none', border: 'none',
+              borderBottom: viewingId === s.id ? '2px solid var(--primary)' : '2px solid transparent',
+              marginBottom: -2, cursor: 'pointer', fontSize: 12,
+              fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: '.07em',
+              fontWeight: viewingId === s.id ? 700 : 400,
+              color: viewingId === s.id ? 'var(--primary)' : 'var(--ink-fade)',
+            }}>
+              {s.name || `v${s.version}`}
+              {s.is_active && (
+                <span style={{ marginLeft: 6, fontSize: 9, background: 'var(--primary)',
+                  color: 'white', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
+                  ACTIVE
+                </span>
+              )}
+            </button>
+          ))}
+          {canEdit && (
+            <button onClick={createNewSentinel} style={{
+              marginLeft: 'auto', padding: '6px 12px', fontSize: 11,
+              fontFamily: "'IBM Plex Mono', monospace", background: 'none',
+              border: '1px solid var(--rule-strong)', borderRadius: 3,
+              cursor: 'pointer', color: 'var(--ink-fade)',
+            }}>
+              + New Sentinel
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="detail-eyebrow">Sentinel · v{sentinel.version} {sentinel.is_active ? '(active)' : '(inactive)'} · {keywords.length} keywords</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
+        <h2 className="detail-title" style={{ margin: 0 }}>
+          {sentinelName || 'Keyword vocabulary'}
+          <HelpIcon topic="sentinel" />
+        </h2>
+        {canEdit && !sentinel.is_active && (
+          <button onClick={() => activateSentinel(sentinel)} style={{
+            padding: '6px 14px', background: 'var(--primary)', color: 'white',
+            border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 12,
+            fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+          }}>
+            Activate
+          </button>
+        )}
+      </div>
       
 {editing && (
         <div style={{ marginBottom: 20 }}>
