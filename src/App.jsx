@@ -2005,7 +2005,13 @@ function ScoreBadge({ score }) {
 function SentinelNames({ matched }) {
   if (!matched || matched.length === 0)
     return <span style={{ color: 'var(--ink-faint)', fontSize: 11 }}>—</span>
-  const names = matched.map(m => typeof m === 'string' ? { name: m, tier: null } : m)
+  const names = matched.map(m =>
+    typeof m === 'string' ? { name: m, tier: null } :
+    typeof m === 'object' && m !== null ? {
+      name: m.name || m.sentinel_name || (m.sentinel_id ? m.sentinel_id.slice(0, 8) : null) || '—',
+      tier: m.tier || null,
+    } : { name: String(m), tier: null }
+  )
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {names.map((m, i) => (
@@ -2015,7 +2021,7 @@ function SentinelNames({ matched }) {
           fontWeight: i === 0 ? 600 : 400,
           whiteSpace: 'nowrap',
         }}>
-          {m.name || m}
+          {m.name}
           {i === 0 && m.tier === 'tier1_strong' && (
             <span style={{ marginLeft: 4, color: 'var(--primary)', fontSize: 9 }}>●</span>
           )}
@@ -2520,9 +2526,10 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
         )}
 
         {/* View source document */}
-        {sig.doc_url && (
+        {(isSam ? (meta.ui_link || sig.doc_url) : sig.doc_url) && (
           <div style={{ marginBottom: 20 }}>
-            <a href={sig.doc_url} target="_blank" rel="noopener noreferrer"
+            <a href={isSam ? (meta.ui_link || sig.doc_url) : sig.doc_url}
+              target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
               {isSam ? 'View on SAM.gov →' : 'View source document →'}
             </a>
