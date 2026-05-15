@@ -3356,6 +3356,7 @@ function SentinelPage() {
   const [bulkAdd, setBulkAdd] = useState('')
   const [analyticsView, setAnalyticsView] = useState('hit_count')
   const [analyticsCollapsed, setAnalyticsCollapsed] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
   const { memberships } = useAuth()
   const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
   const canEdit = ['owner', 'admin'].includes(myRole)
@@ -3363,13 +3364,14 @@ function SentinelPage() {
   const loadAllSentinels = async (selectId = null) => {
     const { data: all } = await supabase
       .from('sentinels')
-      .select('id, version, is_active, mode, match_fields, groups, name, pull_config')
+      .select('id, version, is_active, status, mode, match_fields, groups, name, pull_config')
       .eq('oip_id', selectedOip.id)
       .order('version', { ascending: false })
     setAllSentinels(all || [])
+    const visible = (all || []).filter(s => showArchived || (s.status || 'inactive') !== 'archived')
     const target = selectId
       ? (all || []).find(s => s.id === selectId)
-      : (all || []).find(s => s.is_active) || (all || [])[0]
+      : visible.find(s => s.is_active) || visible[0]
     if (target) await _loadSentinelDetail(target)
   }
 
@@ -3402,10 +3404,13 @@ function SentinelPage() {
 
   const activateSentinel = async (s) => {
     if (s.is_active) return
+    if ((s.status || 'inactive') === 'archived') {
+      alert('Unarchive this sentinel before activating it.')
+      return
+    }
     if (!confirm(`Activate "${s.name || 'Sentinel v' + s.version}"? This deactivates all other sentinels for this OIP.`)) return
-    // Deactivate all, then activate the selected
-    await supabase.from('sentinels').update({ is_active: false }).eq('oip_id', selectedOip.id)
-    await supabase.from('sentinels').update({ is_active: true }).eq('id', s.id)
+    await supabase.from('sentinels').update({ is_active: false, status: 'inactive' }).eq('oip_id', selectedOip.id)
+    await supabase.from('sentinels').update({ is_active: true, status: 'active' }).eq('id', s.id)
     await loadAllSentinels(s.id)
   }
 
@@ -3427,17 +3432,67 @@ function SentinelPage() {
 
   const startEdit = () => { setDraft(JSON.parse(JSON.stringify(keywords))); setEditing(true) }
 
+  const archiveSentinel = async (s) => {
+    if (s.is_active) { alert('Deactivate this sentinel before archiving it.'); return }
+    const label = s.name || `Sentinel v${s.version}`
+    if (!confirm(`Archive "${label}"? It will be hidden from the tab strip but not deleted. You can unarchive it later.`)) return
+    await supabase.from('sentinels').update({ status: 'archived', is_active: false }).eq('id', s.id)
+    await loadAllSentinels()
+  }
+
+  const unarchiveSentinel = async (s) => {
+    const label = s.name || `Sentinel v${s.version}`
+    if (!confirm(`Restore "${label}" to inactive status?`)) return
+    await supabase.from('sentinels').update({ status: 'inactive' }).eq('id', s.id)
+    await loadAllSentinels(s.id)
+  }
+
+  const deleteSentinel = async (s) => {
+    if (s.is_active) { alert('Deactivate this sentinel before deleting it.'); return }
+    const nonArchivedCount = allSentinels.filter(x => (x.status || 'inactive') !== 'archived').length
+    if (nonArchivedCount <= 1 && (s.status || 'inactive') !== 'archived') {
+      alert('Cannot delete the only sentinel. Archive it instead, or create a new one first.')
+      return
+    }
+    const label = s.name || `Sentinel v${s.version}`
+    if (!confirm(`Permanently delete "${label}" and all its keywords? This cannot be undone.`)) return
+    await supabase.from('sentinel_keywords').delete().eq('sentinel_id', s.id)
+    await supabase.from('sentinels').delete().eq('id', s.id)
+    await loadAllSentinels()
+  }
+
   const saveAsNewVersion = async () => {
-    if (!confirm('Create a new sentinel version with these changes? This becomes the new active sentinel.')) return
+    // Duplicate config check — warn if another non-archived sentinel has identical collection config
+    const configKey = s => JSON.stringify({
+      mode: s.mode,
+      fields: [...(s.match_fields || [])].sort(),
+      pull: s.pull_config || {},
+    })
+    const newConfigKey = JSON.stringify({
+      mode: sentinel.mode,
+      fields: [...(sentinel.match_fields || [])].sort(),
+      pull: pullConfig || {},
+    })
+    const duplicate = allSentinels.find(s =>
+      s.id !== sentinel.id &&
+      (s.status || 'inactive') !== 'archived' &&
+      configKey(s) === newConfigKey
+    )
+    if (duplicate) {
+      const dupLabel = duplicate.name || `Sentinel v${duplicate.version}`
+      if (!confirm(`"${dupLabel}" has identical collection settings (same mode, match fields, and pull config). Only the keywords would differ — is that intentional?`)) return
+    }
+    if (!confirm('Save keywords as a new sentinel version? This becomes the new active sentinel.')) return
     setSaving(true)
     // Deactivate current
-    await supabase.from('sentinels').update({ is_active: false }).eq('oip_id', selectedOip.id)
+    await supabase.from('sentinels').update({ is_active: false, status: 'inactive' }).eq('oip_id', selectedOip.id)
     // Insert new sentinel
     const newVersion = String(parseFloat(sentinel.version) + 0.1).slice(0, 4)
       const { data: ns, error: nsErr } = await supabase.from('sentinels').insert({
       oip_id: selectedOip.id,
       version: newVersion,
       is_active: true,
+      status: 'active',
       mode: sentinel.mode,
       match_fields: sentinel.match_fields,
       groups: sentinel.groups,
@@ -3506,24 +3561,37 @@ function SentinelPage() {
       {allSentinels.length > 0 && (
         <div style={{ display: 'flex', gap: 0, marginBottom: 20,
           borderBottom: '2px solid var(--rule)', flexWrap: 'wrap', alignItems: 'center' }}>
-          {allSentinels.map(s => (
-            <button key={s.id} onClick={() => _loadSentinelDetail(s)} style={{
-              padding: '8px 16px', background: 'none', border: 'none',
-              borderBottom: viewingId === s.id ? '2px solid var(--primary)' : '2px solid transparent',
-              marginBottom: -2, cursor: 'pointer', fontSize: 12,
-              fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: '.07em',
-              fontWeight: viewingId === s.id ? 700 : 400,
-              color: viewingId === s.id ? 'var(--primary)' : 'var(--ink-fade)',
-            }}>
-              {s.name || `v${s.version}`}
-              {s.is_active && (
-                <span style={{ marginLeft: 6, fontSize: 9, background: 'var(--primary)',
-                  color: 'white', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
-                  ACTIVE
-                </span>
-              )}
-            </button>
-          ))}
+          {allSentinels
+            .filter(s => showArchived || (s.status || 'inactive') !== 'archived')
+            .map(s => {
+              const sStatus = s.status || (s.is_active ? 'active' : 'inactive')
+              const isArchived = sStatus === 'archived'
+              return (
+                <button key={s.id} onClick={() => _loadSentinelDetail(s)} style={{
+                  padding: '8px 16px', background: 'none', border: 'none',
+                  borderBottom: viewingId === s.id ? '2px solid var(--primary)' : '2px solid transparent',
+                  marginBottom: -2, cursor: 'pointer', fontSize: 12,
+                  fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: '.07em',
+                  fontWeight: viewingId === s.id ? 700 : 400,
+                  color: isArchived ? 'var(--ink-faint)' : viewingId === s.id ? 'var(--primary)' : 'var(--ink-fade)',
+                  opacity: isArchived ? 0.6 : 1,
+                }}>
+                  {s.name || `v${s.version}`}
+                  {sStatus === 'active' && (
+                    <span style={{ marginLeft: 6, fontSize: 9, background: 'var(--primary)',
+                      color: 'white', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
+                      ACTIVE
+                    </span>
+                  )}
+                  {isArchived && (
+                    <span style={{ marginLeft: 6, fontSize: 9, background: 'var(--ink-faint)',
+                      color: 'white', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
+                      ARCHIVED
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           {canEdit && (
             <button onClick={createNewSentinel} style={{
               marginLeft: 'auto', padding: '6px 12px', fontSize: 11,
@@ -3534,16 +3602,26 @@ function SentinelPage() {
               + New Sentinel
             </button>
           )}
+          {allSentinels.some(s => (s.status || 'inactive') === 'archived') && (
+            <button onClick={() => setShowArchived(v => !v)} style={{
+              marginLeft: canEdit ? 8 : 'auto', padding: '6px 10px', fontSize: 10,
+              fontFamily: "'IBM Plex Mono', monospace", background: 'none',
+              border: 'none', cursor: 'pointer', color: 'var(--ink-faint)',
+              textTransform: 'uppercase', letterSpacing: '.07em',
+            }}>
+              {showArchived ? 'Hide archived' : 'Show archived'}
+            </button>
+          )}
         </div>
       )}
 
-      <div className="detail-eyebrow">Sentinel · v{sentinel.version} {sentinel.is_active ? '(active)' : '(inactive)'} · {keywords.length} keywords</div>
+      <div className="detail-eyebrow">Sentinel · v{sentinel.version} · {sentinel.status || (sentinel.is_active ? 'active' : 'inactive')} · {keywords.length} keywords</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
         <h2 className="detail-title" style={{ margin: 0 }}>
           {sentinelName || 'Keyword vocabulary'}
           <HelpIcon topic="sentinel" />
         </h2>
-        {canEdit && !sentinel.is_active && (
+        {canEdit && !sentinel.is_active && (sentinel.status || 'inactive') !== 'archived' && (
           <button onClick={() => activateSentinel(sentinel)} style={{
             padding: '6px 14px', background: 'var(--primary)', color: 'white',
             border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 12,
@@ -3755,6 +3833,58 @@ function SentinelPage() {
           </div>
         )
       })}
+
+      {/* Danger zone — archive / delete */}
+      {canEdit && !editing && (
+        <div style={{ marginTop: 48, paddingTop: 20, borderTop: '1px solid var(--rule)' }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 600,
+            textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-faint)', marginBottom: 14 }}>
+            Sentinel actions
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {(sentinel.status || 'inactive') === 'archived' ? (
+              <button onClick={() => unarchiveSentinel(sentinel)} style={{
+                padding: '7px 14px', background: 'none', border: '1px solid var(--rule-strong)',
+                borderRadius: 3, cursor: 'pointer', fontSize: 12,
+                fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+              }}>
+                Unarchive
+              </button>
+            ) : (
+              <button onClick={() => archiveSentinel(sentinel)}
+                disabled={sentinel.is_active}
+                title={sentinel.is_active ? 'Deactivate before archiving' : undefined}
+                style={{
+                  padding: '7px 14px', background: 'none', border: '1px solid var(--rule-strong)',
+                  borderRadius: 3, cursor: sentinel.is_active ? 'not-allowed' : 'pointer', fontSize: 12,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  color: sentinel.is_active ? 'var(--ink-faint)' : 'var(--ink-fade)',
+                  opacity: sentinel.is_active ? 0.5 : 1,
+                }}>
+                Archive
+              </button>
+            )}
+            <button onClick={() => deleteSentinel(sentinel)}
+              disabled={sentinel.is_active}
+              title={sentinel.is_active ? 'Deactivate before deleting' : undefined}
+              style={{
+                padding: '7px 14px', background: 'none',
+                border: '1px solid ' + (sentinel.is_active ? 'var(--rule)' : '#f87171'),
+                borderRadius: 3, cursor: sentinel.is_active ? 'not-allowed' : 'pointer', fontSize: 12,
+                fontFamily: "'IBM Plex Mono', monospace",
+                color: sentinel.is_active ? 'var(--ink-faint)' : '#ef4444',
+                opacity: sentinel.is_active ? 0.5 : 1,
+              }}>
+              Delete
+            </button>
+          </div>
+          {sentinel.is_active && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--ink-faint)', fontStyle: 'italic' }}>
+              Activate a different sentinel first to enable archive or delete.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
