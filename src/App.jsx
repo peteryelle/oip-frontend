@@ -3402,7 +3402,7 @@ function SentinelPage() {
 
   const activateSentinel = async (s) => {
     if (s.is_active) return
-    if (!confirm(\`Activate "\${s.name || 'Sentinel v' + s.version}"? This deactivates all other sentinels for this OIP.\`)) return
+    if (!confirm(`Activate "${s.name || 'Sentinel v' + s.version}"? This deactivates all other sentinels for this OIP.`)) return
     // Deactivate all, then activate the selected
     await supabase.from('sentinels').update({ is_active: false }).eq('oip_id', selectedOip.id)
     await supabase.from('sentinels').update({ is_active: true }).eq('id', s.id)
@@ -3755,9 +3755,6 @@ function SentinelPage() {
           </div>
         )
       })}
-    </div>
-        </>
-      )}
     </div>
   )
 }
