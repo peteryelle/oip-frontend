@@ -1119,9 +1119,7 @@ function MarketReviewPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
   const [openSignal, setOpenSignal] = useState(null)
-  const [entityBriefing, setEntityBriefing] = useState(null)
-  const [briefingLoading, setBriefingLoading] = useState(false)
-  const [briefingEntity, setBriefingEntity] = useState(null)
+  const [openEntity, setOpenEntity] = useState(null)
 
   // Read entity filter from URL
   const params = new URLSearchParams(useLocation().search)
@@ -1171,72 +1169,6 @@ function MarketReviewPage() {
 
   const allStates = [...new Set(signals.map(s => s.signals?.state).filter(Boolean))].sort()
   const allGroups = [...new Set(signals.flatMap(s => s.matched_groups || []))].sort()
-
-  // Entity intelligence briefing — fires when drilling into an entity from Top 10
-  useEffect(() => {
-    if (!entityFilter || selectedOip?.verticals?.slug === 'sam') return
-    console.log('briefing effect firing', entityFilter, signals.length)
-    const entitySignals = signals.filter(s => s.signals?.source_name === entityFilter)
-
-    if (entitySignals.length === 0) return
-    if (briefingEntity === entityFilter) return
-    setBriefingLoading(true)
-    setEntityBriefing(null)
-    setBriefingEntity(entityFilter)
-
-    const signalSummaries = entitySignals.slice(0, 12).map((s, i) =>
-      `${i + 1}. [${s.signal_tier}] ${s.signals?.title || ''}\n   ${s.match_reason || ''}`
-    ).join('\n')
-    const prompt = `You are a senior BD analyst. Based on these ${entitySignals.length} procurement signals about ${entityFilter}, write an intelligence briefing.
-
-SIGNALS:
-${signalSummaries}
-
-Write three sections: OPPORTUNITY, CONCERNS, GAPS.
-Each section has exactly 3 bullets and one paragraph.
-STRICT RULE: Each bullet must be 8 words or fewer. No exceptions. Cut ruthlessly.
-One paragraph of analyst context follows the bullets (3-4 sentences max).
-
-Format exactly:
-OPPORTUNITY:
-• [8 words max]
-• [8 words max]
-• [8 words max]
-[paragraph]
-
-CONCERNS:
-• [8 words max]
-• [8 words max]
-• [8 words max]
-[paragraph]
-
-GAPS:
-• [8 words max]
-• [8 words max]
-• [8 words max]
-[paragraph]
-
-Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain text only.`
-    fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 900,
-        prompt,
-      })
-    })
-    .then(r => r.json())
-    .then(d => setEntityBriefing(d.content?.find(b => b.type === 'text')?.text || ''))
-    .catch(() => setEntityBriefing('Unable to generate briefing.'))
-    .finally(() => setBriefingLoading(false))
-  }, [entityFilter, signals])
-
-
 
   const updateStatus = async (signalId, newStatus) => {
     const { error } = await supabase
@@ -1324,94 +1256,6 @@ Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain
         )}
       </div>
 
-      {/* Entity Intelligence Briefing */}
-      {entityFilter && !isSam && (briefingLoading || entityBriefing) && (() => {
-        const entitySignals = signals.filter(s => s.signals?.source_name === entityFilter)
-        const strong = entitySignals.filter(s => s.signal_tier === 'tier1_strong').length
-        const tier1  = entitySignals.filter(s => s.signal_tier === 'tier1').length
-        const groups = new Set(entitySignals.flatMap(s => s.matched_groups || []))
-        const score  = Math.min(
-          Math.min(strong, 5) * 12 +
-          Math.min(tier1,  3) * 8  +
-          Math.min(groups.size, 5) * 3,
-          100
-        )
-        const { label, color, bg } = score >= 75 ? { label: 'Priority', color: '#16a34a', bg: '#dcfce7' }
-          : score >= 50 ? { label: 'Strong',   color: '#2563eb', bg: '#dbeafe' }
-          : score >= 25 ? { label: 'Moderate', color: '#b45309', bg: '#fef3c7' }
-          :                { label: 'Watch',    color: '#dc2626', bg: '#fee2e2' }
-        return (
-        <div style={{ margin: '0 0 24px 0', padding: '20px 24px',
-          background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)' }}>
-              Intelligence Briefing
-            </div>
-            <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '.1em', padding: '3px 9px',
-              borderRadius: 3, background: bg, color }}>
-              {label} · {score}
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
-              {strong > 0 && `${strong} strong · `}{tier1 > 0 && `${tier1} tier-1 · `}{entitySignals.length} total
-            </span>
-          </div>
-          {briefingLoading ? (
-            <div style={{ fontSize: 15, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
-              Generating briefing…
-            </div>
-          ) : (
-            <div style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--ink)' }}>
-              {(entityBriefing || '')
-                .split('\n')
-                .map(line => line
-                  .replace(/^#+\s*/, '')           // strip markdown headers
-                  .replace(/\*\*/g, '')             // strip bold markers
-                  .replace(/^INTELLIGENCE BRIEFING:.*$/i, '') // strip LLM title line
-                  .trim()
-                )
-                .filter(Boolean)
-                .map((para, i) => {
-                const labels = ['OPPORTUNITY:', 'CONCERNS:', 'GAPS:']
-                const labelColors = { 'OPPORTUNITY:': 'var(--primary)', 'CONCERNS:': '#b45309', 'GAPS:': 'var(--ink-fade)' }
-                const matchedLabel = labels.find(l => para.toUpperCase().startsWith(l))
-                if (matchedLabel) {
-                  const rest = para.slice(matchedLabel.length).trim()
-                  return (
-                    <div key={i} style={{ marginTop: i === 0 ? 0 : 28, marginBottom: 10 }}>
-                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 700,
-                        textTransform: 'uppercase', letterSpacing: '.12em',
-                        color: labelColors[matchedLabel] || 'var(--ink-fade)' }}>
-                        {matchedLabel.replace(':', '')}
-                      </span>
-                      {rest && <span style={{ marginLeft: 10, fontSize: 15 }}>{rest}</span>}
-                    </div>
-                  )
-                }
-                if (para.startsWith('•') || para.startsWith('-')) {
-                  return (
-                    <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
-                      <span style={{ color: 'var(--primary)', flexShrink: 0, fontWeight: 700, fontSize: 16 }}>•</span>
-                      <span style={{ fontSize: 15, lineHeight: 1.5, color: 'var(--ink)', fontWeight: 600 }}>
-                        {para.replace(/^[•\-]\s*/, '')}
-                      </span>
-                    </div>
-                  )
-                }
-                return (
-                  <div key={i} style={{ marginTop: 10, marginBottom: 6, fontSize: 14,
-                    color: 'var(--ink-light)', lineHeight: 1.7 }}>
-                    {para}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-        )
-      })()}
-
       {/* SAM tabs */}
       {isSam && (
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--rule)' }}>
@@ -1476,30 +1320,9 @@ Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain
 
       {loading ? <SectionLoader /> : (
         <>
-          {/* SLED: Entity Board (no filter) or Entity drill-down (filter set) */}
-          {!isSam && !entityFilter && (
-            <EntityBoard signals={signals} />
-          )}
-          {!isSam && entityFilter && (
-            <>
-              <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
-                {filtered.length} signals
-              </div>
-              {filtered.length === 0 ? (
-                <EmptyMessage title="No signals" message="No signals found for this entity." />
-              ) : (
-                <div>
-                  {filtered
-                    .sort((a, b) => {
-                      const tierOrder = { tier1_strong: 0, tier1: 1, tier2: 2 }
-                      return (tierOrder[a.signal_tier] ?? 3) - (tierOrder[b.signal_tier] ?? 3)
-                    })
-                    .map(s => (
-                      <SignalCard key={s.signal_id} os={s} onClick={() => setOpenSignal(s)} />
-                    ))}
-                </div>
-              )}
-            </>
+          {/* SLED: Entity Board */}
+          {!isSam && (
+            <EntityBoard signals={signals} onEntityClick={name => setOpenEntity(name)} />
           )}
           {/* SAM unchanged */}
           {isSam && (
@@ -1525,6 +1348,14 @@ Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain
       )}
 
       {openSignal && <SignalDrawer {...drawerProps} />}
+      {openEntity && (
+        <EntityDrawer
+          entityName={openEntity}
+          signals={signals.filter(s => s.signals?.source_name === openEntity)}
+          oipId={selectedOip?.id}
+          onClose={() => setOpenEntity(null)}
+        />
+      )}
     </>
   )
 }
@@ -1534,8 +1365,7 @@ Write for a sales director. Direct, no hedging. No markdown, no asterisks, plain
 // ENTITY BOARD — ranked entity cards for Market Review
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EntityBoard({ signals }) {
-  const navigate = useNavigate()
+function EntityBoard({ signals, onEntityClick }) {
   const [search, setSearch] = useState('')
 
   // Group signals by entity and compute composite score
@@ -1604,7 +1434,7 @@ function EntityBoard({ signals }) {
             marginBottom: 10,
             cursor: 'pointer',
           }}
-            onClick={() => navigate(`/market?entity=${encodeURIComponent(e.name)}`)}
+            onClick={() => onEntityClick && onEntityClick(e.name)}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -2153,6 +1983,439 @@ function tierLabel(t) {
   return { tier1_strong: 'Strong', tier1: 'Tier 1', tier2: 'Tier 2', no_match: 'Collected' }[t] || t
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTITY DRAWER — right-side panel for entity intelligence
+// ─────────────────────────────────────────────────────────────────────────────
+
+function EntityDrawer({ entityName, signals, oipId, onClose }) {
+  const [briefing, setBriefing]       = useState(null)
+  const [briefingLoading, setBriefingLoading] = useState(true)
+  const [contact, setContact]         = useState(null)
+  const [contactLoading, setContactLoading] = useState(true)
+
+  // Score
+  const strong = signals.filter(s => s.signal_tier === 'tier1_strong').length
+  const tier1  = signals.filter(s => s.signal_tier === 'tier1').length
+  const groups = [...new Set(signals.flatMap(s => s.matched_groups || []))]
+  const score  = Math.min(Math.min(strong,5)*12 + Math.min(tier1,3)*8 + Math.min(groups.length,5)*3, 100)
+  const { label, color, bg } = score >= 75 ? { label:'Priority', color:'#16a34a', bg:'#dcfce7' }
+    : score >= 50 ? { label:'Strong',   color:'#2563eb', bg:'#dbeafe' }
+    : score >= 25 ? { label:'Moderate', color:'#b45309', bg:'#fef3c7' }
+    :               { label:'Watch',    color:'#dc2626', bg:'#fee2e2' }
+
+  // Top signals for evidence list (tier1_strong + tier1 only)
+  const topSignals = signals
+    .filter(s => s.signal_tier === 'tier1_strong' || s.signal_tier === 'tier1' || s.signal_tier === 'tier2')
+    .sort((a,b) => {
+      const order = { tier1_strong: 0, tier1: 1, tier2: 2 }
+      return (order[a.signal_tier] ?? 3) - (order[b.signal_tier] ?? 3)
+    })
+
+  // Extract named contacts from signal titles
+  // Pattern: "FirstName [Middle] LastName, [Modifier] TitleWord"
+  const TITLE_WORDS = ['Superintendent','Director','Principal','CFO','CEO','CIO',
+    'Controller','Manager','Clerk','Auditor','President','Commissioner',
+    'Administrator','Coordinator','Supervisor','Treasurer','Comptroller',
+    'Officer','Chairperson','Chairman','Chairwoman']
+  const MODIFIERS = ['Assistant','Deputy','Chief','Senior','Executive','Associate','Acting']
+
+  const titlePattern = new RegExp(
+    `([A-Z][a-z]+(?:\\s[A-Z][a-z]+){1,2}),\\s*((?:${MODIFIERS.join('|')})\\s+)?(${TITLE_WORDS.join('|')})`,
+    'g'
+  )
+
+  const extractedContacts = []
+  const seen = new Set()
+  signals.forEach(s => {
+    const title = s.signals?.title || ''
+    let m
+    titlePattern.lastIndex = 0
+    while ((m = titlePattern.exec(title)) !== null) {
+      const name  = m[1].trim()
+      const role  = ((m[2]||'') + m[3]).trim()
+      const key   = name.toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        extractedContacts.push({ name, title: role, source: 'signal_title', contact_mode: 'named' })
+      }
+    }
+  })
+
+  // Contact fetch — only if no named contacts found in titles
+  useEffect(() => {
+    if (extractedContacts.length > 0) { setContactLoading(false); return }
+    const best = signals.find(s => s.signal_tier === 'tier1_strong')
+      || signals.find(s => s.signal_tier === 'tier1')
+      || signals[0]
+    if (!best) { setContactLoading(false); return }
+    fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/find-signal-contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ signal_id: best.signal_id, oip_id: oipId }),
+    })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { if (d?.contacts?.length) setContact(d) })
+    .catch(() => {})
+    .finally(() => setContactLoading(false))
+  }, [entityName])
+
+  // Briefing fetch
+  useEffect(() => {
+    const summaries = signals.slice(0,12).map((s,i) =>
+      `${i+1}. [${s.signal_tier}] ${s.signals?.title || ''}\n   ${s.match_reason||''}`
+    ).join('\n')
+    const prompt = `You are a senior BD analyst. Based on these ${signals.length} procurement signals about ${entityName}, write an intelligence briefing.
+
+SIGNALS:
+${summaries}
+
+Write three sections: OPPORTUNITY, CONCERNS, GAPS.
+Each section has exactly 3 bullets and one paragraph.
+STRICT RULE: Each bullet must be 8 words or fewer. No exceptions.
+Format exactly:
+OPPORTUNITY:
+• [8 words max]
+• [8 words max]
+• [8 words max]
+[paragraph]
+
+CONCERNS:
+• [8 words max]
+• [8 words max]
+• [8 words max]
+[paragraph]
+
+GAPS:
+• [8 words max]
+• [8 words max]
+• [8 words max]
+[paragraph]
+
+Write for a sales director. Direct, no hedging. No markdown, plain text only.`
+
+    fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json',
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900, prompt })
+    })
+    .then(r => r.json())
+    .then(d => setBriefing(d.content?.find(b => b.type==='text')?.text || ''))
+    .catch(() => setBriefing('Unable to generate briefing.'))
+    .finally(() => setBriefingLoading(false))
+  }, [entityName])
+
+  const divider = <hr style={{ border:'none', borderTop:'1px solid var(--rule)', margin:'20px 0' }} />
+  const lbl = (txt) => (
+    <div style={{ fontSize:11, fontFamily:"'IBM Plex Mono', monospace", fontWeight:700,
+      textTransform:'uppercase', letterSpacing:'.12em', color:'var(--ink-fade)', marginBottom:10 }}>
+      {txt}
+    </div>
+  )
+
+  const renderBriefing = (text) => {
+    const labels = ['OPPORTUNITY:', 'CONCERNS:', 'GAPS:']
+    const labelColors = { 'OPPORTUNITY:': 'var(--primary)', 'CONCERNS:': '#b45309', 'GAPS:': 'var(--ink-fade)' }
+    return text.split('\n')
+      .map(l => l.replace(/^#+\s*/,'').replace(/\*\*/g,'').trim())
+      .filter(Boolean)
+      .map((para, i) => {
+        const ml = labels.find(l => para.toUpperCase().startsWith(l))
+        if (ml) {
+          const rest = para.slice(ml.length).trim()
+          return (
+            <div key={i} style={{ marginTop: i===0?0:24, marginBottom:8 }}>
+              <span style={{ fontFamily:"'IBM Plex Mono', monospace", fontSize:11, fontWeight:700,
+                textTransform:'uppercase', letterSpacing:'.12em', color:labelColors[ml]||'var(--ink-fade)' }}>
+                {ml.replace(':','')}
+              </span>
+              {rest && <span style={{ marginLeft:10, fontSize:14 }}>{rest}</span>}
+            </div>
+          )
+        }
+        if (para.startsWith('•') || para.startsWith('-')) {
+          return (
+            <div key={i} style={{ display:'flex', gap:10, marginBottom:6 }}>
+              <span style={{ color:'var(--primary)', flexShrink:0, fontWeight:700 }}>•</span>
+              <span style={{ fontSize:14, lineHeight:1.5, color:'var(--ink)', fontWeight:600 }}>
+                {para.replace(/^[•\-]\s*/,'')}
+              </span>
+            </div>
+          )
+        }
+        return (
+          <div key={i} style={{ marginTop:8, fontSize:13, color:'var(--ink-light)', lineHeight:1.7 }}>
+            {para}
+          </div>
+        )
+      })
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:100,
+      display:'flex', justifyContent:'flex-end',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background:'var(--paper)', width:'100%', maxWidth:680, height:'100%',
+        overflow:'auto', padding:'32px 36px',
+      }}>
+        <button onClick={onClose} style={{
+          background:'none', border:'none', fontSize:20, cursor:'pointer',
+          color:'var(--ink-fade)', float:'right', marginRight:-10, marginTop:-10,
+        }}>×</button>
+
+        {/* Eyebrow */}
+        <div style={{ fontSize:11, fontFamily:"'IBM Plex Mono', monospace", color:'var(--ink-fade)',
+          textTransform:'uppercase', letterSpacing:'.1em', marginBottom:8,
+          display:'flex', gap:8, alignItems:'center' }}>
+          <span>Entity Profile</span>
+          <span>·</span>
+          <span style={{ padding:'2px 8px', borderRadius:3, fontSize:11, fontWeight:700, background:bg, color }}>
+            {label} · {score}
+          </span>
+          <span>·</span>
+          <span>{strong > 0 && `${strong} strong`}{strong>0&&tier1>0&&' · '}{tier1>0&&`${tier1} tier-1`} · {signals.length} total</span>
+        </div>
+
+        {/* Entity name */}
+        <h2 style={{ fontFamily:"'Spectral', serif", fontSize:24, marginBottom:4,
+          lineHeight:1.3, color:'var(--ink)', fontWeight:600 }}>
+          {entityName}
+        </h2>
+
+        {/* Groups */}
+        {groups.length > 0 && (
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:4 }}>
+            {groups.map(g => <span key={g} className="kw-pill">{g}</span>)}
+          </div>
+        )}
+
+        {divider}
+
+        {/* Contact */}
+        <div style={{ marginBottom:20 }}>
+          {lbl('Contact')}
+          {extractedContacts.length > 0 ? (
+            extractedContacts.map((c, i) => (
+              <div key={i} style={{
+                padding:'14px 16px', marginBottom:8,
+                background:'var(--primary-soft)',
+                borderLeft:'3px solid var(--primary)',
+                borderRadius:'0 4px 4px 0',
+              }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                  <span style={{ display:'inline-block', width:7, height:7, borderRadius:'50%',
+                    background:'var(--primary)' }} />
+                  <span style={{ fontSize:10, fontFamily:"'IBM Plex Mono', monospace",
+                    textTransform:'uppercase', letterSpacing:'.1em', fontWeight:700,
+                    color:'var(--primary)' }}>
+                    Named Contact
+                  </span>
+                </div>
+                <div style={{ fontSize:16, fontWeight:600, color:'var(--ink)', marginBottom:2 }}>
+                  {c.name}
+                </div>
+                <div style={{ fontSize:13, color:'var(--ink-fade)' }}>{c.title}</div>
+              </div>
+            ))
+          ) : (
+            <>
+              {contactLoading && (
+                <div style={{ fontSize:13, color:'var(--ink-fade)', fontStyle:'italic',
+                  fontFamily:"'IBM Plex Mono', monospace" }}>Finding contact…</div>
+              )}
+              {!contactLoading && contact?.contacts?.map((c, i) => (
+            <div key={i} style={{
+              padding:'14px 16px',
+              background: c.contact_mode==='named' ? 'var(--primary-soft)' : '#fef9ec',
+              borderLeft: `3px solid ${c.contact_mode==='named' ? 'var(--primary)' : '#f0a500'}`,
+              borderRadius:'0 4px 4px 0',
+            }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                <span style={{ display:'inline-block', width:7, height:7, borderRadius:'50%',
+                  background: c.contact_mode==='named' ? 'var(--primary)' : '#f0a500' }} />
+                <span style={{ fontSize:10, fontFamily:"'IBM Plex Mono', monospace",
+                  textTransform:'uppercase', letterSpacing:'.1em', fontWeight:700,
+                  color: c.contact_mode==='named' ? 'var(--primary)' : '#f0a500' }}>
+                  {c.contact_mode==='named' ? 'Named Contact' : 'Recommended Role'}
+                </span>
+              </div>
+              <div style={{ fontSize:16, fontWeight:600, color:'var(--ink)', marginBottom:2 }}>
+                {c.full_name || c.title || '—'}
+              </div>
+              {c.full_name && c.title && (
+                <div style={{ fontSize:13, color:'var(--ink-fade)', marginBottom:8 }}>{c.title}</div>
+              )}
+              <div style={{ display:'flex', gap:16, flexWrap:'wrap', marginTop:6 }}>
+                {c.email && <a href={`mailto:${c.email}`} style={{ fontSize:13, color:'var(--primary)', textDecoration:'none' }}>✉ {c.email}</a>}
+                {c.phone && <a href={`tel:${c.phone}`} style={{ fontSize:13, color:'var(--ink-light)', textDecoration:'none' }}>☎ {c.phone}</a>}
+                {c.linkedin_url && <a href={`https://${c.linkedin_url.replace(/^https?:\/\//,'')}`} target="_blank" rel="noopener noreferrer" style={{ fontSize:13, color:'var(--primary)', textDecoration:'none' }}>in LinkedIn →</a>}
+                {c.contact_mode==='inferred' && c.raw_data?.buying_window_days && (
+                  <span style={{ fontSize:12, color:'var(--ink-fade)', fontFamily:"'IBM Plex Mono', monospace" }}>
+                    ~{c.raw_data.buying_window_days} day buying window
+                  </span>
+                )}
+              </div>
+              {c.contact_mode==='inferred' && c.raw_data?.key_finding_pattern && (
+                <div style={{ marginTop:8, fontSize:12, color:'var(--ink-fade)',
+                  fontFamily:"'IBM Plex Mono', monospace" }}>
+                  Look for: {c.raw_data.key_finding_pattern}
+                </div>
+              )}
+            </div>
+          ))}
+              {!contactLoading && !contact && (
+                <div style={{ fontSize:13, color:'var(--ink-fade)', fontStyle:'italic',
+                  fontFamily:"'IBM Plex Mono', monospace" }}>No contact found.</div>
+              )}
+            </>
+          )}
+        </div>
+
+        {divider}
+
+        {/* Intelligence Brief */}
+        <div style={{ marginBottom:20 }}>
+          {lbl('Intelligence Briefing')}
+          {briefingLoading
+            ? <div style={{ fontSize:14, color:'var(--ink-fade)', fontStyle:'italic' }}>Generating briefing…</div>
+            : <div style={{ fontSize:14, lineHeight:1.8 }}>{renderBriefing(briefing||'')}</div>
+          }
+        </div>
+
+        {divider}
+
+        {/* Associated Documents — grouped by parent meeting */}
+        {(() => {
+          // Group signals by parent title (everything before last |)
+          const groupMap = new Map()
+          topSignals.forEach(s => {
+            const title = s.signals?.title || '—'
+            const lastPipe = title.lastIndexOf(' | ')
+            const hasFile = lastPipe > -1 && title.slice(lastPipe + 3).match(/\.(pdf|docx?|xlsx?)/i)
+            const parent = hasFile ? title.slice(0, lastPipe).trim() : title
+            const file   = hasFile ? title.slice(lastPipe + 3).trim() : null
+            if (!groupMap.has(parent)) {
+              groupMap.set(parent, {
+                parent,
+                tier: s.signal_tier,
+                date: s.signals?.meeting_date,
+                url: (() => {
+                  const raw = s.signals?.doc_url
+                  if (!raw) return null
+                  if (typeof raw === 'object') return raw.url || null
+                  if (typeof raw === 'string') {
+                    try { const p = JSON.parse(raw); return p.url || raw } catch { return raw }
+                  }
+                  return null
+                })(),
+                source: s.signals?.source,
+                keywords: s.matched_keywords || [],
+                docs: [],
+              })
+            }
+            const g = groupMap.get(parent)
+            if (s.signal_tier === 'tier1_strong') g.tier = 'tier1_strong'
+            // Only push as drill-down if it's a named file
+            if (file) {
+              const rawUrl = s.signals?.doc_url
+              const docUrl = (() => {
+                if (!rawUrl) return null
+                if (typeof rawUrl === 'object') return rawUrl.url || null
+                if (typeof rawUrl === 'string') {
+                  try { const p = JSON.parse(rawUrl); return p.url || rawUrl } catch { return rawUrl }
+                }
+                return null
+              })()
+              g.docs.push({ title: file, url: docUrl, signal_id: s.signal_id })
+            }
+          })
+          const groups = Array.from(groupMap.values())
+
+          return (
+            <div style={{ marginBottom:20 }}>
+              {lbl(`Associated Documents · ${groups.length} agenda item${groups.length!==1?'s':''} · ${topSignals.length} document${topSignals.length!==1?'s':''}`)}
+              {groups.map((g, i) => {
+                const tierClass = g.tier === 'tier1_strong' ? 'tier-strong' : 'tier-1'
+                return (
+                  <div key={i} style={{
+                    padding:'14px 0',
+                    borderBottom: i < groups.length-1 ? '1px solid var(--rule)' : 'none',
+                  }}>
+                    {/* Parent meeting title */}
+                    <div style={{ display:'flex', alignItems:'flex-start', gap:10, marginBottom:8 }}>
+                      <span className={`tier-pill ${tierClass}`} style={{ flexShrink:0, marginTop:2 }}>
+                        {tierLabel(g.tier)}
+                      </span>
+                      <div style={{ flex:1 }}>
+                        {/* If no drill-down docs, make parent title the link */}
+                        {(() => {
+                          const validUrl = [g.url, g.source].find(u => u && u.startsWith('http'))
+                          return g.docs.length === 0 && validUrl ? (
+                            <a href={validUrl} target="_blank" rel="noopener noreferrer"
+                              style={{ fontSize:14, fontWeight:600, color:'var(--primary)',
+                                textDecoration:'none', lineHeight:1.4, display:'block' }}>
+                              {g.parent} →
+                            </a>
+                          ) : (
+                            <div style={{ fontSize:14, fontWeight:600, color:'var(--ink)', lineHeight:1.4 }}>
+                              {g.parent}
+                            </div>
+                          )
+                        })()}
+                        <div style={{ display:'flex', gap:10, marginTop:4, flexWrap:'wrap', alignItems:'center' }}>
+                          {g.date && (
+                            <span style={{ fontSize:11, color:'var(--ink-fade)',
+                              fontFamily:"'IBM Plex Mono', monospace" }}>
+                              {new Date(g.date).toLocaleDateString()}
+                            </span>
+                          )}
+                          {g.keywords.slice(0,3).map(k => (
+                            <span key={k} className="kw-pill" style={{ fontSize:10 }}>{k}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Document drill-downs */}
+                    {g.docs.length > 0 && (
+                      <div style={{ marginLeft:8, paddingLeft:14,
+                        borderLeft:'2px solid var(--rule)' }}>
+                        {g.docs.map((doc, j) => (
+                          <div key={j} style={{
+                            padding:'5px 0',
+                            borderBottom: j < g.docs.length-1 ? '1px solid var(--rule-faint, #f0f0f0)' : 'none',
+                          }}>
+                            {doc.url ? (
+                              <a href={doc.url} target="_blank" rel="noopener noreferrer" style={{
+                                fontSize:12, color:'var(--primary)', textDecoration:'none',
+                                display:'flex', alignItems:'center', gap:6,
+                              }}>
+                                <span style={{ fontSize:10, opacity:0.6 }}>↗</span>
+                                {doc.title}
+                              </a>
+                            ) : (
+                              <span style={{ fontSize:12, color:'var(--ink-fade)' }}>{doc.title}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+          {/* end groups */}
+            </div>
+          )
+        })()}
+      </div>
+    </div>
+  )
+}
+
+
 function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const sig    = os.signals || {}
   const meta   = sig.metadata || {}
@@ -2162,6 +2425,8 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const [aiSummary, setAiSummary] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [enriched, setEnriched] = useState(null)  // on-demand entity data
+  const [contactInfo, setContactInfo] = useState(null)
+  const [contactLoading, setContactLoading] = useState(false)
 
   // On-demand enrichment — fetch company details if not already in metadata
   useEffect(() => {
@@ -2243,6 +2508,26 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
     .then(d => setAiSummary(d.content?.find(b => b.type === 'text')?.text || ''))
     .catch(() => setAiSummary('Unable to generate summary.'))
     .finally(() => setAiLoading(false))
+  }, [os.signal_id])
+
+  // Contact fetch — SLED signals only (not SAM)
+  useEffect(() => {
+    if (isSam) return
+    if (!os.signal_id || !os.oip_id) return
+    setContactInfo(null)
+    setContactLoading(true)
+    fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/find-signal-contact', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ signal_id: os.signal_id, oip_id: os.oip_id }),
+    })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { if (d?.contacts?.length) setContactInfo(d) })
+    .catch(() => {})
+    .finally(() => setContactLoading(false))
   }, [os.signal_id])
 
   const divider = <hr style={{ border: 'none', borderTop: '1px solid var(--rule)', margin: '20px 0' }} />
@@ -2493,6 +2778,98 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
             )}
           </div>
         </>}
+
+        {/* Contact Section — SLED signals */}
+        {!isSam && (
+          <>
+            {divider}
+            <div style={{ marginBottom: 20 }}>
+              {lbl('Contact')}
+              {contactLoading && (
+                <div style={{ fontSize: 13, color: 'var(--ink-fade)',
+                  fontStyle: 'italic', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  Finding contact…
+                </div>
+              )}
+              {!contactLoading && contactInfo?.contacts?.map((c, i) => (
+                <div key={i} style={{
+                  padding: '14px 16px',
+                  background: c.contact_mode === 'named' ? 'var(--primary-soft)' : 'var(--bg-soft, #f8f8f8)',
+                  borderLeft: `3px solid ${c.contact_mode === 'named' ? 'var(--primary)' : 'var(--rule-strong)'}`,
+                  borderRadius: '0 4px 4px 0',
+                  marginBottom: 8,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <span style={{
+                      display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+                      background: c.contact_mode === 'named' ? 'var(--primary)' : '#f0a500',
+                    }} />
+                    <span style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', monospace",
+                      textTransform: 'uppercase', letterSpacing: '.1em',
+                      color: c.contact_mode === 'named' ? 'var(--primary)' : '#f0a500', fontWeight: 700 }}>
+                      {c.contact_mode === 'named' ? 'Named Contact' : 'Recommended Role'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>
+                    {c.full_name || c.title || '—'}
+                  </div>
+                  {c.full_name && c.title && (
+                    <div style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 6 }}>{c.title}</div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+                    {c.email && (
+                      <a href={`mailto:${c.email}`} style={{
+                        fontSize: 13, color: 'var(--primary)', textDecoration: 'none',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                      }}>
+                        <span style={{ fontSize: 11, opacity: 0.7 }}>✉</span> {c.email}
+                      </a>
+                    )}
+                    {c.phone && (
+                      <a href={`tel:${c.phone}`} style={{
+                        fontSize: 13, color: 'var(--ink-light)', textDecoration: 'none',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                      }}>
+                        <span style={{ fontSize: 11, opacity: 0.7 }}>☎</span> {c.phone}
+                      </a>
+                    )}
+                    {c.linkedin_url && (
+                      <a href={`https://${c.linkedin_url.replace(/^https?:\/\//, '')}`}
+                        target="_blank" rel="noopener noreferrer" style={{
+                        fontSize: 13, color: 'var(--primary)', textDecoration: 'none',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                      }}>
+                        <span style={{ fontSize: 11, opacity: 0.7 }}>in</span> LinkedIn →
+                      </a>
+                    )}
+                  </div>
+                  {c.contact_mode === 'inferred' && c.raw_data && (
+                    <div style={{ marginTop: 10, paddingTop: 10,
+                      borderTop: '1px solid var(--rule)', fontSize: 12,
+                      color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace",
+                      lineHeight: 1.6 }}>
+                      {c.raw_data.trigger_type && (
+                        <div>Trigger: {c.raw_data.trigger_type.replace(/_/g, ' ')}</div>
+                      )}
+                      {c.raw_data.buying_window_days && (
+                        <div>Buying window: ~{c.raw_data.buying_window_days} days</div>
+                      )}
+                      {c.raw_data.key_finding_pattern && (
+                        <div>Look for: {c.raw_data.key_finding_pattern}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {!contactLoading && !contactInfo && (
+                <div style={{ fontSize: 13, color: 'var(--ink-fade)',
+                  fontStyle: 'italic', fontFamily: "'IBM Plex Mono', monospace" }}>
+                  No contact found for this signal.
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Why this signal matters */}
         {os.match_reason && (

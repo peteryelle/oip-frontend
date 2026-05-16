@@ -1,22 +1,4 @@
 // supabase/functions/find-signal-contact/index.ts
-//
-// Edge Function: find-signal-contact
-// ====================================
-// Surfaces contacts for a matched signal in two modes:
-//
-//   named    — contact explicitly in the signal source data
-//              (FAC auditee_contact_name, FDIC officer, etc.)
-//              Reads from signals.vertical_data.contact
-//
-//   inferred — no named contact. Reads ideal_contact_title from
-//              OIP enterprise_trigger_profile and returns a
-//              recommended role with rationale.
-//
-// No external API calls in this version.
-// Vibe Prospecting enrichment (email/phone) wired in next phase.
-//
-// Request body:  { signal_id: string, oip_id: string }
-// Response:      { contacts: SignalContact[], mode: string }
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -45,13 +27,14 @@ Deno.serve(async (req: Request) => {
 
     const sb = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // Check cache
+    // Check cache — only for named contacts (inferred are always re-derived)
     const { data: cached } = await sb
       .from("signal_contacts")
       .select("*")
       .eq("signal_id", signal_id)
       .eq("oip_id", oip_id)
-      .neq("enrichment_status", "pending");
+      .eq("contact_mode", "named")
+      .eq("enrichment_status", "enriched");
 
     if (cached?.length) {
       return new Response(
@@ -78,7 +61,7 @@ Deno.serve(async (req: Request) => {
     const named_contact = vertical_data.contact ?? null;
     const entity_name   = signal.source_name ?? signal.title ?? "";
 
-    // Load OIP trigger map
+    // Load OIP trigger map for ideal_contact_title
     const { data: profile } = await sb
       .from("profiles")
       .select("signal_intelligence")
@@ -98,9 +81,11 @@ Deno.serve(async (req: Request) => {
     let mode: string;
 
     if (named_contact?.name) {
-      // Named — contact is in the signal
+      // Named — contact is in the signal, write to cache
       mode = "named";
-      contacts = [{
+      const contact = {
+        signal_id,
+        oip_id,
         contact_mode:      "named",
         full_name:         named_contact.name,
         title:             named_contact.title ?? null,
@@ -111,9 +96,13 @@ Deno.serve(async (req: Request) => {
         confidence:        "named",
         enrichment_status: "enriched",
         enriched_at:       new Date().toISOString(),
-      }];
+      };
+      // Safe to upsert — full_name is not null
+      await sb.from("signal_contacts")
+        .upsert([contact], { onConflict: "signal_id,oip_id,full_name" });
+      contacts = [contact];
     } else {
-      // Inferred — recommend role from trigger map
+      // Inferred — derive from trigger map, do NOT write to DB
       mode = "inferred";
       contacts = [{
         contact_mode:      "inferred",
@@ -136,14 +125,6 @@ Deno.serve(async (req: Request) => {
         },
       }];
     }
-
-    // Write to signal_contacts
-    await sb
-      .from("signal_contacts")
-      .upsert(
-        contacts.map((c) => ({ signal_id, oip_id, ...c })),
-        { onConflict: "signal_id,oip_id,full_name" },
-      );
 
     return new Response(
       JSON.stringify({ contacts, mode }),
