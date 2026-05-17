@@ -2454,6 +2454,13 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   useEffect(() => {
     if (!isSam) return
     setAiSummary(null)
+    // Use pre-scored worker summary if available — skip failing live API call
+    if (!isDib && scores.llm_reason) {
+      setAiSummary(scores.llm_reason)
+      setAiLoading(false)
+      return
+    }
+
     setAiLoading(true)
 
     const prompt = isDib
@@ -2540,6 +2547,93 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
     </tr>
   )
 
+
+  const handleDownloadBrief = () => {
+    const analysis  = scores.llm_analysis
+    const summary   = aiSummary || scores.llm_reason || ''
+    const renderSection = (label, section) => {
+      if (!section) return ''
+      const bs = (section.bullets || []).map(b => `<li style="font-weight:600;margin-bottom:4px">${b}</li>`).join('')
+      const p  = section.summary ? `<p style="font-size:13px;line-height:1.75;margin:6px 0 0">${section.summary}</p>` : ''
+      return `<div class="lbl">${label}</div><ul style="margin:0 0 8px;padding-left:18px;font-size:13px;line-height:1.6">${bs}</ul>${p}`
+    }
+    const analysisHtml = analysis
+      ? renderSection('Opportunity', analysis.opportunity) + renderSection('Concerns', analysis.concerns) + renderSection('Gaps', analysis.gaps)
+      : `<div class="box">${summary || 'No analysis available.'}</div>`
+    const deadline  = meta.response_deadline
+      ? new Date(meta.response_deadline).toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })
+      : 'Not specified'
+    const scored    = os.scored_at
+      ? new Date(os.scored_at).toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })
+      : new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })
+    const llmScore  = os.signal_value ?? '—'
+    const rec       = scores.recommendation || '—'
+    const recColor  = rec === 'Pursue' ? '#1a5c3a' : rec === 'Consider' ? '#7a4e00' : '#8b1a1a'
+    const dept      = (meta.department_full || meta.department_name || '').split('.')[0].trim()
+    const keywords  = (os.matched_keywords || []).join(', ') || '—'
+    const groups    = (os.matched_groups   || []).join(', ') || '—'
+    const setAside  = meta.set_aside_desc || meta.set_aside_code || 'None specified'
+    const naics     = meta.naics_code || '—'
+    const solNum    = meta.solicitation_number || '—'
+    const noticeType = meta.notice_type || '—'
+
+    const w = window.open('', '_blank', 'width=920,height=750')
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>WinQuest Pursuit Brief</title>
+<style>
+  body{font-family:Georgia,serif;margin:0;padding:48px 64px;color:#1a1a1a;max-width:780px;margin:0 auto}
+  .bar{background:#1a3a5c;color:#fff;padding:10px 16px;margin:-48px -64px 32px;font-family:monospace;font-size:12px;display:flex;justify-content:space-between;align-items:center}
+  .bar button{background:#fff;color:#1a3a5c;border:none;padding:6px 14px;border-radius:4px;font-weight:700;cursor:pointer;font-size:12px}
+  .hdr{border-bottom:3px solid #1a3a5c;padding-bottom:16px;margin-bottom:24px}
+  .logo{font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:#1a3a5c;margin-bottom:6px}
+  .title{font-size:22px;font-weight:700;line-height:1.3;margin-bottom:8px}
+  .meta{font-size:12px;color:#555;font-family:monospace;text-transform:uppercase;letter-spacing:.08em}
+  .lbl{font-family:monospace;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#1a3a5c;margin:24px 0 10px}
+  .box{background:#f0f4f8;border-left:4px solid #1a3a5c;padding:14px 18px;font-size:14px;line-height:1.8;border-radius:0 4px 4px 0}
+  .scores{display:flex;gap:20px;margin-bottom:16px}
+  .sc{background:#f8f8f8;border:1px solid #e0e0e0;border-radius:6px;padding:12px 20px;text-align:center;min-width:100px}
+  .sc-n{font-size:28px;font-weight:700;color:#1a3a5c;line-height:1}
+  .sc-l{font-size:10px;font-family:monospace;text-transform:uppercase;letter-spacing:.1em;color:#777;margin-top:4px}
+  .rec-n{font-size:20px;font-weight:700;color:${recColor};line-height:1}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td{padding:7px 0;vertical-align:top;border-bottom:1px solid #f0f0f0}
+  td:first-child{width:140px;font-family:monospace;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#777;padding-right:16px}
+  .footer{margin-top:40px;padding-top:14px;border-top:1px solid #e0e0e0;font-size:11px;font-family:monospace;color:#aaa;text-transform:uppercase;letter-spacing:.1em;display:flex;justify-content:space-between}
+  @media print{.bar{display:none}}
+</style></head><body>
+<div class="bar"><span>WinQuest Pursuit Brief — Save as PDF</span><button onclick="window.print()">⬇ Save PDF</button></div>
+<div class="hdr">
+  <div class="logo">WinQuest OIP &middot; Pursuit Brief</div>
+  <div class="title">${sig.title || 'Untitled Opportunity'}</div>
+  <div class="meta">${noticeType} &middot; ${dept}</div>
+</div>
+<div class="lbl">WinQuest Analysis</div>
+${analysisHtml}
+<div class="lbl">Score Summary</div>
+<div class="scores">
+  <div class="sc"><div class="sc-n">${llmScore}</div><div class="sc-l">Fit Score</div></div>
+  <div class="sc"><div class="rec-n">${rec}</div><div class="sc-l">Recommendation</div></div>
+</div>
+<div class="lbl">Opportunity Detail</div>
+<table><tbody>
+  <tr><td>Agency</td><td>${dept}</td></tr>
+  <tr><td>Notice Type</td><td>${noticeType}</td></tr>
+  <tr><td>NAICS</td><td>${naics}</td></tr>
+  <tr><td>Set-Aside</td><td>${setAside}</td></tr>
+  <tr><td>Response Due</td><td>${deadline}</td></tr>
+  <tr><td>Solicitation #</td><td>${solNum}</td></tr>
+</tbody></table>
+<div class="lbl">Matched Capabilities</div>
+<table><tbody>
+  <tr><td>Groups</td><td>${groups}</td></tr>
+  <tr><td>Keywords</td><td>${keywords}</td></tr>
+</tbody></table>
+<div class="footer"><span>SMCIS &middot; WinQuest SAM OIP</span><span>Scored ${scored}</span></div>
+</body></html>`)
+    w.document.close()
+  }
+
+
   const poc = displayMeta.entity_poc || {}
   const addr = displayMeta.entity_address || {}
   const addrStr = [addr.street, addr.city, addr.state, addr.zip].filter(Boolean).join(', ')
@@ -2607,19 +2701,70 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
               color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.12em', marginBottom: 10 }}>
               WinQuest Analysis
             </div>
-            <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
-              borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
-              fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
-              {scores.llm_reason && !aiLoading && !aiSummary ? (
-                <div>
-                  <div style={{ marginBottom: 8 }}>{scores.llm_reason}</div>
-                  <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
-                    color: 'var(--primary)', opacity: 0.7 }}>Pre-scored · click to refresh</div>
-                </div>
-              ) : aiLoading
-                ? <span style={{ color: 'var(--ink-fade)', fontStyle: 'italic' }}>Analyzing opportunity…</span>
-                : aiSummary || <span style={{ color: 'var(--ink-fade)' }}>—</span>
+            {(() => {
+              const analysis = scores.llm_analysis
+              const sectionLabel = (txt) => (
+                <div style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+                  textTransform: 'uppercase', letterSpacing: '.15em', color: 'var(--primary)',
+                  marginBottom: 8, marginTop: 16 }}>{txt}</div>
+              )
+              const bullets = (items) => (
+                <ul style={{ margin: '0 0 10px 0', paddingLeft: 18 }}>
+                  {(items || []).map((b, i) => (
+                    <li key={i} style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 4,
+                      fontWeight: 600, color: 'var(--ink)' }}>{b}</li>
+                  ))}
+                </ul>
+              )
+              const prose = (txt) => txt
+                ? <p style={{ fontSize: 13, lineHeight: 1.75, color: 'var(--ink)', margin: '0 0 4px' }}>{txt}</p>
+                : null
+
+              if (analysis?.opportunity || analysis?.concerns || analysis?.gaps) {
+                return (
+                  <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
+                    borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0' }}>
+                    {sectionLabel('Opportunity')}
+                    {bullets(analysis.opportunity?.bullets)}
+                    {prose(analysis.opportunity?.summary)}
+                    {sectionLabel('Concerns')}
+                    {bullets(analysis.concerns?.bullets)}
+                    {prose(analysis.concerns?.summary)}
+                    {sectionLabel('Gaps')}
+                    {bullets(analysis.gaps?.bullets)}
+                    {prose(analysis.gaps?.summary)}
+                  </div>
+                )
               }
+              if (aiLoading) return (
+                <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
+                  borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
+                  fontSize: 14, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+                  Analyzing opportunity…
+                </div>
+              )
+              const fallback = aiSummary || scores.llm_reason
+              return (
+                <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
+                  borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
+                  fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
+                  {fallback || <span style={{ color: 'var(--ink-fade)' }}>—</span>}
+                </div>
+              )
+            })()}
+            <div style={{ marginTop: 10, textAlign: 'right' }}>
+              <button
+                onClick={handleDownloadBrief}
+                style={{
+                  background: 'none', border: '1px solid var(--primary)',
+                  color: 'var(--primary)', borderRadius: 4, padding: '5px 14px',
+                  fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                  fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+              >
+                ⬇ Download Brief
+              </button>
             </div>
           </div>
         )}
