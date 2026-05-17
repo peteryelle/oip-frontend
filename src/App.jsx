@@ -1540,18 +1540,16 @@ function SamOpportunityTable({ signals, onRowClick }) {
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ borderBottom: '2px solid var(--rule)' }}>
             <SortTh label="Title" k="title" style={{ minWidth: 280, textAlign: 'left' }} />
             <th style={thSam}>Type</th>
             <SortTh label="Due Date" k="deadline" />
-            <SortTh label="Modified" k="modified" />
             <SortTh label="LLM Score" k="scores.llm_relevance" />
             <SortTh label="Score" k="scores.technical_fit" />
             <SortTh label="Risk" k="scores.bid_risk" />
             <th style={thSam}>Sentinel</th>
-            <th style={thSam}>Action</th>
             <th style={thSam}>Action</th>
           </tr>
         </thead>
@@ -1600,12 +1598,7 @@ function SamOpportunityTable({ signals, onRowClick }) {
                     ? new Date(meta.response_deadline).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
                     : '—'}
                 </td>
-                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 12, whiteSpace: 'nowrap', color: 'var(--ink-fade)' }}>
-                  {meta.modified_date
-                    ? new Date(meta.modified_date).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
-                    : '—'}
-                </td>
+
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
                   <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />
                 </td>
@@ -1620,8 +1613,8 @@ function SamOpportunityTable({ signals, onRowClick }) {
                   <SentinelNames matched={s.matched_sentinels} />
                 </td>
                 <td style={{ padding: '12px 8px' }}>
-                  <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
-                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                  <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '.05em', fontWeight: 600 }}>
                     {scores.llm_recommendation || scores.recommendation || '—'}
                   </span>
                 </td>
@@ -1637,10 +1630,10 @@ function SamOpportunityTable({ signals, onRowClick }) {
 
 const thSam = {
   padding: '10px 8px',
-  fontSize: 11,
+  fontSize: 12,
   fontFamily: "'IBM Plex Mono', monospace",
   textTransform: 'uppercase',
-  letterSpacing: '.1em',
+  letterSpacing: '.08em',
   color: 'var(--ink-fade)',
   textAlign: 'left',
   fontWeight: 600,
@@ -1823,10 +1816,10 @@ function RiskBadge({ risk }) {
 
 function ScoreBadge({ score }) {
   if (score == null) return null
-  const color = score >= 60 ? '#2e7d32' : score >= 35 ? '#f57f17' : '#c62828'
+  const color = score >= 60 ? '#2e7d32' : score >= 35 ? '#b45309' : '#c62828'
   const bg    = score >= 60 ? '#e8f5e9' : score >= 35 ? '#fff8e1' : '#fdecea'
   return (
-    <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 3,
+    <span style={{ fontSize: 14, fontWeight: 700, padding: '3px 10px', borderRadius: 3,
       background: bg, color, fontFamily: "'IBM Plex Mono', monospace" }}>
       {score}
     </span>
