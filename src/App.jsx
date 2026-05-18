@@ -2689,6 +2689,21 @@ ${analysisHtml}
           </div>
         )}
 
+        {/* Why This Signal Matters — immediately below title */}
+        {isSam && !isDib && os.match_reason && (
+          <div style={{ marginBottom: 16, marginTop: 8 }}>
+            <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 8 }}>
+              Why This Signal Matters
+            </div>
+            <div style={{ fontSize: 17, lineHeight: 1.75, color: 'var(--ink)', fontWeight: 500,
+              padding: '16px 20px', background: 'var(--primary-soft)',
+              borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0' }}>
+              {os.match_reason}
+            </div>
+          </div>
+        )}
+
         {isDib && (
           <div style={{ marginBottom: 12 }}>
             {displayMeta.entity_website && (
@@ -3060,16 +3075,7 @@ ${analysisHtml}
           </>
         )}
 
-        {/* Why this signal matters */}
-        {os.match_reason && (
-          <div style={{ marginBottom: 20, padding: '12px 16px', background: 'var(--primary-soft)',
-       borderLeft: '3px solid var(--primary)', borderRadius: 2 }}>
-            {lbl('Why This Signal Matters')}
-            <div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--ink)' }}>
-              {os.match_reason}
-            </div>
-          </div>
-        )}
+        {/* Why This Signal Matters moved to top */}
 
         {/* Signal Categories */}
         {os.matched_keywords?.length > 0 && (

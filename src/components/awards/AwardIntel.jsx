@@ -92,7 +92,8 @@ export default function AwardIntel({ signalId, oipId }) {
 
   const conf   = CONFIDENCE_COLORS[summary.match_confidence] || CONFIDENCE_COLORS.low
   const top    = recipients[0] || {}
-  const topN   = recipients.slice(0, 5)
+  const [showAll, setShowAll] = useState(false)
+  const topN   = showAll ? recipients : recipients.slice(0, 5)
   const repeat = recipients.filter(r => r.award_count >= 2)
 
   // ── Canned question answers ──
@@ -132,26 +133,38 @@ export default function AwardIntel({ signalId, oipId }) {
           cursor: 'pointer', userSelect: 'none', marginBottom: open ? 10 : 0,
         }}
       >
-        <div style={{
-          fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-          textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--primary)',
-        }}>
-          Award Intelligence
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* Confidence badge */}
-          <span style={{
-            fontSize: 10, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace",
-            padding: '2px 7px', borderRadius: 3,
-            background: conf.bg, border: `1px solid ${conf.border}`, color: conf.text,
-            letterSpacing: '.08em',
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--primary)',
           }}>
-            {conf.label}
-          </span>
-          <span style={{ fontSize: 13, color: 'var(--primary)', opacity: 0.7 }}>
-            {open ? '▲' : '▼'}
-          </span>
+            Award Intelligence
+          </div>
+          {/* Confidence badge with explanation */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              fontSize: 13, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace",
+              padding: '3px 10px', borderRadius: 3,
+              background: conf.bg, border: `2px solid ${conf.border}`, color: conf.text,
+              letterSpacing: '.1em',
+            }}>
+              {conf.label}
+            </span>
+            <span style={{
+              fontSize: 12, color: 'var(--ink-light)',
+              fontFamily: "'IBM Plex Mono', monospace",
+            }}>
+              {summary?.match_basis === 'same_office'
+                ? 'same contracting office'
+                : summary?.match_basis === 'same_agency'
+                  ? 'agency match — not office-specific'
+                  : 'NAICS code only'}
+            </span>
+          </div>
         </div>
+        <span style={{ fontSize: 13, color: 'var(--primary)', opacity: 0.7 }}>
+          {open ? '▲' : '▼'}
+        </span>
       </div>
 
       {!open && summary && (
@@ -235,6 +248,26 @@ export default function AwardIntel({ signalId, oipId }) {
               </div>
             ))}
           </div>
+
+          {/* Show more / collapse toggle */}
+          {recipients.length > 5 && (
+            <div style={{ paddingTop: 8 }}>
+              <button
+                onClick={() => setShowAll(s => !s)}
+                style={{
+                  background: 'none', border: 'none', padding: 0,
+                  fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
+                  color: 'var(--primary)', cursor: 'pointer',
+                  fontWeight: 600, letterSpacing: '.02em',
+                  textDecoration: 'underline', textUnderlineOffset: 3,
+                }}
+              >
+                {showAll
+                  ? '▲ Show top 5 only'
+                  : `▼ Show all ${recipients.length} awardees`}
+              </button>
+            </div>
+          )}
 
           {/* Pricing range */}
           {summary.min_amount != null && (
