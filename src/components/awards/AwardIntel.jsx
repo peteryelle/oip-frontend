@@ -46,9 +46,9 @@ export default function AwardIntel({ signalId, oipId }) {
 
   const sectionLbl = (txt) => (
     <div style={{
-      fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-      textTransform: 'uppercase', letterSpacing: '.15em',
-      color: 'var(--primary)', marginBottom: 6, marginTop: 14,
+      fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+      textTransform: 'uppercase', letterSpacing: '.12em',
+      color: 'var(--primary)', marginBottom: 8, marginTop: 16,
     }}>{txt}</div>
   )
 
@@ -175,8 +175,8 @@ export default function AwardIntel({ signalId, oipId }) {
 
           {/* Match basis */}
           <div style={{
-            fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
-            color: 'var(--ink-fade)', marginBottom: 12,
+            fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
+            color: 'var(--ink-light)', marginBottom: 12,
           }}>
             {BASIS_LABELS[summary.match_basis] || summary.match_basis}
             {summary.agency && ` · ${summary.agency}`}
@@ -211,14 +211,14 @@ export default function AwardIntel({ signalId, oipId }) {
               }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
-                    fontSize: 13, fontWeight: 600, color: 'var(--ink)',
+                    fontSize: 15, fontWeight: 600, color: 'var(--ink)',
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                   }}>
                     {i === 0 && <span style={{ color: 'var(--primary)', marginRight: 6 }}>★</span>}
                     {r.recipient_name}
                   </div>
                   <div style={{
-                    fontSize: 11, color: 'var(--ink-fade)',
+                    fontSize: 12, color: 'var(--ink-light)',
                     fontFamily: "'IBM Plex Mono', monospace", marginTop: 2,
                   }}>
                     {r.award_count} award{r.award_count !== 1 ? 's' : ''}
@@ -226,7 +226,7 @@ export default function AwardIntel({ signalId, oipId }) {
                   </div>
                 </div>
                 <div style={{
-                  fontSize: 13, fontWeight: 700, color: 'var(--ink)',
+                  fontSize: 15, fontWeight: 700, color: 'var(--ink)',
                   fontFamily: "'IBM Plex Mono', monospace",
                   whiteSpace: 'nowrap',
                 }}>
@@ -242,7 +242,7 @@ export default function AwardIntel({ signalId, oipId }) {
               {sectionLbl('Pricing Range')}
               <div style={{
                 display: 'flex', gap: 20,
-                fontFamily: "'IBM Plex Mono', monospace", fontSize: 12,
+                fontFamily: "'IBM Plex Mono', monospace", fontSize: 14,
               }}>
                 <span><span style={{ color: 'var(--ink-fade)' }}>min </span>{fmt(summary.min_amount)}</span>
                 <span><span style={{ color: 'var(--ink-fade)' }}>avg </span>{fmt(summary.avg_amount)}</span>
@@ -262,8 +262,8 @@ export default function AwardIntel({ signalId, oipId }) {
                     background: activeQuestion === q.id ? 'var(--primary-soft)' : 'var(--paper)',
                     border: `1px solid ${activeQuestion === q.id ? 'var(--primary)' : 'var(--rule-strong)'}`,
                     borderRadius: 3, padding: '6px 12px',
-                    fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
-                    color: activeQuestion === q.id ? 'var(--primary)' : 'var(--ink-light)',
+                    fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
+                    color: activeQuestion === q.id ? 'var(--primary)' : 'var(--ink)',
                     cursor: 'pointer', textAlign: 'left', width: '100%',
                     letterSpacing: '.02em',
                   }}
@@ -272,7 +272,7 @@ export default function AwardIntel({ signalId, oipId }) {
                 </button>
                 {activeQuestion === q.id && (
                   <div style={{
-                    fontSize: 13, lineHeight: 1.65, color: 'var(--ink)',
+                    fontSize: 15, lineHeight: 1.7, color: 'var(--ink)',
                     padding: '10px 12px',
                     background: 'var(--primary-soft)',
                     borderLeft: '2px solid var(--primary)',
@@ -287,7 +287,7 @@ export default function AwardIntel({ signalId, oipId }) {
 
           {/* CO note */}
           <div style={{
-            marginTop: 14, fontSize: 11, color: 'var(--ink-fade)',
+            marginTop: 14, fontSize: 12, color: 'var(--ink-light)',
             fontFamily: "'IBM Plex Mono', monospace", fontStyle: 'italic',
           }}>
             Confirm incumbent with contracting officer before pursuit decision.

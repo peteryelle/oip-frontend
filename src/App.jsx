@@ -2541,11 +2541,11 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
   )
   const DetailRow = ({ label, value }) => !value ? null : (
     <tr>
-      <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
-        color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em', verticalAlign: 'top' }}>
+      <td style={{ padding: '8px 0', width: 130, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+        color: 'var(--ink-light)', textTransform: 'uppercase', letterSpacing: '.06em', verticalAlign: 'top' }}>
         {label}
       </td>
-      <td style={{ padding: '7px 0 7px 16px', fontSize: 14, color: 'var(--ink)' }}>{value}</td>
+      <td style={{ padding: '8px 0 8px 16px', fontSize: 15, color: 'var(--ink)' }}>{value}</td>
     </tr>
   )
 
@@ -2646,8 +2646,8 @@ ${analysisHtml}
       display: 'flex', justifyContent: 'flex-end',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        background: 'var(--paper)', width: '100%', maxWidth: 660, height: '100%',
-        overflow: 'auto', padding: '32px 36px',
+        background: 'var(--paper)', width: '100%', maxWidth: 900, height: '100%',
+        overflow: 'auto', padding: '40px 56px',
       }}>
         <button onClick={onClose} style={{
           background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
@@ -2655,7 +2655,7 @@ ${analysisHtml}
         }}>×</button>
 
         {/* Eyebrow */}
-        <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+        <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-light)',
           textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>
           {isDib
             ? <>DIB PROSPECT · {meta.department_name?.split('.')[0] || 'Federal'}</>
@@ -2666,7 +2666,7 @@ ${analysisHtml}
         </div>
 
         {/* Title */}
-        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 22, marginBottom: 4,
+        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 28, marginBottom: 4,
           lineHeight: 1.3, color: 'var(--ink)', fontWeight: 600 }}>
           {isDib ? (displayMeta.company_name || displayMeta.entity_legal_name || sig.title) : sig.title}
         </h2>
