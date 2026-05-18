@@ -2420,6 +2420,7 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const [enriched, setEnriched] = useState(null)  // on-demand entity data
   const [contactInfo, setContactInfo] = useState(null)
   const [contactLoading, setContactLoading] = useState(false)
+  const [analysisOpen, setAnalysisOpen] = useState(true)
 
   // On-demand enrichment — fetch company details if not already in metadata
   useEffect(() => {
@@ -2668,6 +2669,25 @@ ${analysisHtml}
           lineHeight: 1.3, color: 'var(--ink)', fontWeight: 600 }}>
           {isDib ? (displayMeta.company_name || displayMeta.entity_legal_name || sig.title) : sig.title}
         </h2>
+
+        {/* Solicitation # and Agency — SAM opportunities only */}
+        {isSam && !isDib && (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8, marginTop: 2 }}>
+            {meta.solicitation_number && (
+              <span style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                color: 'var(--ink-fade)', letterSpacing: '.04em' }}>
+                Sol# {meta.solicitation_number}
+              </span>
+            )}
+            {deptDisplay && (
+              <span style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                color: 'var(--ink-fade)', letterSpacing: '.04em' }}>
+                {deptDisplay}
+              </span>
+            )}
+          </div>
+        )}
+
         {isDib && (
           <div style={{ marginBottom: 12 }}>
             {displayMeta.entity_website && (
@@ -2697,11 +2717,19 @@ ${analysisHtml}
         {/* WinQuest Analysis — opportunities only */}
         {isSam && !isDib && (
           <div style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-              color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.12em', marginBottom: 10 }}>
+            <div
+              onClick={() => setAnalysisOpen(o => !o)}
+              style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+                color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.12em',
+                marginBottom: analysisOpen ? 10 : 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                cursor: 'pointer', userSelect: 'none' }}>
               WinQuest Analysis
+              <span style={{ fontSize: 14, fontWeight: 400, letterSpacing: 0, opacity: 0.7 }}>
+                {analysisOpen ? '▲' : '▼'}
+              </span>
             </div>
-            {(() => {
+            {analysisOpen && (() => {
               const analysis = scores.llm_analysis
               const sectionLabel = (txt) => (
                 <div style={{ fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
@@ -2766,6 +2794,7 @@ ${analysisHtml}
                 ⬇ Download Brief
               </button>
             </div>
+            }
           </div>
         )}
 
