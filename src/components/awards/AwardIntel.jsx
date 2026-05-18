@@ -35,6 +35,7 @@ export default function AwardIntel({ signalId, oipId }) {
   const { recipients, summary, loading, hasData } = useAwards(signalId, oipId)
   const [activeQuestion, setActiveQuestion] = useState(null)
   const [open, setOpen] = useState(true)
+  const [showAll, setShowAll] = useState(false)
 
   const lbl = (txt) => (
     <div style={{
@@ -92,7 +93,6 @@ export default function AwardIntel({ signalId, oipId }) {
 
   const conf   = CONFIDENCE_COLORS[summary.match_confidence] || CONFIDENCE_COLORS.low
   const top    = recipients[0] || {}
-  const [showAll, setShowAll] = useState(false)
   const topN   = showAll ? recipients : recipients.slice(0, 5)
   const repeat = recipients.filter(r => r.award_count >= 2)
 
