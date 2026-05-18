@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import AwardIntel from './components/awards/AwardIntel'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import { AuthProvider, useAuth } from './lib/auth'
@@ -2961,6 +2962,11 @@ ${analysisHtml}
             )}
           </div>
         </>}
+
+        {/* Award Intelligence — SAM opportunities only */}
+        {isSam && !isDib && (
+          <AwardIntel signalId={os.signal_id} oipId={os.oip_id} />
+        )}
 
         {/* Contact Section — SLED signals */}
         {!isSam && (
