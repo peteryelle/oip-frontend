@@ -2729,6 +2729,21 @@ ${analysisHtml}
                 {analysisOpen ? '▲' : '▼'}
               </span>
             </div>
+            {!analysisOpen && (
+              <div style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
+                marginTop: 6, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                {scores.recommendation && (
+                  <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{scores.recommendation}</span>
+                )}
+                {scores.technical_fit != null && (
+                  <span style={{ color: 'var(--ink-fade)' }}>Fit: {scores.technical_fit}/100</span>
+                )}
+                {scores.bid_risk && (
+                  <span style={{ color: 'var(--ink-fade)' }}>· {scores.bid_risk}</span>
+                )}
+                <span style={{ color: 'var(--ink-fade)', fontSize: 11 }}>— click to expand</span>
+              </div>
+            )}
             {analysisOpen && (() => {
               const analysis = scores.llm_analysis
               const sectionLabel = (txt) => (
@@ -2780,21 +2795,22 @@ ${analysisHtml}
                 </div>
               )
             })()}
-            <div style={{ marginTop: 10, textAlign: 'right' }}>
-              <button
-                onClick={handleDownloadBrief}
-                style={{
-                  background: 'none', border: '1px solid var(--primary)',
-                  color: 'var(--primary)', borderRadius: 4, padding: '5px 14px',
-                  fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
-                  fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase',
-                  cursor: 'pointer',
-                }}
-              >
-                ⬇ Download Brief
-              </button>
-            </div>
-            }
+            {analysisOpen && (
+              <div style={{ marginTop: 10, textAlign: 'right' }}>
+                <button
+                  onClick={handleDownloadBrief}
+                  style={{
+                    background: 'none', border: '1px solid var(--primary)',
+                    color: 'var(--primary)', borderRadius: 4, padding: '5px 14px',
+                    fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                    fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ⬇ Download Brief
+                </button>
+              </div>
+            )}
           </div>
         )}
 
