@@ -2534,8 +2534,8 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
 
   const divider = <hr style={{ border: 'none', borderTop: '1px solid var(--rule)', margin: '20px 0' }} />
   const lbl = (txt) => (
-    <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-      textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 10 }}>
+    <div style={{ fontSize: 20, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+      textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink)', marginBottom: 14 }}>
       {txt}
     </div>
   )
@@ -2545,7 +2545,7 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
         color: 'var(--ink-light)', textTransform: 'uppercase', letterSpacing: '.06em', verticalAlign: 'top' }}>
         {label}
       </td>
-      <td style={{ padding: '8px 0 8px 16px', fontSize: 15, color: 'var(--ink)' }}>{value}</td>
+      <td style={{ padding: '8px 0 8px 16px', fontSize: 17, color: 'var(--ink)' }}>{value}</td>
     </tr>
   )
 
@@ -2692,8 +2692,8 @@ ${analysisHtml}
         {/* Why This Signal Matters — immediately below title */}
         {isSam && !isDib && os.match_reason && (
           <div style={{ marginBottom: 16, marginTop: 8 }}>
-            <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 8 }}>
+            <div style={{ fontSize: 20, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink)', marginBottom: 12 }}>
               Why This Signal Matters
             </div>
             <div style={{ fontSize: 17, lineHeight: 1.75, color: 'var(--ink)', fontWeight: 500,
@@ -2735,8 +2735,8 @@ ${analysisHtml}
           <div style={{ marginBottom: 24 }}>
             <div
               onClick={() => setAnalysisOpen(o => !o)}
-              style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
-                color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.12em',
+              style={{ fontSize: 20, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
+                color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '.08em',
                 marginBottom: analysisOpen ? 10 : 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 cursor: 'pointer', userSelect: 'none' }}>
@@ -2980,7 +2980,12 @@ ${analysisHtml}
 
         {/* Award Intelligence — SAM opportunities only */}
         {isSam && !isDib && (
-          <AwardIntel signalId={os.signal_id} oipId={os.oip_id} />
+          <AwardIntel
+            signalId={os.signal_id}
+            oipId={os.oip_id}
+            responseDeadline={meta.response_deadline}
+            signalTitle={sig.title}
+          />
         )}
 
         {/* Contact Section — SLED signals */}
