@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
+import PipelineRadar from './components/radar/PipelineRadar'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import { AuthProvider, useAuth } from './lib/auth'
@@ -38,6 +39,7 @@ export default function App() {
               <Route path="settings/integrations" element={<IntegrationsPage />} />
               <Route path="account" element={<AccountPage />} />
               <Route path="help" element={<HelpPage />} />
+              <Route path="radar" element={<PipelineRadarPage />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -120,6 +122,7 @@ function Layout() {
     path.startsWith('/objectives') ? 'objectives' :
     path.startsWith('/sentinel') ? 'sentinel' :
     path.startsWith('/pursued') ? 'pursued' :
+    path.startsWith('/radar') ? 'radar' :
     path.startsWith('/settings') ? 'settings' : ''
 
   return (
@@ -142,6 +145,9 @@ function Layout() {
         <Link to="/objectives" className={`sec-nav-btn ${activeSection === 'objectives' ? 'active' : ''}`}>Business Objectives</Link>
         <Link to="/sentinel"   className={`sec-nav-btn ${activeSection === 'sentinel' ? 'active' : ''}`}>Sentinel</Link>
         <Link to="/pursued"    className={`sec-nav-btn ${activeSection === 'pursued' ? 'active' : ''}`}>Pursued</Link>
+        {selectedOip?.verticals?.slug === 'sam' && (
+          <Link to="/radar" className={`sec-nav-btn ${activeSection === 'radar' ? 'active' : ''}`}>Pipeline Radar</Link>
+        )}
         <Link to="/help"       className={`sec-nav-btn ${path.startsWith('/help') ? 'active' : ''}`}>User Guide</Link>
       </nav>
 
@@ -167,6 +173,11 @@ function Layout() {
       <FloatingHelpButton />
     </div>
   )
+}
+
+function PipelineRadarPage() {
+  const { selectedOipId } = useOip()
+  return <PipelineRadar supabase={supabase} oipId={selectedOipId} />
 }
 
 function FloatingHelpButton() {
@@ -312,6 +323,7 @@ function viewLabel(section) {
     objectives: 'Business Objectives',
     sentinel: 'Sentinel',
     pursued: 'Pursued Pipeline',
+    radar: 'Pipeline Radar',
     settings: 'Settings',
     help: 'User Guide',
   }
