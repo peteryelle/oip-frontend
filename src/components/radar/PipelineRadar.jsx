@@ -12,9 +12,9 @@ const fmt = new Intl.NumberFormat('en-US', {
 })
 
 const BUCKETS = [
-  { key: '0-9mo',  label: '0–9 Months',  urgency: 'high' },
-  { key: '9-18mo', label: '9–18 Months', urgency: 'mid'  },
-  { key: '18mo+',  label: '18+ Months',  urgency: 'low'  },
+  { key: '0-9mo',  label: 'Bid Alert',       sublabel: 'RFP imminent or live',                urgency: 'alert'  },
+  { key: '9-18mo', label: 'Active Pursuit',   sublabel: 'Sources Sought active, RFP incoming', urgency: 'active' },
+  { key: '18mo+',  label: 'Early Position',   sublabel: 'Relationship and positioning window', urgency: 'early'  },
 ]
 
 export default function PipelineRadar({ supabase, oipId }) {
@@ -69,7 +69,7 @@ export default function PipelineRadar({ supabase, oipId }) {
         <div className="hero-eyebrow">Federal Recompete Intelligence</div>
         <h1 className="hero-title">Pipeline Radar</h1>
         <p className="hero-sub">
-          Federal contracts expiring within {config?.pop_horizon_months ?? 18} months — scored by incumbent health
+          Federal contracts expiring within {config?.pop_horizon_months ?? 36} months — scored by incumbent health
         </p>
       </div>
 
@@ -106,7 +106,6 @@ export default function PipelineRadar({ supabase, oipId }) {
         gap:            16,
         marginBottom:   24
       }}>
-        {/* Stats */}
         <div style={{
           display:      'flex',
           gap:          40,
@@ -119,7 +118,6 @@ export default function PipelineRadar({ supabase, oipId }) {
           <Stat label="Pipeline Value" value={fmt.format(totalValue)} />
         </div>
 
-        {/* Score range filter */}
         <div style={{
           display:      'flex',
           alignItems:   'center',
@@ -139,52 +137,26 @@ export default function PipelineRadar({ supabase, oipId }) {
           }}>
             Health Score
           </span>
-          <input
-            type="number"
-            min={0} max={100}
-            value={scoreMin}
-            onChange={e => setScoreMin(Number(e.target.value))}
-            style={inputStyle}
-          />
-          <span style={{
-            fontFamily: "'IBM Plex Mono', monospace",
-            fontSize:   17,
-            color:      'var(--ink-fade)'
-          }}>
-            –
-          </span>
-          <input
-            type="number"
-            min={0} max={100}
-            value={scoreMax}
-            onChange={e => setScoreMax(Number(e.target.value))}
-            style={inputStyle}
-          />
+          <input type="number" min={0} max={100} value={scoreMin}
+            onChange={e => setScoreMin(Number(e.target.value))} style={inputStyle} />
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 17, color: 'var(--ink-fade)' }}>–</span>
+          <input type="number" min={0} max={100} value={scoreMax}
+            onChange={e => setScoreMax(Number(e.target.value))} style={inputStyle} />
           {(scoreMin > 0 || scoreMax < 100) && (
-            <button
-              onClick={() => { setScoreMin(0); setScoreMax(100) }}
-              style={{
-                background: 'none',
-                border:     'none',
-                cursor:     'pointer',
-                color:      'var(--ink-fade)',
-                fontSize:   22,
-                lineHeight: 1,
-                padding:    0
-              }}
-              title="Clear filter"
-            >
+            <button onClick={() => { setScoreMin(0); setScoreMax(100) }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-fade)', fontSize: 22, lineHeight: 1, padding: 0 }}>
               ×
             </button>
           )}
         </div>
       </div>
 
-      {/* Bucket panels */}
-      {BUCKETS.map(bucket => (
+      {/* Bucket panels — Early Position first (longest runway) */}
+      {[...BUCKETS].reverse().map(bucket => (
         <RadarBucketPanel
           key={bucket.key}
           title={bucket.label}
+          sublabel={bucket.sublabel}
           urgency={bucket.urgency}
           signals={byBucket[bucket.key] || []}
           onScoreClick={setActiveSignal}
@@ -193,25 +165,16 @@ export default function PipelineRadar({ supabase, oipId }) {
 
       {filtered.length === 0 && !loading && (
         <div style={{
-          textAlign:    'center',
-          padding:      '48px 24px',
-          fontSize:     18,
-          color:        'var(--ink-fade)',
-          fontStyle:    'italic',
-          background:   'var(--paper)',
-          border:       '1px solid var(--rule)',
-          borderRadius: 4
+          textAlign: 'center', padding: '48px 24px', fontSize: 18,
+          color: 'var(--ink-fade)', fontStyle: 'italic',
+          background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4
         }}>
           No contracts match the current filter.
         </div>
       )}
 
-      {/* Drawer */}
       {activeSignal && (
-        <RadarDrawer
-          signal={activeSignal}
-          onClose={() => setActiveSignal(null)}
-        />
+        <RadarDrawer signal={activeSignal} onClose={() => setActiveSignal(null)} />
       )}
     </div>
   )
@@ -220,30 +183,17 @@ export default function PipelineRadar({ supabase, oipId }) {
 function ConfigTag({ label, value }) {
   return (
     <div style={{
-      display:      'flex',
-      alignItems:   'center',
-      gap:          8,
-      padding:      '6px 16px',
-      background:   'var(--bg)',
-      border:       '1px solid var(--rule)',
-      borderRadius: 2
+      display: 'flex', alignItems: 'center', gap: 8,
+      padding: '6px 16px', background: 'var(--bg)',
+      border: '1px solid var(--rule)', borderRadius: 2
     }}>
       <span style={{
-        fontFamily:    "'IBM Plex Mono', monospace",
-        fontSize:      13,
-        fontWeight:    600,
-        textTransform: 'uppercase',
-        letterSpacing: '0.08em',
-        color:         'var(--ink-fade)'
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 600,
+        textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-fade)'
       }}>
         {label}
       </span>
-      <span style={{
-        fontFamily: "'IBM Plex Mono', monospace",
-        fontSize:   16,
-        color:      'var(--ink)',
-        fontWeight: 600
-      }}>
+      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 16, color: 'var(--ink)', fontWeight: 600 }}>
         {value}
       </span>
     </div>
@@ -254,23 +204,14 @@ function Stat({ label, value }) {
   return (
     <div>
       <div style={{
-        fontFamily:    "'IBM Plex Mono', monospace",
-        fontSize:      14,
-        fontWeight:    600,
-        letterSpacing: '0.08em',
-        textTransform: 'uppercase',
-        color:         'var(--ink-fade)',
-        marginBottom:  8
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, fontWeight: 600,
+        letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-fade)', marginBottom: 8
       }}>
         {label}
       </div>
       <div style={{
-        fontFamily:         "'IBM Plex Mono', monospace",
-        fontSize:           34,
-        fontWeight:         500,
-        color:              'var(--ink)',
-        letterSpacing:      '-0.04em',
-        fontVariantNumeric: 'tabular-nums'
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: 34, fontWeight: 500,
+        color: 'var(--ink)', letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums'
       }}>
         {value}
       </div>
@@ -279,13 +220,8 @@ function Stat({ label, value }) {
 }
 
 const inputStyle = {
-  width:        68,
-  padding:      '8px 10px',
-  background:   'var(--bg)',
-  border:       '1px solid var(--rule-strong)',
-  borderRadius: 3,
-  color:        'var(--ink)',
-  fontFamily:   "'IBM Plex Mono', monospace",
-  fontSize:     17,
-  textAlign:    'center'
+  width: 68, padding: '8px 10px', background: 'var(--bg)',
+  border: '1px solid var(--rule-strong)', borderRadius: 3,
+  color: 'var(--ink)', fontFamily: "'IBM Plex Mono', monospace",
+  fontSize: 17, textAlign: 'center'
 }
