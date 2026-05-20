@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
 import PipelineRadar from './components/radar/PipelineRadar'
+import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
+import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import { AuthProvider, useAuth } from './lib/auth'
@@ -1123,7 +1125,7 @@ function WeeklyUpdatePage() {
 // ────────────────────────────────────────────────────────────────────────────
 
 function MarketReviewPage() {
-  const { selectedOip } = useOip()
+  const { selectedOip, oips } = useOip()
   const [signals, setSignals] = useState([])
   const [loading, setLoading] = useState(true)
   const [tierFilter, setTierFilter] = useState('')
@@ -1137,6 +1139,16 @@ function MarketReviewPage() {
   // Read entity filter from URL
   const params = new URLSearchParams(useLocation().search)
   const entityFilter = params.get('entity')
+
+  // Multi-vertical: detect if tenant spans more than one vertical
+  const uniqueVerticals = [...new Set((oips || []).map(o => o.vertical_id))]
+  const isMultiVertical = uniqueVerticals.length > 1
+
+  // Multi-vertical hook — only active when tenant has multiple verticals
+  const {
+    signals: mvSignals,
+    loading: mvLoading,
+  } = useMultiVerticalSignals(isMultiVertical ? oips : [], statusFilter)
 
   useEffect(() => {
     if (!selectedOip) return
@@ -1333,8 +1345,17 @@ function MarketReviewPage() {
 
       {loading ? <SectionLoader /> : (
         <>
-          {/* SLED: Entity Board */}
-          {!isSam && (
+          {/* Multi-vertical: unified signal list across all OIPs */}
+          {!isSam && isMultiVertical && (
+            <MultiVerticalSignalList
+              signals={mvSignals}
+              loading={mvLoading}
+              onSignalClick={setOpenSignal}
+            />
+          )}
+
+          {/* SLED: Entity Board — single-vertical tenants only */}
+          {!isSam && !isMultiVertical && (
             <EntityBoard signals={signals} onEntityClick={name => setOpenEntity(name)} />
           )}
           {/* SAM unchanged */}
@@ -2426,8 +2447,11 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const sig    = os.signals || {}
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
-  const isSam  = !sig.state && sig.source_name === 'SAM.gov'
-  const isDib  = isSam && meta.signal_type === 'award'
+  const isSam    = !sig.state && sig.source_name === 'SAM.gov'
+  const isDib    = isSam && meta.signal_type === 'award'
+  const isOe417  = sig.source === 'oe417'  || sig.source_name === 'DOE OE-417'
+  const isGrants = sig.source === 'grants.gov' || sig.source_name === 'Grants.gov'
+  const isPuc    = sig.source === 'puc'
   const [aiSummary, setAiSummary] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [enriched, setEnriched] = useState(null)  // on-demand entity data
@@ -2673,15 +2697,83 @@ ${analysisHtml}
             ? <>DIB PROSPECT · {meta.department_name?.split('.')[0] || 'Federal'}</>
             : isSam
               ? <>{meta.notice_type || 'SAM.GOV'} · {meta.department_name?.split('.')[0] || 'Federal'}</>
-              : <>{sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
+              : isOe417
+                ? <>DOE OE-417 · {meta.event_type || 'Grid Disturbance'} · {meta.nerc_region || 'WECC'}</>
+                : isGrants
+                  ? <>GRANTS.GOV · {meta.agency_name || 'Federal Agency'}</>
+                  : isPuc
+                    ? <>PUC · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
+                    : <>{sig.source || sig.source_name || sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
           }
         </div>
 
-        {/* Title */}
+        {/* Title / Entity */}
         <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 28, marginBottom: 4,
           lineHeight: 1.3, color: 'var(--ink)', fontWeight: 600 }}>
-          {isDib ? (displayMeta.company_name || displayMeta.entity_legal_name || sig.title) : sig.title}
+          {isDib
+            ? (displayMeta.company_name || displayMeta.entity_legal_name || sig.title || os.text_excerpt?.substring(0, 80))
+            : isOe417
+              ? (meta.area_affected || sig.title || os.text_excerpt?.substring(0, 80))
+              : isGrants
+                ? (meta.agency_name || sig.title || os.text_excerpt?.substring(0, 80))
+                : (sig.title || os.text_excerpt?.substring(0, 80) || '(untitled)')}
         </h2>
+
+        {/* OE-417: event title below entity */}
+        {isOe417 && sig.title && sig.title !== meta.area_affected && (
+          <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
+            {sig.title}
+          </div>
+        )}
+
+        {/* Grants: opportunity title below agency */}
+        {isGrants && (sig.title || os.text_excerpt) && (
+          <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
+            {sig.title || os.text_excerpt?.substring(0, 120)}
+          </div>
+        )}
+
+        {/* OE-417: key stats */}
+        {isOe417 && (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8, marginTop: 2 }}>
+            {meta.demand_loss_mw && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                {meta.demand_loss_mw} MW lost
+              </span>
+            )}
+            {meta.customers_affected && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                · {Number(meta.customers_affected).toLocaleString()} customers
+              </span>
+            )}
+            {meta.date_event_began && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                · {meta.date_event_began}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Grants: opportunity number and close date */}
+        {isGrants && (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8, marginTop: 2 }}>
+            {meta.opportunity_number && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                #{meta.opportunity_number}
+              </span>
+            )}
+            {meta.close_date && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                · Closes {meta.close_date}
+              </span>
+            )}
+            {meta.opportunity_status && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                · {meta.opportunity_status}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Solicitation # and Agency — SAM opportunities only */}
         {isSam && !isDib && (
@@ -3115,12 +3207,40 @@ ${analysisHtml}
         )}
 
         {/* View source document */}
-        {(isSam ? (meta.ui_link || sig.doc_url) : sig.doc_url) && (
+        {(isSam ? (meta.ui_link || sig.doc_url) : sig.doc_url) && !isOe417 && !isGrants && (
           <div style={{ marginBottom: 20 }}>
             <a href={isSam ? (meta.ui_link || sig.doc_url) : sig.doc_url}
               target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
-              {isSam ? 'View on SAM.gov →' : 'View source document →'}
+              {isSam ? 'View on SAM.gov →' : isPuc ? 'View PUC document →' : 'View source document →'}
+            </a>
+          </div>
+        )}
+
+        {/* OE-417: link to Open Energy Hub filtered to this specific event */}
+        {isOe417 && (
+          <div style={{ marginBottom: 20 }}>
+            <a href={(() => {
+              const base = 'https://openenergyhub.ornl.gov/explore/dataset/oe-417-annual-summaries/table/'
+              const params = new URLSearchParams({ sort: 'date_event_began' })
+              if (meta.area_affected) params.append('refine', `area_affected:${meta.area_affected}`)
+              if (meta.date_event_began) params.append('refine', `date_event_began:${meta.date_event_began}`)
+              return `${base}?${params.toString()}`
+            })()}
+              target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+              View event on Open Energy Hub →
+            </a>
+          </div>
+        )}
+
+        {/* Grants: always show link — construct from opportunity number if doc_url missing */}
+        {isGrants && (sig.doc_url || meta.opportunity_number) && (
+          <div style={{ marginBottom: 20 }}>
+            <a href={sig.doc_url || `https://grants.gov/search-results-detail/${meta.opportunity_number}`}
+              target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+              View on Grants.gov →
             </a>
           </div>
         )}
