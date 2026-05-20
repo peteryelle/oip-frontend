@@ -2763,8 +2763,8 @@ ${analysisHtml}
           </div>
         )}
 
-        {/* NERC: event title below utility name */}
-        {isNerc && sig.title && sig.title !== primaryEntity?.entity_name && (
+        {/* NERC: event title below utility name — only once entity loaded */}
+        {isNerc && primaryEntity && sig.title && sig.title !== primaryEntity.entity_name && (
           <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
             {sig.title}
           </div>
@@ -3157,8 +3157,8 @@ ${analysisHtml}
           />
         )}
 
-        {/* Contact Section — SLED signals */}
-        {!isSam && (
+        {/* Contact Section — SLED signals only (have a two-letter state) */}
+        {!isSam && sig.state && sig.state.length === 2 && (
           <>
             {divider}
             <div style={{ marginBottom: 20 }}>
@@ -3261,8 +3261,8 @@ ${analysisHtml}
           </div>
         )}
 
-        {/* SLED excerpt */}
-        {!isSam && os.text_excerpt && (
+        {/* SLED excerpt — only for state-partitioned (SLED) signals */}
+        {!isSam && sig.state && sig.state.length === 2 && os.text_excerpt && (
           <div style={{ marginBottom: 20 }}>
             {lbl('Excerpt')}
             <div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--ink-light)', whiteSpace: 'pre-wrap' }}>
@@ -3271,55 +3271,67 @@ ${analysisHtml}
           </div>
         )}
 
-        {/* View source document */}
-        {(isSam ? (meta.ui_link || sig.doc_url) : sig.doc_url) && !isOe417 && !isGrants && (
-          <div style={{ marginBottom: 20 }}>
-            <a href={isSam ? (meta.ui_link || sig.doc_url) : sig.doc_url}
-              target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
-              {isSam ? 'View on SAM.gov →' : isPuc ? 'View PUC document →' : 'View source document →'}
-            </a>
-          </div>
-        )}
-
-        {/* OE-417: link to Open Energy Hub filtered to this specific event */}
-        {isOe417 && (
-          <div style={{ marginBottom: 20 }}>
-            <a href={(() => {
-              const base = 'https://openenergyhub.ornl.gov/explore/dataset/oe-417-annual-summaries/table/'
-              const params = new URLSearchParams({ sort: 'date_event_began' })
-              if (meta.area_affected) params.append('refine', `area_affected:${meta.area_affected}`)
-              if (meta.date_event_began) params.append('refine', `date_event_began:${meta.date_event_began}`)
-              return `${base}?${params.toString()}`
-            })()}
-              target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
-              View event on Open Energy Hub →
-            </a>
-          </div>
-        )}
-
-        {/* NERC: link to NERC Event Analysis library */}
-        {isNerc && (
-          <div style={{ marginBottom: 20 }}>
-            <a href={sig.doc_url || 'https://www.nerc.com/pa/rrm/ea/Pages/default.aspx'}
-              target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
-              View NERC Event Analysis →
-            </a>
-          </div>
-        )}
-
-        {/* Grants: always show link — construct from opportunity number if doc_url missing */}
-        {isGrants && (sig.doc_url || meta.opportunity_number) && (
-          <div style={{ marginBottom: 20 }}>
-            <a href={sig.doc_url || `https://grants.gov/search-results-detail/${meta.opportunity_number}`}
-              target="_blank" rel="noopener noreferrer"
-              style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
-              View on Grants.gov →
-            </a>
-          </div>
-        )}
+        {/* Source link — consolidated for all verticals */}
+        {(() => {
+          if (isSam) {
+            const url = meta.ui_link || sig.doc_url
+            return url ? (
+              <div style={{ marginBottom: 20 }}>
+                <a href={url} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+                  View on SAM.gov →
+                </a>
+              </div>
+            ) : null
+          }
+          if (isOe417) {
+            const base = 'https://openenergyhub.ornl.gov/explore/dataset/oe-417-annual-summaries/table/'
+            const params = new URLSearchParams({ sort: 'date_event_began' })
+            if (meta.area_affected) params.append('refine', `area_affected:${meta.area_affected}`)
+            if (meta.date_event_began) params.append('refine', `date_event_began:${meta.date_event_began}`)
+            return (
+              <div style={{ marginBottom: 20 }}>
+                <a href={`${base}?${params.toString()}`} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+                  View event on Open Energy Hub →
+                </a>
+              </div>
+            )
+          }
+          if (isNerc) {
+            return (
+              <div style={{ marginBottom: 20 }}>
+                <a href={sig.doc_url || 'https://www.nerc.com/pa/rrm/ea/Pages/default.aspx'}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+                  View NERC Event Analysis →
+                </a>
+              </div>
+            )
+          }
+          if (isGrants) {
+            const url = sig.doc_url || (meta.opportunity_number ? `https://grants.gov/search-results-detail/${meta.opportunity_number}` : null)
+            return url ? (
+              <div style={{ marginBottom: 20 }}>
+                <a href={url} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+                  View on Grants.gov →
+                </a>
+              </div>
+            ) : null
+          }
+          if (sig.doc_url) {
+            return (
+              <div style={{ marginBottom: 20 }}>
+                <a href={sig.doc_url} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+                  {isPuc ? 'View PUC document →' : 'View source document →'}
+                </a>
+              </div>
+            )
+          }
+          return null
+        })()}
 
         {divider}
 
