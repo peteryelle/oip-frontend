@@ -1161,8 +1161,7 @@ function MarketReviewPage() {
           oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
           match_reason, text_excerpt, status, notes, scored_at, scores, matched_sentinels,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
-                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata,
-                              signal_entities (entity_name, entity_type, entity_state))
+                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata)
         `)
         .eq('oip_id', selectedOip.id)
         .order('scored_at', { ascending: false })
@@ -1957,7 +1956,6 @@ function SignalCard({ os, onClick }) {
   const isOe417Card  = sig.source === 'oe417'
   const isNercCard   = sig.source === 'nerc_ea'
   const isGrantsCard = sig.source === 'grants.gov' || sig.source === 'grants'
-  const primaryEntity = sig.signal_entities?.[0]
   const tierClass = os.signal_tier === 'tier1_strong' ? 'tier-strong' : os.signal_tier === 'tier1' ? 'tier-1' : 'tier-2'
 
   return (
@@ -1976,19 +1974,18 @@ function SignalCard({ os, onClick }) {
             ) : isOe417Card ? (
               <>
                 <span>OE-417</span>
-                {primaryEntity?.entity_name && <><span>·</span><span>{primaryEntity.entity_name}</span></>}
                 {meta.event_type && <><span>·</span><span>{meta.event_type}</span></>}
+                {meta.date_event_began && <><span>·</span><span>{meta.date_event_began}</span></>}
               </>
             ) : isNercCard ? (
               <>
                 <span>NERC</span>
-                {primaryEntity?.entity_name && <><span>·</span><span>{primaryEntity.entity_name}</span></>}
                 {meta.event_type && <><span>·</span><span>{meta.event_type}</span></>}
+                {meta.nerc_region && <><span>·</span><span>{meta.nerc_region}</span></>}
               </>
             ) : isGrantsCard ? (
               <>
                 <span>GRANTS.GOV</span>
-                {primaryEntity?.entity_name && <><span>·</span><span>{primaryEntity.entity_name}</span></>}
                 {meta.close_date && <><span>·</span><span>Closes {meta.close_date}</span></>}
               </>
             ) : (
@@ -2470,7 +2467,6 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const sig    = os.signals || {}
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
-  const primaryEntity = sig.signal_entities?.[0]
   const isSam    = !sig.state && sig.source_name === 'SAM.gov'
   const isDib    = isSam && meta.signal_type === 'award'
   const isOe417  = sig.source === 'oe417'  || sig.source_name === 'DOE OE-417'
@@ -2483,6 +2479,18 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const [contactInfo, setContactInfo] = useState(null)
   const [contactLoading, setContactLoading] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(true)
+  const [primaryEntity, setPrimaryEntity] = useState(null)
+
+  // Fetch signal_entities on-demand when drawer opens
+  useEffect(() => {
+    if (!os.signal_id) { setPrimaryEntity(null); return }
+    supabase
+      .from('signal_entities')
+      .select('entity_name, entity_type, entity_state')
+      .eq('signal_id', os.signal_id)
+      .limit(1)
+      .then(({ data }) => setPrimaryEntity(data?.[0] ?? null))
+  }, [os.signal_id])
 
   // On-demand enrichment — fetch company details if not already in metadata
   useEffect(() => {
