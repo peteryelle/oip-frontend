@@ -2581,9 +2581,9 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
     .finally(() => setAiLoading(false))
   }, [os.signal_id])
 
-  // Contact fetch — SLED signals only
+  // Contact fetch — SLED signals only (only SLED has a two-letter state code)
   useEffect(() => {
-    if (isSam || isOe417 || isNerc || isGrants) return
+    if (!sig.state || sig.state.length !== 2 || isSam) return
     if (!os.signal_id || !os.oip_id) return
     setContactInfo(null)
     setContactLoading(true)
