@@ -1955,6 +1955,7 @@ function SignalCard({ os, onClick }) {
   const isSam  = !sig.state && sig.source_name === 'SAM.gov'
   const isDib  = isSam && (meta.signal_type === 'award')
   const isOe417Card  = sig.source === 'oe417'
+  const isNercCard   = sig.source === 'nerc_ea'
   const isGrantsCard = sig.source === 'grants.gov' || sig.source === 'grants'
   const primaryEntity = sig.signal_entities?.[0]
   const tierClass = os.signal_tier === 'tier1_strong' ? 'tier-strong' : os.signal_tier === 'tier1' ? 'tier-1' : 'tier-2'
@@ -1975,6 +1976,12 @@ function SignalCard({ os, onClick }) {
             ) : isOe417Card ? (
               <>
                 <span>OE-417</span>
+                {primaryEntity?.entity_name && <><span>·</span><span>{primaryEntity.entity_name}</span></>}
+                {meta.event_type && <><span>·</span><span>{meta.event_type}</span></>}
+              </>
+            ) : isNercCard ? (
+              <>
+                <span>NERC</span>
                 {primaryEntity?.entity_name && <><span>·</span><span>{primaryEntity.entity_name}</span></>}
                 {meta.event_type && <><span>·</span><span>{meta.event_type}</span></>}
               </>
@@ -2467,6 +2474,7 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const isSam    = !sig.state && sig.source_name === 'SAM.gov'
   const isDib    = isSam && meta.signal_type === 'award'
   const isOe417  = sig.source === 'oe417'  || sig.source_name === 'DOE OE-417'
+  const isNerc   = sig.source === 'nerc_ea' || sig.source_name === 'NERC Event Analysis'
   const isGrants = sig.source === 'grants.gov' || sig.source_name === 'Grants.gov'
   const isPuc    = sig.source === 'puc'
   const [aiSummary, setAiSummary] = useState(null)
@@ -2565,9 +2573,9 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
     .finally(() => setAiLoading(false))
   }, [os.signal_id])
 
-  // Contact fetch — SLED signals only (not SAM)
+  // Contact fetch — SLED signals only
   useEffect(() => {
-    if (isSam) return
+    if (isSam || isOe417 || isNerc || isGrants) return
     if (!os.signal_id || !os.oip_id) return
     setContactInfo(null)
     setContactLoading(true)
@@ -2716,11 +2724,13 @@ ${analysisHtml}
               ? <>{meta.notice_type || 'SAM.GOV'} · {meta.department_name?.split('.')[0] || 'Federal'}</>
               : isOe417
                 ? <>DOE OE-417 · {meta.event_type || 'Grid Disturbance'} · {meta.nerc_region || 'WECC'}</>
-                : isGrants
-                  ? <>GRANTS.GOV · {primaryEntity?.entity_name || meta.agency_name || 'Federal Agency'}</>
-                  : isPuc
-                    ? <>PUC · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
-                    : <>{sig.source || sig.source_name || sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
+                : isNerc
+                  ? <>NERC EVENT ANALYSIS · {meta.event_type || 'Reliability Event'}</>
+                  : isGrants
+                    ? <>GRANTS.GOV · {primaryEntity?.entity_name || meta.agency_name || 'Federal Agency'}</>
+                    : isPuc
+                      ? <>PUC · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
+                      : <>{sig.source || sig.source_name || sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
           }
         </div>
 
@@ -2731,15 +2741,24 @@ ${analysisHtml}
             ? (displayMeta.company_name || displayMeta.entity_legal_name || sig.title || os.text_excerpt?.substring(0, 80))
             : isOe417
               ? (primaryEntity?.entity_name || meta.area_affected || sig.title || os.text_excerpt?.substring(0, 80))
-              : isGrants
-                ? (sig.title || os.text_excerpt?.substring(0, 80))
-                : (sig.title || os.text_excerpt?.substring(0, 80) || '(untitled)')}
+              : isNerc
+                ? (primaryEntity?.entity_name || sig.title || os.text_excerpt?.substring(0, 80))
+                : isGrants
+                  ? (sig.title || os.text_excerpt?.substring(0, 80))
+                  : (sig.title || os.text_excerpt?.substring(0, 80) || '(untitled)')}
         </h2>
 
         {/* OE-417: service area below utility name */}
         {isOe417 && meta.area_affected && meta.area_affected !== primaryEntity?.entity_name && (
           <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
             {meta.area_affected}
+          </div>
+        )}
+
+        {/* NERC: event title below utility name */}
+        {isNerc && sig.title && sig.title !== primaryEntity?.entity_name && (
+          <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
+            {sig.title}
           </div>
         )}
 
@@ -2766,6 +2785,27 @@ ${analysisHtml}
             {meta.date_event_began && (
               <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
                 · {meta.date_event_began}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* NERC: event stats */}
+        {isNerc && (
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8, marginTop: 2 }}>
+            {meta.nerc_region && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                {meta.nerc_region}
+              </span>
+            )}
+            {meta.demand_loss_mw && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                · {meta.demand_loss_mw} MW
+              </span>
+            )}
+            {meta.event_date && (
+              <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+                · {meta.event_date}
               </span>
             )}
           </div>
@@ -3247,6 +3287,17 @@ ${analysisHtml}
               target="_blank" rel="noopener noreferrer"
               style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
               View event on Open Energy Hub →
+            </a>
+          </div>
+        )}
+
+        {/* NERC: link to NERC Event Analysis library */}
+        {isNerc && (
+          <div style={{ marginBottom: 20 }}>
+            <a href={sig.doc_url || 'https://www.nerc.com/pa/rrm/ea/Pages/default.aspx'}
+              target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
+              View NERC Event Analysis →
             </a>
           </div>
         )}
