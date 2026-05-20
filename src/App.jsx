@@ -1161,7 +1161,8 @@ function MarketReviewPage() {
           oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
           match_reason, text_excerpt, status, notes, scored_at, scores, matched_sentinels,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
-                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata)
+                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata,
+                              signal_entities (entity_name, entity_type, entity_state))
         `)
         .eq('oip_id', selectedOip.id)
         .order('scored_at', { ascending: false })
@@ -1953,6 +1954,9 @@ function SignalCard({ os, onClick }) {
   const scores = os.scores || {}
   const isSam  = !sig.state && sig.source_name === 'SAM.gov'
   const isDib  = isSam && (meta.signal_type === 'award')
+  const isOe417Card  = sig.source === 'oe417'
+  const isGrantsCard = sig.source === 'grants.gov' || sig.source === 'grants'
+  const primaryEntity = sig.signal_entities?.[0]
   const tierClass = os.signal_tier === 'tier1_strong' ? 'tier-strong' : os.signal_tier === 'tier1' ? 'tier-1' : 'tier-2'
 
   return (
@@ -1967,6 +1971,18 @@ function SignalCard({ os, onClick }) {
                 <span>{meta.notice_type || 'SAM.gov'}</span>
                 {meta.department_name && <><span>·</span><span>{meta.department_name}</span></>}
                 {meta.response_deadline && <><span>·</span><span>Due {new Date(meta.response_deadline).toLocaleDateString()}</span></>}
+              </>
+            ) : isOe417Card ? (
+              <>
+                <span>OE-417</span>
+                {primaryEntity?.entity_name && <><span>·</span><span>{primaryEntity.entity_name}</span></>}
+                {meta.event_type && <><span>·</span><span>{meta.event_type}</span></>}
+              </>
+            ) : isGrantsCard ? (
+              <>
+                <span>GRANTS.GOV</span>
+                {primaryEntity?.entity_name && <><span>·</span><span>{primaryEntity.entity_name}</span></>}
+                {meta.close_date && <><span>·</span><span>Closes {meta.close_date}</span></>}
               </>
             ) : (
               <>
@@ -2447,6 +2463,7 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const sig    = os.signals || {}
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
+  const primaryEntity = sig.signal_entities?.[0]
   const isSam    = !sig.state && sig.source_name === 'SAM.gov'
   const isDib    = isSam && meta.signal_type === 'award'
   const isOe417  = sig.source === 'oe417'  || sig.source_name === 'DOE OE-417'
@@ -2700,7 +2717,7 @@ ${analysisHtml}
               : isOe417
                 ? <>DOE OE-417 · {meta.event_type || 'Grid Disturbance'} · {meta.nerc_region || 'WECC'}</>
                 : isGrants
-                  ? <>GRANTS.GOV · {meta.agency_name || 'Federal Agency'}</>
+                  ? <>GRANTS.GOV · {primaryEntity?.entity_name || meta.agency_name || 'Federal Agency'}</>
                   : isPuc
                     ? <>PUC · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
                     : <>{sig.source || sig.source_name || sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
@@ -2713,23 +2730,23 @@ ${analysisHtml}
           {isDib
             ? (displayMeta.company_name || displayMeta.entity_legal_name || sig.title || os.text_excerpt?.substring(0, 80))
             : isOe417
-              ? (meta.area_affected || sig.title || os.text_excerpt?.substring(0, 80))
+              ? (primaryEntity?.entity_name || meta.area_affected || sig.title || os.text_excerpt?.substring(0, 80))
               : isGrants
-                ? (meta.agency_name || sig.title || os.text_excerpt?.substring(0, 80))
+                ? (sig.title || os.text_excerpt?.substring(0, 80))
                 : (sig.title || os.text_excerpt?.substring(0, 80) || '(untitled)')}
         </h2>
 
-        {/* OE-417: event title below entity */}
-        {isOe417 && sig.title && sig.title !== meta.area_affected && (
+        {/* OE-417: service area below utility name */}
+        {isOe417 && meta.area_affected && meta.area_affected !== primaryEntity?.entity_name && (
           <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
-            {sig.title}
+            {meta.area_affected}
           </div>
         )}
 
-        {/* Grants: opportunity title below agency */}
-        {isGrants && (sig.title || os.text_excerpt) && (
+        {/* Grants: agency below opportunity title */}
+        {isGrants && (primaryEntity?.entity_name || meta.agency_name) && (
           <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
-            {sig.title || os.text_excerpt?.substring(0, 120)}
+            {primaryEntity?.entity_name || meta.agency_name}
           </div>
         )}
 
