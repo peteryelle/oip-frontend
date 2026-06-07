@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Component } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
 import B2BBusDevTab from './components/awards/B2BBusDevTab'
 import PipelineRadar from './components/radar/PipelineRadar'
@@ -14,6 +14,25 @@ import { USER_GUIDE, HELP_ANCHORS } from './lib/help'
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
 // ────────────────────────────────────────────────────────────────────────────
+
+// Isolates a sub-panel: if a child throws during render, show a small fallback
+// instead of tearing down the whole view (App.jsx has no other error boundary).
+class PanelErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { err: null } }
+  static getDerivedStateFromError(err) { return { err } }
+  componentDidCatch(err, info) { console.error('[WinQuest] panel error:', err, info) }
+  render() {
+    if (this.state.err) {
+      return this.props.fallback ?? (
+        <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+          color: 'var(--ink-fade)', fontStyle: 'italic', padding: '12px 0' }}>
+          This panel couldn’t load.
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 export default function App() {
   return (
@@ -3181,12 +3200,22 @@ ${analysisHtml}
 
         {/* Award Intelligence — SAM opportunities only */}
         {isSam && !isDib && (
-          <AwardIntel
-            signalId={os.signal_id}
-            oipId={os.oip_id}
-            responseDeadline={meta.response_deadline}
-            signalTitle={sig.title}
-          />
+          <PanelErrorBoundary
+            key={os.signal_id}
+            fallback={
+              <div style={{ marginTop: 8, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+                Award intelligence unavailable for this opportunity.
+              </div>
+            }
+          >
+            <AwardIntel
+              signalId={os.signal_id}
+              oipId={os.oip_id}
+              responseDeadline={meta.response_deadline}
+              signalTitle={sig.title}
+            />
+          </PanelErrorBoundary>
         )}
 
         {/* Contact Section — SLED signals only (have a two-letter state) */}
