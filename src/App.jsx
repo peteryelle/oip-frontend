@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
+import B2BBusDevTab from './components/awards/B2BBusDevTab'
 import PipelineRadar from './components/radar/PipelineRadar'
 import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
 import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
@@ -1287,6 +1288,7 @@ function MarketReviewPage() {
           {[
             { key: 'opportunities', label: `Opportunities${samOpportunities.length ? ` (${samOpportunities.length})` : ''}` },
             { key: 'dib', label: `DIB Prospects${samDib.length ? ` (${samDib.length})` : ''}` },
+            { key: 'busdev', label: 'B2B Bus Dev' },
           ].map(tab => (
             <button key={tab.key} onClick={() => setSamTab(tab.key)} style={{
               padding: '10px 20px',
@@ -1360,6 +1362,9 @@ function MarketReviewPage() {
           )}
           {/* SAM unchanged */}
           {isSam && (
+            samTab === 'busdev' ? (
+              <B2BBusDevTab oipId={selectedOip.id} />
+            ) : (
             <>
               <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
                 {filtered.length} {samTab === 'dib' ? 'prospects' : 'opportunities'}
@@ -1377,6 +1382,7 @@ function MarketReviewPage() {
                 <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal} />
               )}
             </>
+            )
           )}
         </>
       )}
