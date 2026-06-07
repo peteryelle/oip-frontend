@@ -1162,7 +1162,7 @@ function MarketReviewPage() {
           oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
           match_reason, text_excerpt, status, notes, scored_at, scores, matched_sentinels,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
-                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata)
+                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind)
         `)
         .eq('oip_id', selectedOip.id)
         .order('scored_at', { ascending: false })
@@ -1242,8 +1242,9 @@ function MarketReviewPage() {
   } : null
 
   // Split SAM signals into opportunities vs DIB prospects
-  const samOpportunities = isSam ? signals.filter(s => (s.signals?.metadata?.signal_type || 'opportunity') === 'opportunity') : signals
-  const samDib           = isSam ? signals.filter(s => s.signals?.metadata?.signal_type === 'award') : []
+  const samBusdev        = isSam ? signals.filter(s => s.signals?.signal_kind === 'award') : []
+  const samOpportunities = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && (s.signals?.metadata?.signal_type || 'opportunity') === 'opportunity') : signals
+  const samDib           = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && s.signals?.metadata?.signal_type === 'award') : []
   useEffect(() => { setSamTab(isDibOip ? 'dib' : 'opportunities') }, [selectedOip?.id])
   const [naicsFilter, setNaicsFilter] = useState('')
   const activeSignals    = isSam ? (samTab === 'dib' ? samDib : samOpportunities) : signals
@@ -1272,7 +1273,7 @@ function MarketReviewPage() {
         <div className="hero-eyebrow">{isSam ? 'SAM.gov' : 'Market Review'}</div>
         <h1 className="hero-title" style={{ fontSize: 30 }}>
           {isSam
-            ? (samTab === 'dib' ? 'DIB Prospects' : 'Federal Opportunities')
+            ? (samTab === 'dib' ? 'DIB Prospects' : samTab === 'busdev' ? 'B2B Bus Dev' : 'Opportunities')
             : (entityFilter ? entityFilter : 'Entity Board')}
         </h1>
         {entityFilter && !isSam && (
@@ -1286,9 +1287,9 @@ function MarketReviewPage() {
       {isSam && (
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--rule)' }}>
           {[
-            { key: 'opportunities', label: `Opportunities${samOpportunities.length ? ` (${samOpportunities.length})` : ''}` },
+            { key: 'opportunities', label: `B2G Opportunities${samOpportunities.length ? ` (${samOpportunities.length})` : ''}` },
+            { key: 'busdev', label: `Bus Dev${samBusdev.length ? ` (${samBusdev.length})` : ''}` },
             { key: 'dib', label: `DIB Prospects${samDib.length ? ` (${samDib.length})` : ''}` },
-            { key: 'busdev', label: 'B2B Bus Dev' },
           ].map(tab => (
             <button key={tab.key} onClick={() => setSamTab(tab.key)} style={{
               padding: '10px 20px',

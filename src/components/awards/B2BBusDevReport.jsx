@@ -56,6 +56,15 @@ export default function B2BBusDevReport({ award }) {
         </div>
       </div>
 
+      <Section title="How this surfaced">
+        <p className="wq-rep-muted">
+          Surfaced from federal award data ({award.agency || "—"}
+          {award.naics ? ` · NAICS ${award.naics}` : ""}), then scored on delivery
+          entailment — not a keyword match.
+        </p>
+        {ent.chain ? <p className="wq-rep-p">{ent.chain}</p> : null}
+      </Section>
+
       <Section title="Why now">
         {award.whyNow ? <p className="wq-rep-p">{award.whyNow}</p> : null}
       </Section>
@@ -129,9 +138,9 @@ export default function B2BBusDevReport({ award }) {
         <button type="button" className="wq-btn" onClick={() => downloadAwardBrief(award)}>
           Download B2B Brief
         </button>
-        {award.url && (
-          <a className="wq-btn wq-btn-ghost" href={award.url} target="_blank" rel="noreferrer">
-            View on USASpending
+        {bd.vendor?.website && (
+          <a className="wq-btn wq-btn-ghost" href={bd.vendor.website} target="_blank" rel="noreferrer">
+            {award.recipient || "Prime"} site
           </a>
         )}
       </div>
