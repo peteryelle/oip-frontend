@@ -1631,8 +1631,7 @@ function SamOpportunityTable({ signals, onRowClick }) {
             <SortTh label="Title" k="title" style={{ minWidth: 280, textAlign: 'left' }} />
             <th style={thSam}>Type</th>
             <SortTh label="Due Date" k="deadline" />
-            <SortTh label="LLM Score" k="scores.llm_relevance" />
-            <SortTh label="Score" k="scores.technical_fit" />
+            <SortTh label="Fit Score" k="scores.llm_relevance" />
             <SortTh label="Risk" k="scores.bid_risk" />
             <th style={thSam}>Sentinel</th>
             <th style={thSam}>Action</th>
@@ -1686,9 +1685,6 @@ function SamOpportunityTable({ signals, onRowClick }) {
 
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
                   <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />
-                </td>
-                <td style={{ padding: '12px 8px', textAlign: 'center' }}>
-                  <ScoreBadge score={scores.technical_fit} />
                 </td>
                 <td style={{ padding: '12px 8px' }}>
                   <RiskBadge risk={scores.bid_risk} />
@@ -2058,7 +2054,7 @@ function SignalCard({ os, onClick }) {
           </div>
 )}
           <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {isSam && scores.technical_fit != null && <ScoreBadge score={scores.technical_fit} />}
+            {isSam && (scores.llm_relevance ?? scores.technical_fit) != null && <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />}
             {isSam && scores.bid_risk && <RiskBadge risk={scores.bid_risk} />}
             {isSam && scores.recommendation && (
               <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -2659,13 +2655,13 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
       {txt}
     </div>
   )
-  const DetailRow = ({ label, value }) => !value ? null : (
+  const DetailRow = ({ label, value, blur }) => !value ? null : (
     <tr>
       <td style={{ padding: '8px 0', width: 130, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
         color: 'var(--ink-light)', textTransform: 'uppercase', letterSpacing: '.06em', verticalAlign: 'top' }}>
         {label}
       </td>
-      <td style={{ padding: '8px 0 8px 16px', fontSize: 17, color: 'var(--ink)' }}>{value}</td>
+      <td className={blur ? 'blurable' : undefined} style={{ padding: '8px 0 8px 16px', fontSize: 17, color: 'var(--ink)' }}>{value}</td>
     </tr>
   )
 
@@ -2775,7 +2771,7 @@ ${analysisHtml}
         }}>×</button>
 
         {/* Eyebrow */}
-        <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-light)',
+        <div className="blurable" style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-light)',
           textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>
           {isDib
             ? <>DIB PROSPECT · {meta.department_name?.split('.')[0] || 'Federal'}</>
@@ -2794,7 +2790,7 @@ ${analysisHtml}
         </div>
 
         {/* Title / Entity */}
-        <h2 style={{ fontFamily: "'Spectral', serif", fontSize: 28, marginBottom: 4,
+        <h2 className="blurable" style={{ fontFamily: "'Spectral', serif", fontSize: 28, marginBottom: 4,
           lineHeight: 1.3, color: 'var(--ink)', fontWeight: 600 }}>
           {isDib
             ? (displayMeta.company_name || displayMeta.entity_legal_name || sig.title || os.text_excerpt?.substring(0, 80))
@@ -2809,21 +2805,21 @@ ${analysisHtml}
 
         {/* OE-417: service area below utility name */}
         {isOe417 && meta.area_affected && meta.area_affected !== primaryEntity?.entity_name && (
-          <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
+          <div className="blurable" style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
             {meta.area_affected}
           </div>
         )}
 
         {/* NERC: event title below utility name — only once entity loaded */}
         {isNerc && primaryEntity && sig.title && sig.title !== primaryEntity.entity_name && (
-          <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
+          <div className="blurable" style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
             {sig.title}
           </div>
         )}
 
         {/* Grants: agency below opportunity title */}
         {isGrants && (primaryEntity?.entity_name || meta.agency_name) && (
-          <div style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
+          <div className="blurable" style={{ fontSize: 15, color: 'var(--ink-light)', marginBottom: 8, lineHeight: 1.4 }}>
             {primaryEntity?.entity_name || meta.agency_name}
           </div>
         )}
@@ -2893,7 +2889,7 @@ ${analysisHtml}
 
         {/* Solicitation # and Agency — SAM opportunities only */}
         {isSam && !isDib && (
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8, marginTop: 2 }}>
+          <div className="blurable" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8, marginTop: 2 }}>
             {meta.solicitation_number && (
               <span style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
                 color: 'var(--ink-fade)', letterSpacing: '.04em' }}>
@@ -2916,7 +2912,7 @@ ${analysisHtml}
               textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink)', marginBottom: 12 }}>
               Why This Signal Matters
             </div>
-            <div style={{ fontSize: 17, lineHeight: 1.75, color: 'var(--ink)', fontWeight: 500,
+            <div className="blurable" style={{ fontSize: 17, lineHeight: 1.75, color: 'var(--ink)', fontWeight: 500,
               padding: '16px 20px', background: 'var(--primary-soft)',
               borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0' }}>
               {os.match_reason}
@@ -2927,7 +2923,7 @@ ${analysisHtml}
         {isDib && (
           <div style={{ marginBottom: 12 }}>
             {displayMeta.entity_website && (
-              <a href={displayMeta.entity_website.startsWith('http') ? displayMeta.entity_website : 'https://' + displayMeta.entity_website}
+              <a className="blurable" href={displayMeta.entity_website.startsWith('http') ? displayMeta.entity_website : 'https://' + displayMeta.entity_website}
                 target="_blank" rel="noopener noreferrer"
                 style={{ fontSize: 13, color: 'var(--primary)', textDecoration: 'none', marginRight: 16 }}>
                 {displayMeta.entity_website} →
@@ -2942,7 +2938,7 @@ ${analysisHtml}
           </div>
         )}
         {isDib && (
-          <div style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 4,
+          <div className="blurable" style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 4,
             fontFamily: "'IBM Plex Mono', monospace" }}>
             {sig.title}
           </div>
@@ -3001,7 +2997,7 @@ ${analysisHtml}
 
               if (analysis?.opportunity || analysis?.concerns || analysis?.gaps) {
                 return (
-                  <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
+                  <div className="blurable" style={{ padding: '14px 16px', background: 'var(--primary-soft)',
                     borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0' }}>
                     {sectionLabel('Opportunity')}
                     {bullets(analysis.opportunity?.bullets)}
@@ -3024,7 +3020,7 @@ ${analysisHtml}
               )
               const fallback = aiSummary || scores.llm_reason
               return (
-                <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
+                <div className="blurable" style={{ padding: '14px 16px', background: 'var(--primary-soft)',
                   borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
                   fontSize: 14, lineHeight: 1.75, color: 'var(--ink)' }}>
                   {fallback || <span style={{ color: 'var(--ink-fade)' }}>—</span>}
@@ -3058,10 +3054,10 @@ ${analysisHtml}
             {lbl('Company Detail')}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
-                <DetailRow label="Legal Name"  value={displayMeta.entity_legal_name} />
-                <DetailRow label="Address"     value={addrStr} />
-                <DetailRow label="CAGE Code"   value={displayMeta.entity_cage_code || meta.uei} />
-                <DetailRow label="UEI"         value={meta.uei} />
+                <DetailRow label="Legal Name"  value={displayMeta.entity_legal_name} blur />
+                <DetailRow label="Address"     value={addrStr} blur />
+                <DetailRow label="CAGE Code"   value={displayMeta.entity_cage_code || meta.uei} blur />
+                <DetailRow label="UEI"         value={meta.uei} blur />
                 <DetailRow label="NAICS Codes" value={(displayMeta.entity_naics_codes || []).slice(0,6).join(', ')} />
                 <DetailRow label="Certs"       value={(displayMeta.entity_certifications || []).join(', ')} />
                 <DetailRow label="Status"      value={displayMeta.entity_status} />
@@ -3075,12 +3071,12 @@ ${analysisHtml}
               {lbl('Point of Contact')}
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <tbody>
-                  <DetailRow label="Name"  value={poc.name} />
+                  <DetailRow label="Name"  value={poc.name} blur />
                   <DetailRow label="Title" value={poc.title} />
                   <DetailRow label="Email" value={poc.email
                     ? <a href={`mailto:${poc.email}`} style={{ color: 'var(--primary)' }}>{poc.email}</a>
-                    : null} />
-                  <DetailRow label="Phone" value={poc.phone} />
+                    : null} blur />
+                  <DetailRow label="Phone" value={poc.phone} blur />
                 </tbody>
               </table>
             </div>
@@ -3092,10 +3088,10 @@ ${analysisHtml}
             {lbl('Award Detail')}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
-                <DetailRow label="Agency"     value={deptDisplay} />
+                <DetailRow label="Agency"     value={deptDisplay} blur />
                 <DetailRow label="Amount"     value={meta.award_amount ? `$${(meta.award_amount/1e6).toFixed(2)}M` : null} />
                 <DetailRow label="Award Date" value={meta.award_date ? new Date(meta.award_date).toLocaleDateString() : null} />
-                <DetailRow label="Contract #" value={meta.contract_number || meta.solicitation_number} />
+                <DetailRow label="Contract #" value={meta.contract_number || meta.solicitation_number} blur />
                 <DetailRow label="NAICS"      value={meta.naics_code} />
               </tbody>
             </table>
@@ -3107,23 +3103,24 @@ ${analysisHtml}
             {lbl('Company Details')}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
-                <DetailRow label="Name"    value={displayMeta.entity_poc?.name || poc.name} />
+                <DetailRow label="Name"    value={displayMeta.entity_poc?.name || poc.name} blur />
                 <DetailRow label="Title"   value={displayMeta.entity_poc?.title || poc.title} />
                 <DetailRow label="Email"   value={(displayMeta.entity_poc?.email || poc.email)
                   ? <a href={`mailto:${displayMeta.entity_poc?.email || poc.email}`}
                       style={{ color: 'var(--primary)' }}>
                       {displayMeta.entity_poc?.email || poc.email}
                     </a>
-                  : null} />
-                <DetailRow label="Phone"   value={displayMeta.entity_poc?.phone || poc.phone} />
+                  : null} blur />
+                <DetailRow label="Phone"   value={displayMeta.entity_poc?.phone || poc.phone} blur />
                 <DetailRow label="Website" value={(displayMeta.entity_website)
                   ? <a href={displayMeta.entity_website.startsWith('http') ? displayMeta.entity_website : 'https://' + displayMeta.entity_website}
                       target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>
                       {displayMeta.entity_website}
                     </a>
-                  : null} />
-                <DetailRow label="Street"  value={displayMeta.entity_address?.street} />
-                <DetailRow label="City"    value={displayMeta.entity_address?.city} />
+                  : null} blur />
+                <DetailRow label="Street"  value={displayMeta.entity_address?.street} blur />
+                <DetailRow label="City"    value={displayMeta.entity_address?.city} blur />
+                <DetailRow label="State"   value={displayMeta.entity_address?.state} />
                 <DetailRow label="State"   value={displayMeta.entity_address?.state} />
               </tbody>
             </table>
@@ -3143,12 +3140,12 @@ ${analysisHtml}
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 <DetailRow label="Type"       value={meta.notice_type} />
-                <DetailRow label="Department" value={deptDisplay} />
+                <DetailRow label="Department" value={deptDisplay} blur />
                 <DetailRow label="NAICS"      value={meta.naics_code} />
                 <DetailRow label="Set-Aside"  value={meta.set_aside_desc || meta.set_aside_code || 'None'} />
                 <DetailRow label="Due Date"   value={meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString() : null} />
                 <DetailRow label="Modified"   value={meta.modified_date ? new Date(meta.modified_date).toLocaleDateString() : null} />
-                <DetailRow label="Contract #" value={meta.solicitation_number} />
+                <DetailRow label="Contract #" value={meta.solicitation_number} blur />
               </tbody>
             </table>
           </div>
@@ -3161,10 +3158,10 @@ ${analysisHtml}
               <tbody>
                 <tr>
                   <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
-                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Technical Fit</td>
+                    color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Fit Score</td>
                   <td style={{ padding: '7px 0 7px 16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ScoreBadge score={scores.technical_fit} />
+                      <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />
                       <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>/ 100</span>
                     </div>
                   </td>
@@ -3184,13 +3181,13 @@ ${analysisHtml}
               </tbody>
             </table>
             {scores.evidence?.length > 0 && (
-              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-light)',
+              <div className="blurable" style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-light)',
                 fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.6 }}>
                 {scores.evidence.join(' · ')}
               </div>
             )}
             {scores.bid_risk_notes?.length > 0 && (
-              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--ink-fade)',
+              <div className="blurable" style={{ marginTop: 6, fontSize: 12, color: 'var(--ink-fade)',
                 fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.6 }}>
                 {scores.bid_risk_notes.join(' · ')}
               </div>
@@ -3249,13 +3246,13 @@ ${analysisHtml}
                       {c.contact_mode === 'named' ? 'Named Contact' : 'Recommended Role'}
                     </span>
                   </div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>
+                  <div className="blurable" style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>
                     {c.full_name || c.title || '—'}
                   </div>
                   {c.full_name && c.title && (
                     <div style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 6 }}>{c.title}</div>
                   )}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+                  <div className="blurable" style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
                     {c.email && (
                       <a href={`mailto:${c.email}`} style={{
                         fontSize: 13, color: 'var(--primary)', textDecoration: 'none',
