@@ -262,3 +262,21 @@
 .wq-atable-amt { font-family: 'IBM Plex Mono', monospace; font-weight: 600; white-space: nowrap; }
 .wq-atable-motion { font-size: 12.5px; color: var(--wq-muted); white-space: nowrap; }
 .wq-score-sm { min-width: 30px; height: 24px; font-size: 13px; padding: 0 7px; }
+
+/* ---- who-to-call links ---- */
+.wq-li-link { color: var(--wq-accent); text-decoration: none; font-weight: 600; font-size: 12.5px; }
+.wq-li-link:hover { text-decoration: underline; }
+.wq-rep-loc { color: var(--wq-muted); font-size: 12.5px; }
+
+/* ---- demo blur mode (toggled by .demo-blur on the app root) ----
+   Injected app-wide via this stylesheet, so .blurable works on any view.
+   Hover reveals for the presenter; pointer/select disabled while blurred. */
+.demo-blur .blurable {
+  filter: blur(6px);
+  border-radius: 3px;
+  transition: filter .12s ease;
+  cursor: default;
+}
+.demo-blur .blurable:hover { filter: blur(0); }
+.demo-blur a.blurable { pointer-events: none; }
+.demo-blur a.blurable:hover { pointer-events: auto; }

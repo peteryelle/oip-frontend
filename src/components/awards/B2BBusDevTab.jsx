@@ -12,15 +12,17 @@ import "./awards.css";
 export default function B2BBusDevTab({ oipId }) {
   const [disposition, setDisposition] = useState("all");
   const [recompeteOnly, setRecompeteOnly] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState("");
   const [openAward, setOpenAward] = useState(null);
 
   // Initial order is B2B score desc; the table's column headers re-sort locally.
-  const { awards, loading, error, total } = useAwards(oipId, {
+  const { awards, loading, error, total, archivedCount } = useAwards(oipId, {
     sort: "score",
     disposition,
     withinMonths: recompeteOnly ? 18 : null,
     search,
+    includeArchived: showArchived,
   });
 
   return (
@@ -40,6 +42,14 @@ export default function B2BBusDevTab({ oipId }) {
             onChange={(e) => setRecompeteOnly(e.target.checked)}
           />
           Recompete &le;18mo
+        </label>
+        <label className="wq-check">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+          />
+          Show archived (&le;39){archivedCount ? ` · ${archivedCount}` : ""}
         </label>
         <input
           type="search"

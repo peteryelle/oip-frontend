@@ -17,7 +17,16 @@ const SORTERS = {
 const rank = (m) => (m == null || m < 0 ? Number.POSITIVE_INFINITY : m);
 
 export function useAwards(oipId, opts = {}) {
-  const { sort = "score", disposition = "all", withinMonths = null, search = "" } = opts;
+  const {
+    sort = "score",
+    disposition = "all",
+    withinMonths = null,
+    search = "",
+    includeArchived = false,
+  } = opts;
+
+  // Scores below this are archived (low delivery-fit noise) and hidden by default.
+  const ARCHIVE_BELOW = 40;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -54,6 +63,9 @@ export function useAwards(oipId, opts = {}) {
 
   const awards = useMemo(() => {
     let list = rows.slice();
+    if (!includeArchived) {
+      list = list.filter((a) => a.score != null && a.score >= ARCHIVE_BELOW);
+    }
     if (disposition !== "all") list = list.filter((a) => a.disposition === disposition);
     if (withinMonths != null) {
       list = list.filter(
@@ -71,9 +83,14 @@ export function useAwards(oipId, opts = {}) {
     }
     list.sort(SORTERS[sort] || SORTERS.score);
     return list;
-  }, [rows, sort, disposition, withinMonths, search]);
+  }, [rows, sort, disposition, withinMonths, search, includeArchived]);
 
-  return { awards, loading, error, refetch: load, total: rows.length };
+  const archivedCount = useMemo(
+    () => rows.filter((a) => a.score == null || a.score < ARCHIVE_BELOW).length,
+    [rows]
+  );
+
+  return { awards, loading, error, refetch: load, total: rows.length, archivedCount };
 }
 
 function normalize(r) {

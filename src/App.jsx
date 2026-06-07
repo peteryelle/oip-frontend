@@ -82,6 +82,14 @@ function Layout() {
   const navigate = useNavigate()
   const location = useLocation()
 
+  // Demo blur — masks identifying text (company/opportunity/person) for screen-shares.
+  const [demoBlur, setDemoBlur] = useState(() => {
+    try { return localStorage.getItem('wq-demo-blur') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('wq-demo-blur', demoBlur ? '1' : '0') } catch {}
+  }, [demoBlur])
+
   // Pull the most recent successful scrape_run for the run-stamp display
   useEffect(() => {
     if (!selectedOip) return
@@ -129,7 +137,7 @@ function Layout() {
     path.startsWith('/settings') ? 'settings' : ''
 
   return (
-    <div className="app">
+    <div className={`app${demoBlur ? ' demo-blur' : ''}`}>
       <Topbar
         onSignOut={signOut}
         userEmail={user.email}
@@ -152,12 +160,21 @@ function Layout() {
           <Link to="/radar" className={`sec-nav-btn ${activeSection === 'radar' ? 'active' : ''}`}>Pipeline Radar</Link>
         )}
         <Link to="/help"       className={`sec-nav-btn ${path.startsWith('/help') ? 'active' : ''}`}>User Guide</Link>
+        <button
+          type="button"
+          onClick={() => setDemoBlur(v => !v)}
+          className={`sec-nav-btn ${demoBlur ? 'active' : ''}`}
+          title="Blur identifying details (company / opportunity / person) for screen-sharing. Hover any blurred item to reveal."
+          style={{ marginLeft: 'auto', border: 'none', background: demoBlur ? undefined : 'none', cursor: 'pointer', font: 'inherit' }}
+        >
+          {demoBlur ? 'Demo blur: ON' : 'Demo blur'}
+        </button>
       </nav>
 
       {/* Breadcrumb */}
       <nav className="breadcrumb">
         {path === '/' ? (
-          <span className="current">{selectedOip?.name} dashboard</span>
+          <span className="current"><span className="blurable">{selectedOip?.name}</span> dashboard</span>
         ) : (
           <>
             <button onClick={() => navigate('/')}>OIP dashboard</button>
@@ -170,7 +187,7 @@ function Layout() {
       <Outlet />
 
       <footer className="confidentiality-footer">
-        Confidential — for {selectedOip?.tenants?.name || 'tenant'} use only
+        Confidential — for <span className="blurable">{selectedOip?.tenants?.name || 'tenant'}</span> use only
       </footer>
 
       <FloatingHelpButton />
@@ -358,7 +375,7 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
             <span className="dot"></span>WinQuest OIP: Opportunity Intelligence Platform
           </Link>
           <div className="brand-customer">
-            {tenantName}
+            <span className="blurable">{tenantName}</span>
             {oips.length > 1 ? (
               <select
                 value={selectedOipId || ''}
@@ -1627,10 +1644,10 @@ function SamOpportunityTable({ signals, onRowClick }) {
                       </span>
                     )}
                     <div>
-                      <div style={{ fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3, marginBottom: 3 }}>
+                      <div className="blurable" style={{ fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3, marginBottom: 3 }}>
                         {(sig.title || '').length > 60 ? sig.title.slice(0, 60) + '…' : sig.title}
                       </div>
-                      <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                      <div className="blurable" style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
                         color: 'var(--ink-fade)', display: 'flex', gap: 8 }}>
                         {meta.solicitation_number && <span>{meta.solicitation_number.slice(0, 20)}</span>}
                         {dept && <span>{dept.slice(0, 35)}</span>}

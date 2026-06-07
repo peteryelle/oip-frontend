@@ -113,13 +113,13 @@ export default function AwardTable({ awards, onRowClick }) {
             return (
               <tr key={a.signalId} className="wq-atable-row" onClick={() => onRowClick(a)}>
                 <td className="wq-atable-td">
-                  <div className="wq-atable-prime">{a.recipient || "Unknown prime"}</div>
-                  <div className="wq-atable-sub">
+                  <div className="wq-atable-prime blurable">{a.recipient || "Unknown prime"}</div>
+                  <div className="wq-atable-sub blurable">
                     {a.piid && <span>{a.piid.slice(0, 22)}</span>}
                     {a.uei && <span>{a.uei}</span>}
                   </div>
                 </td>
-                <td className="wq-atable-td wq-atable-agency">
+                <td className="wq-atable-td wq-atable-agency blurable">
                   {a.subAgency || a.agency || "—"}
                 </td>
                 <td className="wq-atable-td wq-atable-r wq-atable-amt">{fmtMoney(a.amount)}</td>

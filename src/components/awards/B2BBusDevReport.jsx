@@ -58,15 +58,15 @@ export default function B2BBusDevReport({ award }) {
 
       <Section title="How this surfaced">
         <p className="wq-rep-muted">
-          Surfaced from federal award data ({award.agency || "—"}
-          {award.naics ? ` · NAICS ${award.naics}` : ""}), then scored on delivery
+          Surfaced from federal award data (<span className="blurable">{award.agency || "—"}
+          {award.naics ? ` · NAICS ${award.naics}` : ""}</span>), then scored on delivery
           entailment — not a keyword match.
         </p>
-        {ent.chain ? <p className="wq-rep-p">{ent.chain}</p> : null}
+        {ent.chain ? <p className="wq-rep-p blurable">{ent.chain}</p> : null}
       </Section>
 
       <Section title="Why now">
-        {award.whyNow ? <p className="wq-rep-p">{award.whyNow}</p> : null}
+        {award.whyNow ? <p className="wq-rep-p blurable">{award.whyNow}</p> : null}
       </Section>
 
       <Section title="Entailment">
@@ -77,21 +77,21 @@ export default function B2BBusDevReport({ award }) {
             {ent.mode ? ` · mode: ${ent.mode}` : ""}
           </span>
           <span>Capability</span>
-          <span>{ent.capability || "—"}</span>
+          <span className="blurable">{ent.capability || "—"}</span>
           <span>Chain</span>
-          <span>{ent.chain || "—"}</span>
+          <span className="blurable">{ent.chain || "—"}</span>
           <span>Incumbent method</span>
           <span>{award.incumbentMethod || pos.incumbent_method || "—"}</span>
         </div>
       </Section>
 
-      <Section title="Pitch">{pos.pitch ? <p className="wq-rep-p">{pos.pitch}</p> : null}</Section>
-      <Section title="Pain">{pos.pain ? <p className="wq-rep-p">{pos.pain}</p> : null}</Section>
+      <Section title="Pitch">{pos.pitch ? <p className="wq-rep-p blurable">{pos.pitch}</p> : null}</Section>
+      <Section title="Pain">{pos.pain ? <p className="wq-rep-p blurable">{pos.pain}</p> : null}</Section>
 
       <Section title="Performance read">
         {tgt.narrative && (
           <p className="wq-rep-p">
-            <strong>Target contract:</strong> {tgt.narrative}
+            <strong>Target contract:</strong> <span className="blurable">{tgt.narrative}</span>
           </p>
         )}
         <Bullets items={tgt.bullets} />
@@ -115,9 +115,23 @@ export default function B2BBusDevReport({ award }) {
           <ul className="wq-rep-people">
             {who.map((p, i) => (
               <li key={i}>
-                <strong>{p.name || "TBD"}</strong>
+                <strong className="blurable">{p.name || "TBD"}</strong>
                 {p.role ? ` — ${p.role}` : ""}
-                {p.why ? <div className="wq-rep-muted">{p.why}</div> : null}
+                {p.linkedin ? (
+                  <>
+                    {" · "}
+                    <a
+                      className="wq-li-link blurable"
+                      href={p.linkedin}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      LinkedIn ↗
+                    </a>
+                  </>
+                ) : null}
+                {p.location ? <span className="wq-rep-loc"> · {p.location}</span> : null}
+                {p.why ? <div className="wq-rep-muted blurable">{p.why}</div> : null}
               </li>
             ))}
           </ul>
@@ -140,7 +154,7 @@ export default function B2BBusDevReport({ award }) {
         </button>
         {bd.vendor?.website && (
           <a className="wq-btn wq-btn-ghost" href={bd.vendor.website} target="_blank" rel="noreferrer">
-            {award.recipient || "Prime"} site
+            <span className="blurable">{award.recipient || "Prime"}</span> site
           </a>
         )}
       </div>
