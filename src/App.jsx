@@ -1287,9 +1287,9 @@ function MarketReviewPage() {
       {isSam && (
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--rule)' }}>
           {[
-            { key: 'opportunities', label: `B2G Opportunities${samOpportunities.length ? ` (${samOpportunities.length})` : ''}` },
-            { key: 'busdev', label: `Bus Dev${samBusdev.length ? ` (${samBusdev.length})` : ''}` },
-            { key: 'dib', label: `DIB Prospects${samDib.length ? ` (${samDib.length})` : ''}` },
+            { key: 'opportunities', label: 'B2G' },
+            { key: 'busdev', label: `B2B${samBusdev.length ? ` (${samBusdev.length})` : ''}` },
+            { key: 'dib', label: 'DIB' },
           ].map(tab => (
             <button key={tab.key} onClick={() => setSamTab(tab.key)} style={{
               padding: '10px 20px',
