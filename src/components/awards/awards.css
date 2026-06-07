@@ -226,3 +226,39 @@
   color: var(--wq-muted);
   cursor: pointer;
 }
+
+/* ---- B2B award table (mirrors SAM notice table) ---- */
+.wq-atable-wrap { overflow-x: auto; }
+.wq-atable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.wq-atable-th {
+  padding: 10px 8px;
+  font-size: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--wq-muted);
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 2px solid var(--wq-line);
+}
+.wq-atable-th.is-sorted { color: var(--wq-accent); }
+.wq-atable-th:not(:nth-child(2)) { cursor: pointer; user-select: none; }
+.wq-atable-r { text-align: right; }
+.wq-atable-row { border-bottom: 1px solid var(--wq-line); cursor: pointer; }
+.wq-atable-row:hover { background: #f6f8f7; }
+.wq-atable-td { padding: 12px 8px; vertical-align: top; }
+.wq-atable-prime { font-weight: 600; color: var(--wq-ink); line-height: 1.3; margin-bottom: 3px; }
+.wq-atable-sub {
+  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--wq-muted);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wq-atable-sub-inline { font-size: 12px; font-family: 'IBM Plex Mono', monospace; color: var(--wq-muted); }
+.wq-atable-agency { color: var(--wq-ink); max-width: 200px; }
+.wq-atable-amt { font-family: 'IBM Plex Mono', monospace; font-weight: 600; white-space: nowrap; }
+.wq-atable-motion { font-size: 12.5px; color: var(--wq-muted); white-space: nowrap; }
+.wq-score-sm { min-width: 30px; height: 24px; font-size: 13px; padding: 0 7px; }
