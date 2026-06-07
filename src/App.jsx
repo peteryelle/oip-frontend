@@ -964,6 +964,14 @@ function HomePage() {
   )
 }
 
+// Display-only label for dashboard entities; underlying source_name is unchanged
+// (still used as the View-signals filter key).
+function entityLabel(name) {
+  if (name === 'SAM.gov') return 'B2G'
+  if (name === 'USASpending') return 'B2B'
+  return name
+}
+
 function Top10Row({ r, onView }) {
   const qualityClass = { strong: 'sq-strong', active: 'sq-active', emerging: 'sq-emerging' }[r.quality]
   const qualityLabel = { strong: 'Strong', active: 'Active', emerging: 'Emerging' }[r.quality]
@@ -974,7 +982,7 @@ function Top10Row({ r, onView }) {
     <tr>
       <td className={`td-rank ${r.rank <= 3 ? 'top3' : ''}`}>{r.rank}</td>
       <td className="td-entity">
-        <div className="entity-name">{r.name}</div>
+        <div className="entity-name">{entityLabel(r.name)}</div>
         <div className="entity-state">{r.state}</div>
       </td>
       <td className="td-rationale">{r.rationale}</td>
