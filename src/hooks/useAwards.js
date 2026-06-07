@@ -1,114 +1,120 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+// src/hooks/useAwards.js
+//
+// Reads the B2B Bus Dev (Awards-mode) feed for one OIP. Award signals are
+// signals with signal_kind='award'; their scoring lives on oip_signals
+// (b2b_busdev jsonb + scalar extracts). No separate scores table.
+//
+// ADJUST: point this import at your existing configured Supabase client.
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabase";
 
-/**
- * useAwards — loads USASpending award intelligence for a signal.
- *
- * Returns:
- *   candidates   enriched awards sorted by req_similarity desc (for matrix)
- *   recipients   grouped by recipient for leaderboard view
- *   summary      aggregate stats
- *   loading      bool
- *   hasData      bool
- */
-export function useAwards(signalId, oipId) {
-  const [candidates, setCandidates] = useState([])
-  const [recipients, setRecipients] = useState([])
-  const [summary, setSummary]       = useState(null)
-  const [loading, setLoading]       = useState(false)
+const SORTERS = {
+  score:     (a, b) => (b.score ?? -1) - (a.score ?? -1),
+  amount:    (a, b) => (b.amount ?? 0) - (a.amount ?? 0),
+  // soonest recompete first (smallest non-negative months to PoP end)
+  recompete: (a, b) => rank(a.monthsToPopEnd) - rank(b.monthsToPopEnd),
+};
+const rank = (m) => (m == null || m < 0 ? Number.POSITIVE_INFINITY : m);
+
+export function useAwards(oipId, opts = {}) {
+  const { sort = "score", disposition = "all", withinMonths = null, search = "" } = opts;
+
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!oipId) return;
+    setLoading(true);
+    setError(null);
+    const { data, error } = await supabase
+      .from("oip_signals")
+      .select(`
+        signal_id, status,
+        b2b_busdev, b2b_score, disposition, motion, displacement_difficulty,
+        incumbent_method, prime_uei, why_now,
+        signals!inner ( id, title, url, source_meta, signal_kind )
+      `)
+      .eq("oip_id", oipId)
+      .eq("signals.signal_kind", "award")
+      .order("b2b_score", { ascending: false, nullsFirst: false });
+
+    if (error) {
+      setError(error);
+      setRows([]);
+    } else {
+      setRows((data || []).map(normalize));
+    }
+    setLoading(false);
+  }, [oipId]);
 
   useEffect(() => {
-    if (!signalId || !oipId) return
-    let cancelled = false
+    load();
+  }, [load]);
 
-    setLoading(true)
-    setCandidates([])
-    setRecipients([])
-    setSummary(null)
+  const awards = useMemo(() => {
+    let list = rows.slice();
+    if (disposition !== "all") list = list.filter((a) => a.disposition === disposition);
+    if (withinMonths != null) {
+      list = list.filter(
+        (a) => a.monthsToPopEnd != null && a.monthsToPopEnd >= 0 && a.monthsToPopEnd <= withinMonths
+      );
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (a) =>
+          (a.recipient || "").toLowerCase().includes(q) ||
+          (a.agency || "").toLowerCase().includes(q) ||
+          (a.piid || "").toLowerCase().includes(q)
+      );
+    }
+    list.sort(SORTERS[sort] || SORTERS.score);
+    return list;
+  }, [rows, sort, disposition, withinMonths, search]);
 
-    supabase
-      .from('signal_awards')
-      .select('*')
-      .eq('signal_id', signalId)
-      .eq('oip_id', oipId)
-      .in('match_confidence', ['high', 'medium'])
-      .order('req_similarity', { ascending: false, nullsFirst: false })
-      .order('award_amount', { ascending: false, nullsFirst: false })
-      .then(({ data }) => {
-        if (cancelled) return
-        const rows = data || []
+  return { awards, loading, error, refetch: load, total: rows.length };
+}
 
-        if (rows.length === 0) {
-          setLoading(false)
-          return
-        }
+function normalize(r) {
+  const sig = r.signals || {};
+  const meta = sig.source_meta || {};
+  return {
+    signalId: r.signal_id,
+    status: r.status,
+    title: sig.title || meta.piid || "",
+    url: sig.url || "",
+    piid: meta.piid || "",
+    awardId: meta.usaspending_award_id || "",
+    recipient: meta.recipient_name || "",
+    uei: meta.recipient_uei || r.prime_uei || "",
+    agency: meta.awarding_agency || "",
+    subAgency: meta.awarding_sub_agency || "",
+    naics: meta.naics || "",
+    psc: meta.psc || "",
+    amount: toNum(meta.award_amount),
+    popStart: meta.pop_start || null,
+    popEnd: meta.pop_end || null,
+    monthsToPopEnd: monthsTo(meta.pop_end),
+    score: r.b2b_score,
+    disposition: r.disposition || null,
+    motion: r.motion || null,
+    difficulty: r.displacement_difficulty || null,
+    incumbentMethod: r.incumbent_method || null,
+    whyNow: r.why_now || null,
+    busdev: r.b2b_busdev || {},
+  };
+}
 
-        // Candidates — enriched first, then unenriched
-        const enriched   = rows.filter(r => r.req_similarity != null)
-        const unenriched = rows.filter(r => r.req_similarity == null)
-        setCandidates([...enriched, ...unenriched])
+function toNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
-        // Recipients — grouped for leaderboard
-        const byRecipient = {}
-        rows.forEach(a => {
-          const key = (a.recipient_name || 'Unknown').trim()
-          if (!byRecipient[key]) {
-            byRecipient[key] = {
-              recipient_name:   key,
-              award_count:      0,
-              total_awarded:    0,
-              any_recompete:    false,
-              awarding_agency:  a.awarding_agency_name || '',
-              awarding_office:  a.awarding_office_name || '',
-              match_confidence: a.match_confidence,
-              match_basis:      a.match_basis,
-              best_similarity:  null,
-            }
-          }
-          const r = byRecipient[key]
-          r.award_count++
-          r.total_awarded += a.award_amount || 0
-          if (a.is_recompete_signal) r.any_recompete = true
-          if (a.req_similarity != null && (r.best_similarity == null || a.req_similarity > r.best_similarity)) {
-            r.best_similarity = a.req_similarity
-          }
-        })
-
-        const grouped = Object.values(byRecipient)
-          .sort((a, b) => {
-            const simA = a.best_similarity ?? -1
-            const simB = b.best_similarity ?? -1
-            if (simB !== simA) return simB - simA
-            return b.total_awarded - a.total_awarded
-          })
-          .slice(0, 10)
-
-        setRecipients(grouped)
-
-        // Summary
-        const amounts      = rows.map(a => a.award_amount).filter(v => v != null && v > 0)
-        const anyRecompete = rows.some(a => a.is_recompete_signal)
-
-        setSummary({
-          total_rows:        rows.length,
-          unique_recipients: Object.keys(byRecipient).length,
-          enriched_count:    enriched.length,
-          min_amount:        amounts.length ? Math.min(...amounts) : null,
-          max_amount:        amounts.length ? Math.max(...amounts) : null,
-          avg_amount:        amounts.length ? amounts.reduce((a, b) => a + b, 0) / amounts.length : null,
-          any_recompete:     anyRecompete,
-          top_similarity:    enriched.length ? enriched[0].req_similarity : null,
-          match_confidence:  rows[0]?.match_confidence || 'medium',
-          match_basis:       rows[0]?.match_basis || '',
-          agency:            rows[0]?.awarding_agency_name || '',
-        })
-
-        setLoading(false)
-      })
-      .catch(() => { if (!cancelled) setLoading(false) })
-
-    return () => { cancelled = true }
-  }, [signalId, oipId])
-
-  return { candidates, recipients, summary, loading, hasData: candidates.length > 0 }
+function monthsTo(iso) {
+  if (!iso) return null;
+  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  return (d.getUTCFullYear() - now.getUTCFullYear()) * 12 + (d.getUTCMonth() - now.getUTCMonth());
 }
