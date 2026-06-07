@@ -33,7 +33,7 @@ export function useAwards(oipId, opts = {}) {
         signal_id, status,
         b2b_busdev, b2b_score, disposition, motion, displacement_difficulty,
         incumbent_method, prime_uei, why_now,
-        signals!inner ( id, title, url, source_meta, signal_kind )
+        signals!inner ( id, title, doc_url, source_meta, signal_kind )
       `)
       .eq("oip_id", oipId)
       .eq("signals.signal_kind", "award")
@@ -83,7 +83,7 @@ function normalize(r) {
     signalId: r.signal_id,
     status: r.status,
     title: sig.title || meta.piid || "",
-    url: sig.url || "",
+    url: sig.doc_url || "",
     piid: meta.piid || "",
     awardId: meta.usaspending_award_id || "",
     recipient: meta.recipient_name || "",
