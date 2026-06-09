@@ -7,6 +7,7 @@ import React, { useState } from "react";
 import { useAwards } from "../../hooks/useAwards";
 import AwardTable from "./AwardTable";
 import B2BBusDevReport from "./B2BBusDevReport";
+import DemandGrid from "../demand/DemandGrid";
 import "./awards.css";
 
 export default function B2BBusDevTab({ oipId }) {
@@ -27,6 +28,10 @@ export default function B2BBusDevTab({ oipId }) {
 
   return (
     <div className="wq-awards">
+      <div style={{ marginBottom: 20 }}>
+        <DemandGrid oipId={oipId} />
+      </div>
+
       <div className="wq-awards-controls">
         <select value={disposition} onChange={(e) => setDisposition(e.target.value)}>
           <option value="all">All dispositions</option>
