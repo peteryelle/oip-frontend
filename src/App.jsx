@@ -2,6 +2,7 @@ import { useEffect, useState, Component } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
 import B2BBusDevTab from './components/awards/B2BBusDevTab'
 import PipelineRadar from './components/radar/PipelineRadar'
+import DerivedDemandSetup from './components/demand/DerivedDemandSetup'
 import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
 import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
@@ -53,6 +54,7 @@ export default function App() {
               <Route path="profile" element={<ProfilePage />} />
               <Route path="objectives" element={<ObjectivesPage />} />
               <Route path="sentinel" element={<SentinelPage />} />
+              <Route path="demand" element={<DerivedDemandPage />} />
               <Route path="pursued" element={<PursuedPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="settings/team" element={<TeamPage />} />
@@ -151,6 +153,7 @@ function Layout() {
     path.startsWith('/profile') ? 'profile' :
     path.startsWith('/objectives') ? 'objectives' :
     path.startsWith('/sentinel') ? 'sentinel' :
+    path.startsWith('/demand') ? 'demand' :
     path.startsWith('/pursued') ? 'pursued' :
     path.startsWith('/radar') ? 'radar' :
     path.startsWith('/settings') ? 'settings' : ''
@@ -174,6 +177,9 @@ function Layout() {
         <Link to="/profile"    className={`sec-nav-btn ${activeSection === 'profile' ? 'active' : ''}`}>Profile</Link>
         <Link to="/objectives" className={`sec-nav-btn ${activeSection === 'objectives' ? 'active' : ''}`}>Business Objectives</Link>
         <Link to="/sentinel"   className={`sec-nav-btn ${activeSection === 'sentinel' ? 'active' : ''}`}>Sentinel</Link>
+        {selectedOip?.verticals?.slug === 'sam' && (
+          <Link to="/demand" className={`sec-nav-btn ${activeSection === 'demand' ? 'active' : ''}`}>Derived Demand</Link>
+        )}
         <Link to="/pursued"    className={`sec-nav-btn ${activeSection === 'pursued' ? 'active' : ''}`}>Pursued</Link>
         {selectedOip?.verticals?.slug === 'sam' && (
           <Link to="/radar" className={`sec-nav-btn ${activeSection === 'radar' ? 'active' : ''}`}>Pipeline Radar</Link>
@@ -217,6 +223,12 @@ function Layout() {
 function PipelineRadarPage() {
   const { selectedOipId } = useOip()
   return <PipelineRadar supabase={supabase} oipId={selectedOipId} />
+}
+
+function DerivedDemandPage() {
+  const { selectedOip } = useOip()
+  if (!selectedOip) return null
+  return <DerivedDemandSetup oipId={selectedOip.id} verticalId={selectedOip.vertical_id} />
 }
 
 function FloatingHelpButton() {
@@ -361,6 +373,7 @@ function viewLabel(section) {
     profile: 'Profile',
     objectives: 'Business Objectives',
     sentinel: 'Sentinel',
+    demand: 'Derived Demand',
     pursued: 'Pursued Pipeline',
     radar: 'Pipeline Radar',
     settings: 'Settings',
