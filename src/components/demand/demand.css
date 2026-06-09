@@ -1,0 +1,104 @@
+/* src/components/demand/demand.css
+   Namespaced under .wq-demand so nothing collides with global.css. Fonts inherit
+   from the app on purpose; colors fall back if the app doesn't define them. */
+
+.wq-demand {
+  --wq-line: #e6e8eb;
+  --wq-ink: #1a1d21;
+  --wq-muted: #6b7280;
+  --wq-faint: #a3a192;
+  font-family: inherit;
+  color: var(--wq-ink);
+}
+
+/* ── Legend ─────────────────────────────────────────────────── */
+.wq-dem-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--wq-muted);
+}
+.wq-dem-key { display: inline-flex; align-items: center; gap: 6px; }
+.wq-dem-sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+/* ── Table ──────────────────────────────────────────────────── */
+.wq-dem-scroll { overflow-x: auto; }
+.wq-dem-table {
+  border-collapse: separate;
+  border-spacing: 3px;
+  width: 100%;
+}
+.wq-dem-corner { width: 84px; }
+.wq-dem-colhead {
+  font-weight: 500;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--wq-muted);
+  text-align: center;
+  vertical-align: bottom;
+  padding: 0 4px 6px;
+  min-width: 92px;
+}
+.wq-dem-rowhead {
+  text-align: right;
+  padding: 6px 8px 6px 0;
+  white-space: nowrap;
+}
+.wq-dem-acr { font-weight: 500; font-size: 13px; }
+.wq-dem-tier {
+  display: block;
+  font-size: 10.5px;
+  color: var(--wq-faint);
+  margin-top: 1px;
+}
+
+/* ── Cells ──────────────────────────────────────────────────── */
+.wq-dem-cell {
+  border-radius: 6px;
+  padding: 8px 6px;
+  height: 50px;
+  text-align: center;
+  vertical-align: middle;
+}
+.wq-dem-spend { font-size: 12.5px; font-weight: 500; color: var(--wq-ink); }
+.wq-dem-pct { font-size: 11px; margin-top: 3px; }
+.wq-dem-dot { color: #cfcbbf; font-size: 14px; }
+
+.wq-dem-hi   { background: #d9ebdf; }
+.wq-dem-hi   .wq-dem-pct { color: #2f6b49; }
+.wq-dem-mid  { background: #fbf1d8; }
+.wq-dem-mid  .wq-dem-pct { color: #8a7320; }
+.wq-dem-lo   { background: #f3e7df; }
+.wq-dem-lo   .wq-dem-pct { color: #8a4a2c; }
+.wq-dem-na   { background: #efeae3; }
+.wq-dem-na   .wq-dem-pct { color: var(--wq-faint); }
+.wq-dem-blank { background: #fafaf5; }
+
+/* ── Footer totals ──────────────────────────────────────────── */
+.wq-dem-foot {
+  border-top: 1px solid var(--wq-line);
+  background: transparent;
+  font-size: 12px;
+  color: var(--wq-muted);
+  font-weight: 400;
+  border-radius: 0;
+  padding-top: 8px;
+}
+
+/* ── States ─────────────────────────────────────────────────── */
+.wq-dem-empty {
+  border: 1px dashed var(--wq-line);
+  border-radius: 10px;
+  padding: 24px;
+  text-align: center;
+  color: var(--wq-muted);
+  font-size: 14px;
+}
+.wq-dem-empty code {
+  background: #f1efe8;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12.5px;
+}
