@@ -23,7 +23,7 @@ export function useDemand(oipId) {
       supabase
         .from("derived_demand_cells")
         .select(
-          "agency_name, agency_tier, naics, addressable_spend, award_count, " +
+          "agency_name, agency_tier, naics, addressable_spend, " +
             "samples_scored, high_fit_count, hit_rate, burden_density, priority_rank"
         )
         .eq("oip_id", oipId)
@@ -66,7 +66,6 @@ function buildGrid(cells, vlib, alib) {
 
     map.set(`${c.agency_name}|${c.naics}`, {
       spend,
-      awardCount: c.award_count || 0,
       scored: samples > 0,
       pct,
       rank: c.priority_rank,
