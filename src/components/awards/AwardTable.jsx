@@ -33,22 +33,41 @@ function fmtMoney(n) {
   if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
   return `$${n}`;
 }
-function fmtPopEnd(iso, months) {
-  if (!iso) return { date: "—", cls: "" };
+function fmtPopEnd(iso, daysToEnd, horizonDays) {
+  if (!iso) return { date: "—", cls: "", months: null };
   const date = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`).toLocaleDateString(
     undefined,
     { month: "numeric", day: "numeric", year: "2-digit" }
   );
   let cls = "";
-  if (months != null && months >= 0) {
-    if (months <= 9) cls = "wq-clock-hot";
-    else if (months <= 18) cls = "wq-clock-warm";
+  let months = null;
+  if (daysToEnd != null && daysToEnd >= 0) {
+    months = Math.round(daysToEnd / 30.44);
+    if (daysToEnd <= 90) cls = "wq-clock-hot";
+    else if (daysToEnd <= horizonDays) cls = "wq-clock-warm";
   }
   return { date, cls, months };
 }
 const rankMonths = (m) => (m == null || m < 0 ? Number.POSITIVE_INFINITY : m);
 
-export default function AwardTable({ awards, onRowClick }) {
+// The collector stores signal title as "<PIID>: <SCOPE>", sometimes with
+// IGF::XX::IGF inherently-governmental markers. Pull a clean short scope so two
+// awards to the same prime are distinguishable at a glance.
+function scopeFromTitle(title, piid) {
+  if (!title) return "";
+  let s = String(title);
+  if (piid && s.startsWith(piid)) s = s.slice(piid.length);
+  s = s
+    .replace(/^[:\s-]+/, "")
+    .replace(/IGF::[A-Z]{2}::IGF/gi, " ")
+    .replace(/IGF::[A-Z]{2}::/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (s.length > 64) s = s.slice(0, 63).trimEnd() + "\u2026";
+  return s;
+}
+
+export default function AwardTable({ awards, onRowClick, recompeteDays = 180, awardDays = 120 }) {
   const [sortKey, setSortKey] = useState("score");
   const [sortDir, setSortDir] = useState("desc");
 
@@ -109,11 +128,18 @@ export default function AwardTable({ awards, onRowClick }) {
         </thead>
         <tbody>
           {sorted.map((a) => {
-            const pop = fmtPopEnd(a.popEnd, a.monthsToPopEnd);
+            const pop = fmtPopEnd(a.popEnd, a.daysToPopEnd, recompeteDays);
+            const scope = scopeFromTitle(a.title, a.piid);
+            const isNew =
+              a.daysSincePopStart != null &&
+              a.daysSincePopStart >= 0 &&
+              a.daysSincePopStart <= awardDays;
             return (
               <tr key={a.signalId} className="wq-atable-row" onClick={() => onRowClick(a)}>
                 <td className="wq-atable-td">
                   <div className="wq-atable-prime blurable">{a.recipient || "Unknown prime"}</div>
+                  {isNew && <span className="wq-chip wq-flag-new">New award</span>}
+                  {scope && <div className="wq-atable-scope blurable">{scope}</div>}
                   <div className="wq-atable-sub blurable">
                     {a.piid && <span>{a.piid.slice(0, 22)}</span>}
                     {a.uei && <span>{a.uei}</span>}

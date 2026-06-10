@@ -3,7 +3,8 @@
 // Self-contained "B2B Bus Dev" tab for the SAM Market Review. Owns its own
 // data (useAwards), filter controls, award TABLE, and detail drawer — so it
 // touches none of the existing notice/DIB query or SignalDrawer.
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { supabase } from "../../lib/supabase";
 import { useAwards } from "../../hooks/useAwards";
 import AwardTable from "./AwardTable";
 import B2BBusDevReport from "./B2BBusDevReport";
@@ -12,16 +13,42 @@ import "./awards.css";
 
 export default function B2BBusDevTab({ oipId }) {
   const [disposition, setDisposition] = useState("all");
-  const [recompeteOnly, setRecompeteOnly] = useState(false);
+  const [actionableOnly, setActionableOnly] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState("");
   const [openAward, setOpenAward] = useState(null);
+
+  // Timing windows (duration days) configured on the Derived Demand page.
+  const [windows, setWindows] = useState({ recompeteDays: 180, awardDays: 120 });
+  useEffect(() => {
+    if (!oipId) return;
+    let live = true;
+    (async () => {
+      const { data } = await supabase
+        .from("sentinels")
+        .select("pull_config")
+        .eq("oip_id", oipId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!live) return;
+      const w = data?.pull_config?.busdev_windows || {};
+      setWindows({
+        recompeteDays: w.recompete_days ?? 180,
+        awardDays: w.award_recency_days ?? 120,
+      });
+    })();
+    return () => {
+      live = false;
+    };
+  }, [oipId]);
 
   // Initial order is B2B score desc; the table's column headers re-sort locally.
   const { awards, loading, error, total, archivedCount } = useAwards(oipId, {
     sort: "score",
     disposition,
-    withinMonths: recompeteOnly ? 18 : null,
+    actionableOnly,
+    recompeteDays: windows.recompeteDays,
+    awardDays: windows.awardDays,
     search,
     includeArchived: showArchived,
   });
@@ -43,10 +70,10 @@ export default function B2BBusDevTab({ oipId }) {
         <label className="wq-check">
           <input
             type="checkbox"
-            checked={recompeteOnly}
-            onChange={(e) => setRecompeteOnly(e.target.checked)}
+            checked={actionableOnly}
+            onChange={(e) => setActionableOnly(e.target.checked)}
           />
-          Recompete &le;18mo
+          Actionable only (new &le;{windows.awardDays}d · recompete &le;{windows.recompeteDays}d)
         </label>
         <label className="wq-check">
           <input
@@ -85,7 +112,12 @@ export default function B2BBusDevTab({ oipId }) {
       )}
 
       {!loading && !error && awards.length > 0 && (
-        <AwardTable awards={awards} onRowClick={setOpenAward} />
+        <AwardTable
+          awards={awards}
+          onRowClick={setOpenAward}
+          recompeteDays={windows.recompeteDays}
+          awardDays={windows.awardDays}
+        />
       )}
 
       {openAward && (

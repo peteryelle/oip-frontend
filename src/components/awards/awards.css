@@ -322,3 +322,19 @@
 }
 .wq-rep-outreach .wq-rep-p { margin: 0; font-style: italic; }
 .wq-rep-poc-note { margin-top: 8px; font-size: 11.5px; font-style: italic; }
+
+/* B2B table: award scope line under prime name (differentiates same-prime rows) */
+.wq-atable-scope {
+  font-size: 12px;
+  color: var(--wq-muted);
+  line-height: 1.3;
+  margin-top: 1px;
+}
+
+/* "New award" flag — recently-awarded marker in the B2B table */
+.wq-flag-new {
+  display: inline-block;
+  margin: 2px 0;
+  background: #dbeafe;
+  color: #1e40af;
+}

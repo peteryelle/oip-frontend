@@ -16,9 +16,10 @@ function fmtDate(iso) {
 }
 
 export default function DerivedDemandSetup({ oipId, verticalId }) {
-  const { pullConfig, vlib, overrides, loading, error, saveBurden, promote } =
+  const { pullConfig, vlib, overrides, windows, loading, error, saveBurden, saveWindows, promote } =
     useDemandSetup(oipId);
   const [edits, setEdits] = useState({}); // naics -> in-progress string
+  const [winEdits, setWinEdits] = useState({}); // recompeteDays|awardDays -> in-progress string
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(null);
 
@@ -85,6 +86,23 @@ export default function DerivedDemandSetup({ oipId, verticalId }) {
     if (e) setNote(`Burden save failed: ${e.message || e}`);
   };
 
+  const onWindowBlur = async (key) => {
+    const raw = winEdits[key];
+    if (raw == null || raw === "") return;
+    const val = Number(raw);
+    if (Number.isFinite(val) && val >= 1) {
+      const e = await saveWindows(
+        key === "recompeteDays" ? { recompeteDays: val } : { awardDays: val }
+      );
+      if (e) setNote(`Window save failed: ${e.message || e}`);
+    }
+    setWinEdits((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
   return (
     <div className="wq-demand">
       <div className="wq-dds-head">
@@ -95,6 +113,49 @@ export default function DerivedDemandSetup({ oipId, verticalId }) {
           </div>
         </div>
         <span className={`wq-dds-chip ${status.cls}`}>{status.label}</span>
+      </div>
+
+      <div className="wq-dds-sec">
+        Timing windows{" "}
+        <span className="wq-dds-sec-note">— how the B2B Market Review filters and flags awards</span>
+      </div>
+      <div className="wq-dds-windows">
+        <div className="wq-dds-win">
+          <label className="wq-dds-win-lbl" htmlFor="dds-win-award">New-award window</label>
+          <div className="wq-dds-win-in">
+            <input
+              id="dds-win-award"
+              type="number"
+              min="1"
+              step="1"
+              value={winEdits.awardDays != null ? winEdits.awardDays : windows.awardDays}
+              onChange={(e) => setWinEdits((p) => ({ ...p, awardDays: e.target.value }))}
+              onBlur={() => onWindowBlur("awardDays")}
+            />
+            <span className="wq-dds-win-unit">days</span>
+          </div>
+          <div className="wq-dds-win-hint">
+            Flag an award as new when its performance started within this many days.
+          </div>
+        </div>
+        <div className="wq-dds-win">
+          <label className="wq-dds-win-lbl" htmlFor="dds-win-recompete">Recompete horizon</label>
+          <div className="wq-dds-win-in">
+            <input
+              id="dds-win-recompete"
+              type="number"
+              min="1"
+              step="1"
+              value={winEdits.recompeteDays != null ? winEdits.recompeteDays : windows.recompeteDays}
+              onChange={(e) => setWinEdits((p) => ({ ...p, recompeteDays: e.target.value }))}
+              onBlur={() => onWindowBlur("recompeteDays")}
+            />
+            <span className="wq-dds-win-unit">days</span>
+          </div>
+          <div className="wq-dds-win-hint">
+            Flag an award as recompete-soon when its PoP ends within this many days.
+          </div>
+        </div>
       </div>
 
       {!sug && (

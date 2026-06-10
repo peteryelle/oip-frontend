@@ -98,5 +98,30 @@ export function useDemandSetup(oipId) {
     [pullConfig, sentinelId, oipId, load]
   );
 
-  return { sentinelId, pullConfig, vlib, overrides, loading, error, refetch: load, saveBurden, promote };
+  // Timing windows for the B2B view (duration in days). The configure page
+  // writes them; the Market Review B2B surface reads them to filter/flag.
+  const saveWindows = useCallback(
+    async ({ recompeteDays, awardDays }) => {
+      if (!sentinelId) return new Error("No active sentinel");
+      const cur = pullConfig.busdev_windows || {};
+      const next = {
+        recompete_days:
+          recompeteDays != null ? Math.max(1, Math.round(Number(recompeteDays))) : cur.recompete_days ?? 180,
+        award_recency_days:
+          awardDays != null ? Math.max(1, Math.round(Number(awardDays))) : cur.award_recency_days ?? 120,
+      };
+      const newPC = { ...pullConfig, busdev_windows: next };
+      const { error: e } = await supabase.from("sentinels").update({ pull_config: newPC }).eq("id", sentinelId);
+      if (!e) setPullConfig(newPC);
+      return e || null;
+    },
+    [pullConfig, sentinelId]
+  );
+
+  const windows = {
+    recompeteDays: pullConfig.busdev_windows?.recompete_days ?? 180,
+    awardDays: pullConfig.busdev_windows?.award_recency_days ?? 120,
+  };
+
+  return { sentinelId, pullConfig, vlib, overrides, windows, loading, error, refetch: load, saveBurden, saveWindows, promote };
 }

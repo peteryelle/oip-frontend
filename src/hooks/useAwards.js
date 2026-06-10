@@ -21,6 +21,9 @@ export function useAwards(oipId, opts = {}) {
     sort = "score",
     disposition = "all",
     withinMonths = null,
+    recompeteDays = null,
+    awardDays = null,
+    actionableOnly = false,
     search = "",
     includeArchived = false,
   } = opts;
@@ -67,6 +70,21 @@ export function useAwards(oipId, opts = {}) {
       list = list.filter((a) => a.score != null && a.score >= ARCHIVE_BELOW);
     }
     if (disposition !== "all") list = list.filter((a) => a.disposition === disposition);
+    if (actionableOnly && (recompeteDays != null || awardDays != null)) {
+      list = list.filter((a) => {
+        const recompeteSoon =
+          recompeteDays != null &&
+          a.daysToPopEnd != null &&
+          a.daysToPopEnd >= 0 &&
+          a.daysToPopEnd <= recompeteDays;
+        const recentlyAwarded =
+          awardDays != null &&
+          a.daysSincePopStart != null &&
+          a.daysSincePopStart >= 0 &&
+          a.daysSincePopStart <= awardDays;
+        return recompeteSoon || recentlyAwarded;
+      });
+    }
     if (withinMonths != null) {
       list = list.filter(
         (a) => a.monthsToPopEnd != null && a.monthsToPopEnd >= 0 && a.monthsToPopEnd <= withinMonths
@@ -83,7 +101,7 @@ export function useAwards(oipId, opts = {}) {
     }
     list.sort(SORTERS[sort] || SORTERS.score);
     return list;
-  }, [rows, sort, disposition, withinMonths, search, includeArchived]);
+  }, [rows, sort, disposition, withinMonths, recompeteDays, awardDays, actionableOnly, search, includeArchived]);
 
   const archivedCount = useMemo(
     () => rows.filter((a) => a.score == null || a.score < ARCHIVE_BELOW).length,
@@ -113,6 +131,8 @@ function normalize(r) {
     popStart: meta.pop_start || null,
     popEnd: meta.pop_end || null,
     monthsToPopEnd: monthsTo(meta.pop_end),
+    daysToPopEnd: daysFromToday(meta.pop_end),
+    daysSincePopStart: daysSince(meta.pop_start),
     score: r.b2b_score,
     disposition: r.disposition || null,
     motion: r.motion || null,
@@ -135,3 +155,17 @@ function monthsTo(iso) {
   const now = new Date();
   return (d.getUTCFullYear() - now.getUTCFullYear()) * 12 + (d.getUTCMonth() - now.getUTCMonth());
 }
+
+// Days from today to an ISO date: positive = future, negative = past.
+function daysFromToday(iso) {
+  if (!iso) return null;
+  const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((d.getTime() - today) / 86400000);
+}
+const daysSince = (iso) => {
+  const d = daysFromToday(iso);
+  return d == null ? null : -d;
+};
