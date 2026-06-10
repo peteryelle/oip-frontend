@@ -1,8 +1,9 @@
 // src/components/awards/B2BBusDevReport.jsx
 //
-// Renders the b2b_busdev jsonb in the detail drawer (the Awards-mode analog of
-// your notice WinQuest Analysis three-section layout). Defensive: the LLM output
+// Renders the b2b_busdev jsonb in the detail drawer. Defensive: the LLM output
 // can vary, so every section degrades gracefully when a field is missing.
+// Brief order: SUBJECT (who is analyzed) -> How this surfaced -> Why now ->
+// Entailment -> Solution -> Point of contact -> Performance read -> Cross-sell.
 import React from "react";
 import { downloadAwardBrief } from "../../lib/awardsBrief";
 
@@ -34,8 +35,33 @@ export default function B2BBusDevReport({ award }) {
   const perf = bd.performance || {};
   const tgt = perf.target_contract || {};
   const port = perf.prime_portfolio || {};
-  const who = Array.isArray(pos.who_to_call) ? pos.who_to_call : [];
   const crossSell = Array.isArray(pos.cross_sell) ? pos.cross_sell : [];
+
+  // Solution: list of subscriber offerings that remove the burden. Older rows
+  // scored before this field existed fall back to the pitch paragraph.
+  const solution = Array.isArray(pos.solution)
+    ? pos.solution
+    : pos.solution
+    ? [pos.solution]
+    : [];
+
+  // POC: prefer the structured role-based poc; for rows scored before it
+  // existed, synthesize from the legacy who_to_call[0] + pain.
+  const whoArr = Array.isArray(pos.who_to_call) ? pos.who_to_call : [];
+  const rawPoc =
+    pos.poc && typeof pos.poc === "object"
+      ? pos.poc
+      : whoArr[0]
+      ? { role: whoArr[0].role, pain_impact: null, how_we_solve: null, outreach: null }
+      : null;
+  const poc = rawPoc
+    ? {
+        role: rawPoc.role || null,
+        pain_impact: rawPoc.pain_impact || pos.pain || null,
+        how_we_solve: rawPoc.how_we_solve || null,
+        outreach: rawPoc.outreach || null,
+      }
+    : null;
 
   return (
     <div className="wq-awards wq-report">
@@ -56,13 +82,22 @@ export default function B2BBusDevReport({ award }) {
         </div>
       </div>
 
+      {/* WHO IS BEING ANALYZED */}
+      <div className="wq-rep-subject">
+        <div className="wq-rep-subject-name blurable">{award.recipient || "Prime (unresolved)"}</div>
+        <div className="wq-rep-subject-meta">
+          {award.piid ? <span className="blurable">{award.piid}</span> : null}
+          {award.agency ? <span className="blurable">{award.agency}</span> : null}
+          {award.naics ? <span>NAICS {award.naics}</span> : null}
+        </div>
+      </div>
+
       <Section title="How this surfaced">
         <p className="wq-rep-muted">
           Surfaced from federal award data (<span className="blurable">{award.agency || "—"}
           {award.naics ? ` · NAICS ${award.naics}` : ""}</span>), then scored on delivery
           entailment — not a keyword match.
         </p>
-        {ent.chain ? <p className="wq-rep-p blurable">{ent.chain}</p> : null}
       </Section>
 
       <Section title="Why now">
@@ -78,15 +113,58 @@ export default function B2BBusDevReport({ award }) {
           </span>
           <span>Capability</span>
           <span className="blurable">{ent.capability || "—"}</span>
-          <span>Chain</span>
+          <span>Why they need this</span>
           <span className="blurable">{ent.chain || "—"}</span>
           <span>Incumbent method</span>
           <span>{award.incumbentMethod || pos.incumbent_method || "—"}</span>
         </div>
       </Section>
 
-      <Section title="Pitch">{pos.pitch ? <p className="wq-rep-p blurable">{pos.pitch}</p> : null}</Section>
-      <Section title="Pain">{pos.pain ? <p className="wq-rep-p blurable">{pos.pain}</p> : null}</Section>
+      {/* SOLUTION — subscriber offerings that address the derived burden */}
+      {(solution.length > 0 || pos.pitch) && (
+        <Section title="Solution">
+          {solution.length > 0 ? (
+            <Bullets items={solution} />
+          ) : (
+            <p className="wq-rep-p blurable">{pos.pitch}</p>
+          )}
+        </Section>
+      )}
+
+      {/* POINT OF CONTACT — role-based; real named contacts on subscription */}
+      {poc && (poc.role || poc.pain_impact || poc.how_we_solve || poc.outreach) && (
+        <Section title="Point of contact">
+          <div className="wq-rep-grid">
+            {poc.role ? (
+              <>
+                <span>Role</span>
+                <span className="blurable">{poc.role}</span>
+              </>
+            ) : null}
+            {poc.pain_impact ? (
+              <>
+                <span>Why it hits them</span>
+                <span className="blurable">{poc.pain_impact}</span>
+              </>
+            ) : null}
+            {poc.how_we_solve ? (
+              <>
+                <span>How we solve</span>
+                <span className="blurable">{poc.how_we_solve}</span>
+              </>
+            ) : null}
+          </div>
+          {poc.outreach ? (
+            <div className="wq-rep-outreach">
+              <div className="wq-rep-outreach-lbl">Suggested opening</div>
+              <p className="wq-rep-p blurable">{poc.outreach}</p>
+            </div>
+          ) : null}
+          <p className="wq-rep-muted wq-rep-poc-note">
+            Suggested role-based contact. Named real contacts available with an active subscription.
+          </p>
+        </Section>
+      )}
 
       <Section title="Performance read">
         {tgt.narrative && (
@@ -99,9 +177,7 @@ export default function B2BBusDevReport({ award }) {
           <>
             <p className="wq-rep-p">
               <strong>Prime portfolio</strong> — health {port.portfolio_health ?? "—"}/100
-              {port.chronic_risk ? (
-                <span className="wq-flag"> · chronic-risk flag</span>
-              ) : null}
+              {port.chronic_risk ? <span className="wq-flag"> · chronic-risk flag</span> : null}
             </p>
             <Bullets items={port.bullets} />
           </>
@@ -109,34 +185,6 @@ export default function B2BBusDevReport({ award }) {
           <p className="wq-rep-muted">Prime portfolio: {port?.note || "not scored"}</p>
         )}
       </Section>
-
-      {who.length > 0 && (
-        <Section title="Who to call">
-          <ul className="wq-rep-people">
-            {who.map((p, i) => (
-              <li key={i}>
-                <strong className="blurable">{p.name || "TBD"}</strong>
-                {p.role ? ` — ${p.role}` : ""}
-                {p.linkedin ? (
-                  <>
-                    {" · "}
-                    <a
-                      className="wq-li-link blurable"
-                      href={p.linkedin}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      LinkedIn ↗
-                    </a>
-                  </>
-                ) : null}
-                {p.location ? <span className="wq-rep-loc"> · {p.location}</span> : null}
-                {p.why ? <div className="wq-rep-muted blurable">{p.why}</div> : null}
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
 
       {crossSell.length > 0 && (
         <Section title="Cross-sell">
