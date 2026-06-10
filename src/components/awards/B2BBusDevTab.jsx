@@ -13,7 +13,13 @@ import "./awards.css";
 
 export default function B2BBusDevTab({ oipId }) {
   const [disposition, setDisposition] = useState("all");
-  const [actionableOnly, setActionableOnly] = useState(true);
+  const [states, setStates] = useState({
+    awardedNew: true,
+    awardedOld: true,
+    recompeteSoon: true,
+    recompeteOutside: true,
+  });
+  const toggle = (k) => setStates((s) => ({ ...s, [k]: !s[k] }));
   const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState("");
   const [openAward, setOpenAward] = useState(null);
@@ -46,7 +52,7 @@ export default function B2BBusDevTab({ oipId }) {
   const { awards, loading, error, total, archivedCount } = useAwards(oipId, {
     sort: "score",
     disposition,
-    actionableOnly,
+    states,
     recompeteDays: windows.recompeteDays,
     awardDays: windows.awardDays,
     search,
@@ -67,14 +73,30 @@ export default function B2BBusDevTab({ oipId }) {
           <option value="Route-B2G">Route-B2G</option>
           <option value="No">No</option>
         </select>
-        <label className="wq-check">
-          <input
-            type="checkbox"
-            checked={actionableOnly}
-            onChange={(e) => setActionableOnly(e.target.checked)}
-          />
-          Actionable only (new &le;{windows.awardDays}d · recompete &le;{windows.recompeteDays}d)
-        </label>
+        <span className="wq-state-filters">
+          <span className="wq-state-lbl">Awarded</span>
+          <label className="wq-check">
+            <input type="checkbox" checked={states.awardedNew} onChange={() => toggle("awardedNew")} />
+            new
+          </label>
+          <label className="wq-check">
+            <input type="checkbox" checked={states.awardedOld} onChange={() => toggle("awardedOld")} />
+            old
+          </label>
+          <span className="wq-state-lbl">Recompete</span>
+          <label className="wq-check">
+            <input type="checkbox" checked={states.recompeteSoon} onChange={() => toggle("recompeteSoon")} />
+            soon
+          </label>
+          <label className="wq-check">
+            <input
+              type="checkbox"
+              checked={states.recompeteOutside}
+              onChange={() => toggle("recompeteOutside")}
+            />
+            outside window
+          </label>
+        </span>
         <label className="wq-check">
           <input
             type="checkbox"
@@ -130,7 +152,7 @@ export default function B2BBusDevTab({ oipId }) {
             >
               &times;
             </button>
-            <B2BBusDevReport award={openAward} />
+            <B2BBusDevReport award={openAward} recompeteDays={windows.recompeteDays} />
           </div>
         </div>
       )}

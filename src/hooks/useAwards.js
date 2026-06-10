@@ -16,6 +16,28 @@ const SORTERS = {
 };
 const rank = (m) => (m == null || m < 0 ? Number.POSITIVE_INFINITY : m);
 
+// Two-axis tags the B2B view filters and flags by. Award axis: new vs old
+// (pop_start). Recompete axis: soon vs outside-window (pop_end). Only active
+// awards (future or open-ended PoP) are tagged; past-PoP awards are untagged
+// and therefore excluded from the view.
+export function awardTags(a, recompeteDays = 180, awardDays = 120) {
+  const active = a.daysToPopEnd == null || a.daysToPopEnd >= 0;
+  if (!active) {
+    return { active: false, awardedNew: false, awardedOld: false, recompeteSoon: false, recompeteOutside: false };
+  }
+  const awardedNew =
+    a.daysSincePopStart != null && a.daysSincePopStart >= 0 && a.daysSincePopStart <= awardDays;
+  const recompeteSoon =
+    a.daysToPopEnd != null && a.daysToPopEnd >= 0 && a.daysToPopEnd <= recompeteDays;
+  return {
+    active: true,
+    awardedNew,
+    awardedOld: !awardedNew,
+    recompeteSoon,
+    recompeteOutside: !recompeteSoon,
+  };
+}
+
 export function useAwards(oipId, opts = {}) {
   const {
     sort = "score",
@@ -23,7 +45,7 @@ export function useAwards(oipId, opts = {}) {
     withinMonths = null,
     recompeteDays = null,
     awardDays = null,
-    actionableOnly = false,
+    states = null,
     search = "",
     includeArchived = false,
   } = opts;
@@ -70,19 +92,18 @@ export function useAwards(oipId, opts = {}) {
       list = list.filter((a) => a.score != null && a.score >= ARCHIVE_BELOW);
     }
     if (disposition !== "all") list = list.filter((a) => a.disposition === disposition);
-    if (actionableOnly && (recompeteDays != null || awardDays != null)) {
+    if (states) {
+      const rd = recompeteDays ?? 180;
+      const ad = awardDays ?? 120;
       list = list.filter((a) => {
-        const recompeteSoon =
-          recompeteDays != null &&
-          a.daysToPopEnd != null &&
-          a.daysToPopEnd >= 0 &&
-          a.daysToPopEnd <= recompeteDays;
-        const recentlyAwarded =
-          awardDays != null &&
-          a.daysSincePopStart != null &&
-          a.daysSincePopStart >= 0 &&
-          a.daysSincePopStart <= awardDays;
-        return recompeteSoon || recentlyAwarded;
+        const t = awardTags(a, rd, ad);
+        if (!t.active) return false;
+        return (
+          (states.awardedNew && t.awardedNew) ||
+          (states.awardedOld && t.awardedOld) ||
+          (states.recompeteSoon && t.recompeteSoon) ||
+          (states.recompeteOutside && t.recompeteOutside)
+        );
       });
     }
     if (withinMonths != null) {
@@ -101,7 +122,7 @@ export function useAwards(oipId, opts = {}) {
     }
     list.sort(SORTERS[sort] || SORTERS.score);
     return list;
-  }, [rows, sort, disposition, withinMonths, recompeteDays, awardDays, actionableOnly, search, includeArchived]);
+  }, [rows, sort, disposition, withinMonths, recompeteDays, awardDays, states, search, includeArchived]);
 
   const archivedCount = useMemo(
     () => rows.filter((a) => a.score == null || a.score < ARCHIVE_BELOW).length,

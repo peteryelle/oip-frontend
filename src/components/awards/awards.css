@@ -338,3 +338,46 @@
   background: #dbeafe;
   color: #1e40af;
 }
+
+/* B2B state-filter checkbox group */
+.wq-state-filters { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.wq-state-lbl {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wq-muted);
+  font-weight: 600;
+}
+
+/* B2B table lifecycle states (active / ended) in the Recompete column */
+.wq-atable-state { font-size: 12px; white-space: nowrap; }
+.wq-state-active { color: var(--wq-muted); }
+.wq-state-ended { color: #9aa0a6; text-decoration: line-through; }
+
+/* Incumbent-health banner — shown on recompetes; low score = vulnerable = opening */
+.wq-rep-health {
+  margin: 6px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--wq-line);
+  border-left: 3px solid var(--wq-accent);
+  border-radius: 0 8px 8px 0;
+  background: #fafbfb;
+}
+.wq-rep-health-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.wq-rep-health-lbl {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wq-muted);
+}
+.wq-rep-health-score { font-size: 18px; font-weight: 700; }
+.wq-health-weak { color: #b91c1c; }
+.wq-health-mixed { color: #92400e; }
+.wq-health-strong { color: #166534; }
+.wq-rep-health-na { font-size: 13px; color: var(--wq-muted); font-style: italic; }

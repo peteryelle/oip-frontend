@@ -5,6 +5,7 @@
 // opens the existing B2BBusDevReport drawer. Self-contained: reuses only
 // the wq- classes already defined in awards.css.
 import React, { useMemo, useState } from "react";
+import { awardTags } from "../../hooks/useAwards";
 
 const DISPOSITION_CLASS = {
   Yes: "wq-disp-yes",
@@ -130,15 +131,12 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
           {sorted.map((a) => {
             const pop = fmtPopEnd(a.popEnd, a.daysToPopEnd, recompeteDays);
             const scope = scopeFromTitle(a.title, a.piid);
-            const isNew =
-              a.daysSincePopStart != null &&
-              a.daysSincePopStart >= 0 &&
-              a.daysSincePopStart <= awardDays;
+            const t = awardTags(a, recompeteDays, awardDays);
             return (
               <tr key={a.signalId} className="wq-atable-row" onClick={() => onRowClick(a)}>
                 <td className="wq-atable-td">
                   <div className="wq-atable-prime blurable">{a.recipient || "Unknown prime"}</div>
-                  {isNew && <span className="wq-chip wq-flag-new">New award</span>}
+                  {t.awardedNew && <span className="wq-chip wq-flag-new">New award</span>}
                   {scope && <div className="wq-atable-scope blurable">{scope}</div>}
                   <div className="wq-atable-sub blurable">
                     {a.piid && <span>{a.piid.slice(0, 22)}</span>}
@@ -150,12 +148,14 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                 </td>
                 <td className="wq-atable-td wq-atable-r wq-atable-amt">{fmtMoney(a.amount)}</td>
                 <td className="wq-atable-td">
-                  {pop.cls ? (
-                    <span className={`wq-chip ${pop.cls}`}>
+                  {!t.active ? (
+                    <span className="wq-atable-state wq-state-ended">Ended · {pop.date}</span>
+                  ) : t.recompeteSoon ? (
+                    <span className={`wq-chip ${pop.cls || "wq-clock-warm"}`}>
                       {pop.date}{pop.months != null ? ` · ${pop.months}mo` : ""}
                     </span>
                   ) : (
-                    <span className="wq-atable-sub-inline">{pop.date}</span>
+                    <span className="wq-atable-state wq-state-active">Outside window · {pop.date}</span>
                   )}
                 </td>
                 <td className="wq-atable-td">

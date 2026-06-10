@@ -28,7 +28,14 @@ function Bullets({ items }) {
   );
 }
 
-export default function B2BBusDevReport({ award }) {
+function healthBand(h) {
+  if (h == null) return "";
+  if (h < 50) return "wq-health-weak"; // low health = vulnerable incumbent = displacement opening
+  if (h < 70) return "wq-health-mixed";
+  return "wq-health-strong";
+}
+
+export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
   const bd = award.busdev || {};
   const ent = bd.entailment || {};
   const pos = bd.positioning || {};
@@ -36,6 +43,11 @@ export default function B2BBusDevReport({ award }) {
   const tgt = perf.target_contract || {};
   const port = perf.prime_portfolio || {};
   const crossSell = Array.isArray(pos.cross_sell) ? pos.cross_sell : [];
+
+  // Recompete state drives whether the incumbent-health banner shows at top.
+  const isRecompete =
+    award.daysToPopEnd != null && award.daysToPopEnd >= 0 && award.daysToPopEnd <= recompeteDays;
+  const portfolioHealth = port.portfolio_health ?? null;
 
   // Solution: list of subscriber offerings that remove the burden. Older rows
   // scored before this field existed fall back to the pitch paragraph.
@@ -91,6 +103,34 @@ export default function B2BBusDevReport({ award }) {
           {award.naics ? <span>NAICS {award.naics}</span> : null}
         </div>
       </div>
+
+      {isRecompete && (
+        <div className="wq-rep-health">
+          <div className="wq-rep-health-top">
+            <span className="wq-rep-health-lbl">Incumbent health</span>
+            {portfolioHealth != null ? (
+              <span className={`wq-rep-health-score ${healthBand(portfolioHealth)}`}>
+                {portfolioHealth}/100
+              </span>
+            ) : (
+              <span className="wq-rep-health-na">not scored</span>
+            )}
+            {port.chronic_risk && <span className="wq-chip wq-clock-hot">chronic-risk</span>}
+          </div>
+          {Array.isArray(port.bullets) && port.bullets.length > 0 && (
+            <Bullets items={port.bullets} />
+          )}
+          {tgt.narrative && (
+            <p className="wq-rep-muted">
+              This contract: <span className="blurable">{tgt.narrative}</span>
+              {tgt.score != null ? ` (${tgt.score}/100)` : ""}
+            </p>
+          )}
+          {portfolioHealth == null && (
+            <p className="wq-rep-muted">Rescore this award to populate the incumbent-health read.</p>
+          )}
+        </div>
+      )}
 
       <Section title="How this surfaced">
         <p className="wq-rep-muted">
