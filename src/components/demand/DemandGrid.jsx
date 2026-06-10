@@ -23,7 +23,7 @@ function bandClass(cell) {
   return "wq-dem-lo";
 }
 
-export default function DemandGrid({ oipId }) {
+export default function DemandGrid({ oipId, onCellClick, selected }) {
   const { agencies, verticals, cellAt, colTotals, loading, error, cellCount } =
     useDemand(oipId);
 
@@ -52,6 +52,11 @@ export default function DemandGrid({ oipId }) {
         <span className="wq-dem-key"><span className="wq-dem-sw wq-dem-na" />Not yet scored</span>
       </div>
 
+      <div className="wq-dem-caption">
+        Dollar figures are total federal contract spend in each agency × service line — the
+        addressable market, not your pipeline. {onCellClick ? "Select any cell to see the scored opportunities in that pocket." : null}
+      </div>
+
       <div className="wq-dem-scroll">
         <table className="wq-dem-table">
           <thead>
@@ -75,8 +80,47 @@ export default function DemandGrid({ oipId }) {
                   const cell = cellAt(a.name, v.naics);
                   const cls = bandClass(cell);
                   const has = cell && cell.spend > 0;
+                  const isSel = selected && selected.agency === a.name && selected.naics === v.naics;
+                  const clickable = has && onCellClick;
+                  const tip = has
+                    ? cell.scored
+                      ? `${a.acronym} · ${v.label}\nFit ${cell.pct}% from ${cell.samples} sampled award${cell.samples === 1 ? "" : "s"}\n${money(cell.spend)} total category spend`
+                      : `${a.acronym} · ${v.label}\nNot yet scored\n${money(cell.spend)} total category spend`
+                    : undefined;
                   return (
-                    <td key={v.naics} className={`wq-dem-cell ${cls}`}>
+                    <td
+                      key={v.naics}
+                      className={`wq-dem-cell ${cls}${clickable ? " wq-dem-click" : ""}${isSel ? " wq-dem-sel" : ""}`}
+                      title={tip}
+                      role={clickable ? "button" : undefined}
+                      tabIndex={clickable ? 0 : undefined}
+                      onClick={
+                        clickable
+                          ? () =>
+                              onCellClick({
+                                agency: a.name,
+                                naics: v.naics,
+                                agencyLabel: a.acronym,
+                                naicsLabel: v.label,
+                              })
+                          : undefined
+                      }
+                      onKeyDown={
+                        clickable
+                          ? (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                onCellClick({
+                                  agency: a.name,
+                                  naics: v.naics,
+                                  agencyLabel: a.acronym,
+                                  naicsLabel: v.label,
+                                });
+                              }
+                            }
+                          : undefined
+                      }
+                    >
                       {has ? (
                         <>
                           <div className="wq-dem-spend">{money(cell.spend)}</div>

@@ -48,6 +48,7 @@ export function useAwards(oipId, opts = {}) {
     states = null,
     search = "",
     includeArchived = false,
+    pocket = null,
   } = opts;
 
   // Scores below this are archived (low delivery-fit noise) and hidden by default.
@@ -91,6 +92,10 @@ export function useAwards(oipId, opts = {}) {
     if (!includeArchived) {
       list = list.filter((a) => a.score != null && a.score >= ARCHIVE_BELOW);
     }
+    // Pocket scope: a clicked demand-grid cell (sub-agency × NAICS).
+    if (pocket && pocket.agency && pocket.naics) {
+      list = list.filter((a) => a.subAgency === pocket.agency && a.naics === pocket.naics);
+    }
     if (disposition !== "all") list = list.filter((a) => a.disposition === disposition);
     if (states) {
       const rd = recompeteDays ?? 180;
@@ -122,7 +127,7 @@ export function useAwards(oipId, opts = {}) {
     }
     list.sort(SORTERS[sort] || SORTERS.score);
     return list;
-  }, [rows, sort, disposition, withinMonths, recompeteDays, awardDays, states, search, includeArchived]);
+  }, [rows, sort, disposition, withinMonths, recompeteDays, awardDays, states, search, includeArchived, pocket]);
 
   const archivedCount = useMemo(
     () => rows.filter((a) => a.score == null || a.score < ARCHIVE_BELOW).length,

@@ -381,3 +381,27 @@
 .wq-health-mixed { color: #92400e; }
 .wq-health-strong { color: #166534; }
 .wq-rep-health-na { font-size: 13px; color: var(--wq-muted); font-style: italic; }
+
+/* ── Pocket scope chip (drill-in from demand grid) ──────────────── */
+.wq-pocket-scope {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 12px;
+  padding: 8px 12px;
+  background: #eef4f0;
+  border: 1px solid #cfe0d5;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--wq-ink);
+}
+.wq-pocket-clear {
+  background: none;
+  border: none;
+  color: #2f6b49;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.wq-pocket-clear:hover { text-decoration: underline; }

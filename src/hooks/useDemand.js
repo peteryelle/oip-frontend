@@ -67,6 +67,7 @@ function buildGrid(cells, vlib, alib) {
     map.set(`${c.agency_name}|${c.naics}`, {
       spend,
       scored: samples > 0,
+      samples,
       pct,
       rank: c.priority_rank,
     });

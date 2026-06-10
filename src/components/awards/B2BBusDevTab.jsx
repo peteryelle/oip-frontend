@@ -3,7 +3,7 @@
 // Self-contained "B2B Bus Dev" tab for the SAM Market Review. Owns its own
 // data (useAwards), filter controls, award TABLE, and detail drawer — so it
 // touches none of the existing notice/DIB query or SignalDrawer.
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAwards } from "../../hooks/useAwards";
 import AwardTable from "./AwardTable";
@@ -23,6 +23,15 @@ export default function B2BBusDevTab({ oipId }) {
   const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState("");
   const [openAward, setOpenAward] = useState(null);
+  const [pocket, setPocket] = useState(null);
+  const listRef = useRef(null);
+
+  // When a demand-grid cell is clicked, scope the list and scroll to it.
+  useEffect(() => {
+    if (pocket && listRef.current) {
+      listRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [pocket]);
 
   // Timing windows (duration days) configured on the Derived Demand page.
   const [windows, setWindows] = useState({ recompeteDays: 180, awardDays: 120 });
@@ -57,13 +66,26 @@ export default function B2BBusDevTab({ oipId }) {
     awardDays: windows.awardDays,
     search,
     includeArchived: showArchived,
+    pocket,
   });
 
   return (
     <div className="wq-awards">
       <div style={{ marginBottom: 20 }}>
-        <DemandGrid oipId={oipId} />
+        <DemandGrid oipId={oipId} onCellClick={setPocket} selected={pocket} />
       </div>
+
+      <div ref={listRef} />
+      {pocket && (
+        <div className="wq-pocket-scope">
+          <span>
+            Showing <strong>{pocket.agencyLabel} × {pocket.naicsLabel}</strong>
+          </span>
+          <button className="wq-pocket-clear" onClick={() => setPocket(null)}>
+            Clear filter &times;
+          </button>
+        </div>
+      )}
 
       <div className="wq-awards-controls">
         <select value={disposition} onChange={(e) => setDisposition(e.target.value)}>
@@ -129,7 +151,20 @@ export default function B2BBusDevTab({ oipId }) {
 
       {!loading && !error && awards.length === 0 && (
         <div className="wq-awards-empty">
-          No scored awards yet. Queue a <code>busdev</code> job for this OIP and run the dispatcher.
+          {pocket ? (
+            <>
+              No actionable opportunities (score &ge; 40) in{" "}
+              <strong>{pocket.agencyLabel} &times; {pocket.naicsLabel}</strong>.{" "}
+              <button className="wq-pocket-clear" onClick={() => setPocket(null)}>
+                Clear filter
+              </button>{" "}
+              to see the full list.
+            </>
+          ) : (
+            <>
+              No scored awards yet. Queue a <code>busdev</code> job for this OIP and run the dispatcher.
+            </>
+          )}
         </div>
       )}
 

@@ -76,6 +76,19 @@
 .wq-dem-na   .wq-dem-pct { color: var(--wq-faint); }
 .wq-dem-blank { background: #fafaf5; }
 
+/* Clickable cells (drill into the pocket's opportunities) */
+.wq-dem-click { cursor: pointer; transition: box-shadow 0.1s ease, transform 0.1s ease; }
+.wq-dem-click:hover { box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, 0.18); }
+.wq-dem-click:focus-visible { outline: 2px solid #2f6b49; outline-offset: -2px; }
+.wq-dem-sel { box-shadow: inset 0 0 0 2px #2f6b49; }
+
+.wq-dem-caption {
+  font-size: 12px;
+  color: var(--wq-muted);
+  line-height: 1.4;
+  margin: 2px 2px 12px;
+}
+
 /* ── Footer totals ──────────────────────────────────────────── */
 .wq-dem-foot {
   border-top: 1px solid var(--wq-line);
