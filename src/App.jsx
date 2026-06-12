@@ -1290,6 +1290,7 @@ function MarketReviewPage() {
 
   const isSam = selectedOip?.verticals?.slug === 'sam'
   const isDibOip = selectedOip?.slug === 'sam-dib'
+  const isDerivedOip = selectedOip?.slug?.endsWith('-derived')
   const [samTab, setSamTab] = useState(isDibOip ? 'dib' : 'opportunities')
   const drawerProps = openSignal ? {
     os: openSignal,
@@ -1421,7 +1422,7 @@ function MarketReviewPage() {
           {/* SAM unchanged */}
           {isSam && (
             samTab === 'busdev' ? (
-              <B2BBusDevTab oipId={selectedOip.id} />
+              <B2BBusDevTab oipId={selectedOip.id} isDerived={isDerivedOip} />
             ) : (
             <>
               <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>

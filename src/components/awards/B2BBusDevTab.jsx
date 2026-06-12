@@ -11,7 +11,7 @@ import B2BBusDevReport from "./B2BBusDevReport";
 import DemandGrid from "../demand/DemandGrid";
 import "./awards.css";
 
-export default function B2BBusDevTab({ oipId }) {
+export default function B2BBusDevTab({ oipId, isDerived }) {
   const [disposition, setDisposition] = useState("all");
   const [states, setStates] = useState({
     awardedNew: true,
@@ -71,9 +71,11 @@ export default function B2BBusDevTab({ oipId }) {
 
   return (
     <div className="wq-awards">
-      <div style={{ marginBottom: 20 }}>
-        <DemandGrid oipId={oipId} onCellClick={setPocket} selected={pocket} />
-      </div>
+      {isDerived && (
+        <div style={{ marginBottom: 20 }}>
+          <DemandGrid oipId={oipId} onCellClick={setPocket} selected={pocket} />
+        </div>
+      )}
 
       <div ref={listRef} />
       {pocket && (
