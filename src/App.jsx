@@ -5316,8 +5316,8 @@ function InviteModal({ tenantId, onClose }) {
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-fade)', marginBottom: 6 }}>Role</div>
             <select value={role} onChange={e => setRole(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--rule-strong)', borderRadius: 3, fontSize: 15 }}>
               <option value="viewer">Viewer (read-only)</option>
-              <option value="member">Member (can edit signals)</option>
-              <option value="admin">Admin (can edit OIP, profile, sentinel, invite team)</option>
+              <option value="member">Member (can edit, cannot invite)</option>
+              <option value="admin">Admin (can edit + invite team)</option>
             </select>
           </label>
           {err && <div className="auth-error">{err}</div>}
