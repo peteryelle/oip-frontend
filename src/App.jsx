@@ -1291,7 +1291,7 @@ function MarketReviewPage() {
   const isSam = selectedOip?.verticals?.slug === 'sam'
   const isDibOip = selectedOip?.slug === 'sam-dib'
   const isDerivedOip = selectedOip?.slug?.endsWith('-derived')
-  const [samTab, setSamTab] = useState(isDibOip ? 'dib' : 'opportunities')
+  const [samTab, setSamTab] = useState(isDibOip ? 'dib' : isDerivedOip ? 'busdev' : 'opportunities')
   const drawerProps = openSignal ? {
     os: openSignal,
     onClose: () => setOpenSignal(null),
@@ -1303,7 +1303,7 @@ function MarketReviewPage() {
   const samBusdev        = isSam ? signals.filter(s => s.signals?.signal_kind === 'award') : []
   const samOpportunities = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && (s.signals?.metadata?.signal_type || 'opportunity') === 'opportunity') : signals
   const samDib           = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && s.signals?.metadata?.signal_type === 'award') : []
-  useEffect(() => { setSamTab(isDibOip ? 'dib' : 'opportunities') }, [selectedOip?.id])
+  useEffect(() => { setSamTab(isDibOip ? 'dib' : isDerivedOip ? 'busdev' : 'opportunities') }, [selectedOip?.id])
   const [naicsFilter, setNaicsFilter] = useState('')
   const activeSignals    = isSam ? (samTab === 'dib' ? samDib : samOpportunities) : signals
 
@@ -1341,8 +1341,8 @@ function MarketReviewPage() {
         )}
       </div>
 
-      {/* SAM tabs */}
-      {isSam && (
+      {/* SAM tabs — hidden for single-lens derived OIPs (OIP selector already pins the lens) */}
+      {isSam && !isDerivedOip && (
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--rule)' }}>
           {[
             { key: 'opportunities', label: 'B2G' },
