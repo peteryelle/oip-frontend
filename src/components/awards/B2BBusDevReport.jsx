@@ -240,6 +240,16 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
         <button type="button" className="wq-btn" onClick={() => downloadAwardBrief(award)}>
           Download B2B Brief
         </button>
+        {award.awardId && (
+          <a
+            className="wq-btn wq-btn-ghost"
+            href={`https://www.usaspending.gov/award/${award.awardId}/`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            View on USASpending &#8599;
+          </a>
+        )}
         {bd.vendor?.website && (
           <a className="wq-btn wq-btn-ghost" href={bd.vendor.website} target="_blank" rel="noreferrer">
             <span className="blurable">{award.recipient || "Prime"}</span> site
