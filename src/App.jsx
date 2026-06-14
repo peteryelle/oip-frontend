@@ -1,6 +1,8 @@
 import { useEffect, useState, Component } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
 import B2BBusDevTab from './components/awards/B2BBusDevTab'
+import ActivityLog from './components/audit/ActivityLog'
+import AuditHistory from './components/audit/AuditHistory'
 import PipelineRadar from './components/radar/PipelineRadar'
 import DerivedDemandSetup from './components/demand/DerivedDemandSetup'
 import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
@@ -61,6 +63,7 @@ export default function App() {
               <Route path="settings/subscriptions" element={<SubscriptionsPage />} />
               <Route path="settings/runs" element={<RunHistoryPage />} />
               <Route path="settings/integrations" element={<IntegrationsPage />} />
+              <Route path="settings/activity" element={<ActivityLogPage />} />
               <Route path="account" element={<AccountPage />} />
               <Route path="help" element={<HelpPage />} />
               <Route path="radar" element={<PipelineRadarPage />} />
@@ -3439,6 +3442,8 @@ ${analysisHtml}
           </p>
         </div>
 
+        <AuditHistory table="oip_signals" recordId={`${os.oip_id}:${os.signal_id}`} />
+
       </div>
     </div>
   )
@@ -5140,6 +5145,12 @@ function PursuedPage() {
 // SETTINGS — landing
 // ────────────────────────────────────────────────────────────────────────────
 
+function ActivityLogPage() {
+  const { selectedOip } = useOip()
+  if (!selectedOip) return null
+  return <ActivityLog tenantId={selectedOip.tenant_id} tenantName={selectedOip.tenants?.name} />
+}
+
 function SettingsPage() {
   return (
     <div className="detail-section">
@@ -5165,6 +5176,11 @@ function SettingsPage() {
           <div className="us-eyebrow">Operations</div>
           <div className="us-title">Run history</div>
           <div className="us-body">Past scrape and score runs, status, and stats.</div>
+        </Link>
+        <Link to="/settings/activity" className="us-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="us-eyebrow">Audit</div>
+          <div className="us-title">Activity log</div>
+          <div className="us-body">Every field change by a team member — who, when, and what. Append-only.</div>
         </Link>
         <Link to="/account" className="us-card" style={{ textDecoration: 'none', color: 'inherit' }}>
           <div className="us-eyebrow">Account</div>
