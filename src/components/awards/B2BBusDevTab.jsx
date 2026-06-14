@@ -13,6 +13,7 @@ import "./awards.css";
 
 export default function B2BBusDevTab({ oipId, isDerived }) {
   const [disposition, setDisposition] = useState("all");
+  const [sort, setSort] = useState("recompete");
   const [states, setStates] = useState({
     awardedNew: true,
     awardedOld: true,
@@ -57,9 +58,10 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
     };
   }, [oipId]);
 
-  // Initial order is B2B score desc; the table's column headers re-sort locally.
+  // Default order is recompete-soonest (near-term PoP-end floats up); the sort
+  // control below switches it, and the table's column headers still re-sort locally.
   const { awards, loading, error, total, archivedCount } = useAwards(oipId, {
-    sort: "score",
+    sort,
     disposition,
     states,
     recompeteDays: windows.recompeteDays,
@@ -90,6 +92,11 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
       )}
 
       <div className="wq-awards-controls">
+        <select value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="recompete">Sort: Recompete soonest</option>
+          <option value="score">Sort: Fit score</option>
+          <option value="amount">Sort: Award value</option>
+        </select>
         <select value={disposition} onChange={(e) => setDisposition(e.target.value)}>
           <option value="all">All dispositions</option>
           <option value="Yes">Yes</option>
