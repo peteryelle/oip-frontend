@@ -7,6 +7,8 @@ import PipelineRadar from './components/radar/PipelineRadar'
 import DerivedDemandSetup from './components/demand/DerivedDemandSetup'
 import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
 import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
+import { DemoGateProvider } from './hooks/useDemoGate'
+import DemoIndicator from './components/demo/DemoIndicator'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import { AuthProvider, useAuth } from './lib/auth'
@@ -162,6 +164,7 @@ function Layout() {
     path.startsWith('/settings') ? 'settings' : ''
 
   return (
+    <DemoGateProvider supabase={supabase} tenantId={selectedOip?.tenant_id}>
     <div className={`app${demoBlur ? ' demo-blur' : ''}`}>
       <Topbar
         onSignOut={signOut}
@@ -197,6 +200,7 @@ function Layout() {
         >
           {demoBlur ? 'Demo blur: ON' : 'Demo blur'}
         </button>
+        <DemoIndicator />
       </nav>
 
       {/* Breadcrumb */}
@@ -220,6 +224,7 @@ function Layout() {
 
       <FloatingHelpButton />
     </div>
+    </DemoGateProvider>
   )
 }
 
