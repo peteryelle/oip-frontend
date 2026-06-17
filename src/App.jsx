@@ -3486,9 +3486,10 @@ function ProfilePage() {
   const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
   const [versions, setVersions] = useState([])
+  const [borrowed, setBorrowed] = useState(false) // profile resolved from tenant-canonical (no per-OIP row)
   const { memberships } = useAuth()
   const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
-  const canEdit = ['owner', 'admin'].includes(myRole)
+  const canEdit = ['owner', 'admin'].includes(myRole) && !borrowed
   const isSam = selectedOip?.verticals?.slug === 'sam'
 
   const loadProfile = async () => {
@@ -3497,9 +3498,19 @@ function ProfilePage() {
       .select('id, version, is_active, data, created_at')
       .eq('oip_id', selectedOip.id)
       .order('version', { ascending: false })
-    if (data) {
+    if (data && data.length) {
       setVersions(data)
       setProfile(data.find(p => p.is_active) || data[0])
+      setBorrowed(false)
+    } else {
+      // Recompete/Derived lanes have no per-OIP profile row — fall back to the
+      // tenant-canonical profile (read-only) so Profile renders in every lane.
+      const { data: canon } = await supabase.rpc('get_canonical_profile_row', { p_oip_id: selectedOip.id })
+      if (canon) {
+        setVersions([])
+        setProfile({ id: canon.id, version: null, is_active: true, data: canon.data })
+        setBorrowed(true)
+      }
     }
     // Also load the current state subscriptions to show "States in Action"
     const { data: subs } = await supabase
@@ -3547,7 +3558,7 @@ function ProfilePage() {
 
   return (
     <div className="detail-section">
-      <div className="detail-eyebrow">Profile · v{profile.version} {profile.is_active ? '(active)' : ''}</div>
+      <div className="detail-eyebrow">Profile · {borrowed ? 'tenant profile (read-only)' : `v${profile.version} ${profile.is_active ? '(active)' : ''}`}</div>
       <h2 className="detail-title">
         {data.name || selectedOip.tenants?.name}<HelpIcon topic="profile" />
       </h2>
@@ -3904,9 +3915,10 @@ function ObjectivesPage() {
   const [draft, setDraft] = useState({})
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
+  const [borrowed, setBorrowed] = useState(false) // profile resolved from tenant-canonical (no per-OIP row)
   const { memberships } = useAuth()
   const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
-  const canEdit = ['owner', 'admin'].includes(myRole)
+  const canEdit = ['owner', 'admin'].includes(myRole) && !borrowed
 
   const load = async () => {
     if (!selectedOip) return
@@ -3915,8 +3927,14 @@ function ObjectivesPage() {
       .select('id, version, data')
       .eq('oip_id', selectedOip.id)
       .eq('is_active', true)
-      .single()
-    setProfile(data)
+      .maybeSingle()
+    if (data) {
+      setProfile(data); setBorrowed(false)
+    } else {
+      // Recompete/Derived lanes share the tenant-canonical profile (read-only here).
+      const { data: canon } = await supabase.rpc('get_canonical_profile_row', { p_oip_id: selectedOip.id })
+      if (canon) { setProfile({ id: canon.id, version: null, data: canon.data }); setBorrowed(true) }
+    }
   }
 
   useEffect(() => { load() }, [selectedOip])
@@ -3959,7 +3977,7 @@ function ObjectivesPage() {
 
   return (
     <div className="detail-section">
-      <div className="detail-eyebrow">Business Objectives · v{profile.version}</div>
+      <div className="detail-eyebrow">Business Objectives · {borrowed ? 'tenant profile (read-only)' : `v${profile.version}`}</div>
       <h2 className="detail-title">Strategic targets and expansion areas<HelpIcon topic="objectives" /></h2>
 
       <ObjectivesField
