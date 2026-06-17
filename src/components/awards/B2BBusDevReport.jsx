@@ -75,6 +75,17 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
       }
     : null;
 
+  // Core narrative — worker brief elements 1-4: award scope -> prime capability
+  // -> the gap (entailed, not evidenced by prime) -> how Mason fills it.
+  const awardScope = pos.deliverables || null; // element 1
+  const primeOffering = pos.prime_core_offering || null; // element 2
+  const gap = Array.isArray(pos.gaps_addressed) // element 3
+    ? pos.gaps_addressed
+    : Array.isArray(bd.vendor?.gap)
+    ? bd.vendor.gap
+    : [];
+  const fillImpact = pos.impact || null; // element 4
+
   return (
     <div className="wq-awards wq-report">
       <div className="wq-rep-header">
@@ -103,6 +114,30 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
           {award.naics ? <span>NAICS {award.naics}</span> : null}
         </div>
       </div>
+
+      {/* CORE NARRATIVE — award scope -> prime capability -> gap -> how Mason fills it */}
+      {(awardScope || primeOffering || gap.length > 0 || fillImpact) && (
+        <>
+          <Section title="Award scope">
+            {awardScope ? <p className="wq-rep-p blurable">{awardScope}</p> : null}
+          </Section>
+          <Section title="Prime's capability to deliver">
+            {primeOffering ? <p className="wq-rep-p blurable">{primeOffering}</p> : null}
+          </Section>
+          <Section title="The gap — entailed, not evidenced by the prime">
+            {gap.length > 0 ? (
+              <Bullets items={gap} />
+            ) : (
+              <p className="wq-rep-muted">
+                No separable gap identified — the prime appears to own the entailed scope.
+              </p>
+            )}
+          </Section>
+          <Section title="How Mason fills the gap">
+            {fillImpact ? <p className="wq-rep-p blurable">{fillImpact}</p> : null}
+          </Section>
+        </>
+      )}
 
       {isRecompete && (
         <div className="wq-rep-health">
