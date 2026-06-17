@@ -1201,6 +1201,7 @@ function MarketReviewPage() {
   const [search, setSearch] = useState('')
   const [openSignal, setOpenSignal] = useState(null)
   const [openEntity, setOpenEntity] = useState(null)
+  const [agencyAllowlist, setAgencyAllowlist] = useState([]) // profile target_agencies (empty = show all)
 
   // Read entity filter from URL
   const params = new URLSearchParams(useLocation().search)
@@ -1256,6 +1257,18 @@ function MarketReviewPage() {
         })
       .subscribe()
     return () => { supabase.removeChannel(ch) }
+  }, [selectedOip])
+
+  // Load the tenant-canonical agency allowlist (target_agencies). Empty => no filtering.
+  useEffect(() => {
+    if (!selectedOip) { setAgencyAllowlist([]); return }
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase.rpc('get_canonical_profile', { p_oip_id: selectedOip.id })
+      if (cancelled) return
+      setAgencyAllowlist(Array.isArray(data?.target_agencies) ? data.target_agencies : [])
+    })()
+    return () => { cancelled = true }
   }, [selectedOip])
 
   const allStates = [...new Set(signals.map(s => s.signals?.state).filter(Boolean))].sort()
@@ -1318,6 +1331,14 @@ function MarketReviewPage() {
   const filtered = activeSignals.filter(s => {
     if (statusFilter && s.status !== statusFilter) return false
     if (tierFilter && s.signal_tier !== tierFilter) return false
+    // Agency allowlist — Direct SAM opportunities only. Hide signals whose awarding
+    // department isn't in the profile's target_agencies. Empty allowlist => show all.
+    if (isSam && samTab === 'opportunities' && agencyAllowlist.length) {
+      const m = s.signals?.metadata || {}
+      const dept = `${m.department_full || ''} ${m.department_name || ''}`.toUpperCase()
+      const ok = agencyAllowlist.some(a => (a.match || []).some(tok => dept.includes(String(tok).toUpperCase())))
+      if (!ok) return false
+    }
     if (!isSam) {
       if (stateFilter && s.signals?.state !== stateFilter) return false
       if (groupFilter && !(s.matched_groups || []).includes(groupFilter)) return false
