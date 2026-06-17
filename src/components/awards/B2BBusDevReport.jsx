@@ -49,29 +49,20 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
     award.daysToPopEnd != null && award.daysToPopEnd >= 0 && award.daysToPopEnd <= recompeteDays;
   const portfolioHealth = port.portfolio_health ?? null;
 
-  // Solution: list of subscriber offerings that remove the burden. Older rows
-  // scored before this field existed fall back to the pitch paragraph.
-  const solution = Array.isArray(pos.solution)
-    ? pos.solution
-    : pos.solution
-    ? [pos.solution]
-    : [];
-
-  // POC: prefer the structured role-based poc; for rows scored before it
-  // existed, synthesize from the legacy who_to_call[0] + pain.
+  // Point of contact — current schema poc:{role,pains,positioning}; fall back to
+  // legacy keys (pain_impact/how_we_solve/who_to_call) for older scored rows.
   const whoArr = Array.isArray(pos.who_to_call) ? pos.who_to_call : [];
   const rawPoc =
     pos.poc && typeof pos.poc === "object"
       ? pos.poc
       : whoArr[0]
-      ? { role: whoArr[0].role, pain_impact: null, how_we_solve: null, outreach: null }
+      ? { role: whoArr[0].role }
       : null;
   const poc = rawPoc
     ? {
         role: rawPoc.role || null,
-        pain_impact: rawPoc.pain_impact || pos.pain || null,
-        how_we_solve: rawPoc.how_we_solve || null,
-        outreach: rawPoc.outreach || null,
+        pains: rawPoc.pains || rawPoc.pain_impact || pos.pain || null,
+        positioning: rawPoc.positioning || rawPoc.how_we_solve || null,
       }
     : null;
 
@@ -176,7 +167,9 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
       </Section>
 
       <Section title="Why now">
-        {award.whyNow ? <p className="wq-rep-p blurable">{award.whyNow}</p> : null}
+        {(award.whyNow || pos.why_now) ? (
+          <p className="wq-rep-p blurable">{award.whyNow || pos.why_now}</p>
+        ) : null}
       </Section>
 
       <Section title="Entailment">
@@ -191,23 +184,19 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
           <span>Why they need this</span>
           <span className="blurable">{ent.chain || "—"}</span>
           <span>Incumbent method</span>
-          <span>{award.incumbentMethod || pos.incumbent_method || "—"}</span>
+          <span>{award.incumbentMethod || bd.vendor?.incumbent_method || "—"}</span>
         </div>
       </Section>
 
-      {/* SOLUTION — subscriber offerings that address the derived burden */}
-      {(solution.length > 0 || pos.pitch) && (
-        <Section title="Solution">
-          {solution.length > 0 ? (
-            <Bullets items={solution} />
-          ) : (
-            <p className="wq-rep-p blurable">{pos.pitch}</p>
-          )}
+      {/* SALES PLAN — element 5: timing + what to lead with + land->expand->cross-sell */}
+      {pos.sales_plan && (
+        <Section title="Sales plan">
+          <p className="wq-rep-p blurable">{pos.sales_plan}</p>
         </Section>
       )}
 
       {/* POINT OF CONTACT — role-based; real named contacts on subscription */}
-      {poc && (poc.role || poc.pain_impact || poc.how_we_solve || poc.outreach) && (
+      {poc && (poc.role || poc.pains || poc.positioning) && (
         <Section title="Point of contact">
           <div className="wq-rep-grid">
             {poc.role ? (
@@ -216,25 +205,19 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
                 <span className="blurable">{poc.role}</span>
               </>
             ) : null}
-            {poc.pain_impact ? (
+            {poc.pains ? (
               <>
-                <span>Why it hits them</span>
-                <span className="blurable">{poc.pain_impact}</span>
+                <span>Their delivery pains</span>
+                <span className="blurable">{poc.pains}</span>
               </>
             ) : null}
-            {poc.how_we_solve ? (
+            {poc.positioning ? (
               <>
-                <span>How we solve</span>
-                <span className="blurable">{poc.how_we_solve}</span>
+                <span>How to position</span>
+                <span className="blurable">{poc.positioning}</span>
               </>
             ) : null}
           </div>
-          {poc.outreach ? (
-            <div className="wq-rep-outreach">
-              <div className="wq-rep-outreach-lbl">Suggested opening</div>
-              <p className="wq-rep-p blurable">{poc.outreach}</p>
-            </div>
-          ) : null}
           <p className="wq-rep-muted wq-rep-poc-note">
             Suggested role-based contact. Named real contacts available with an active subscription.
           </p>
