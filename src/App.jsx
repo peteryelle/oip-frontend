@@ -401,6 +401,19 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
   const tenantName = selectedOip?.tenants?.name || ''
   const oipName = selectedOip?.name || ''
 
+  // On OIP change, drop the user on that lane's results landing page.
+  const landingFor = (oip) => {
+    const slug = oip?.slug || ''
+    if (slug.endsWith('-recompete')) return '/radar'      // Recompete → Pipeline Radar
+    if (slug.endsWith('-derived'))   return '/demand'     // Derived  → Derived Demand
+    if (oip?.verticals?.slug === 'sam') return '/market'  // Direct SAM → B2G Opportunities
+    return '/'                                             // SLED / other → Dashboard
+  }
+  const handleSelectOip = (id) => {
+    onSelectOip(id)
+    navigate(landingFor(oips.find(o => o.id === id)))
+  }
+
   const lastRunStr = latestRun?.finished_at
     ? new Date(latestRun.finished_at).toLocaleString('en-US', {
         month: 'short', day: 'numeric', year: 'numeric'
@@ -419,7 +432,7 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
             {oips.length > 1 ? (
               <select
                 value={selectedOipId || ''}
-                onChange={e => onSelectOip(e.target.value)}
+                onChange={e => handleSelectOip(e.target.value)}
                 style={{
                   marginLeft: 12,
                   fontFamily: "'IBM Plex Mono', monospace",
