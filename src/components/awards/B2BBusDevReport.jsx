@@ -35,7 +35,7 @@ function healthBand(h) {
   return "wq-health-strong";
 }
 
-export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
+export default function B2BBusDevReport({ award, recompeteDays = 180, subscriberName = null }) {
   const bd = award.busdev || {};
   const ent = bd.entailment || {};
   const pos = bd.positioning || {};
@@ -67,7 +67,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
     : null;
 
   // Core narrative — worker brief elements 1-4: award scope -> prime capability
-  // -> the gap (entailed, not evidenced by prime) -> how Mason fills it.
+  // -> the gap (entailed, not evidenced by prime) -> how the subscriber fills it.
   const awardScope = pos.deliverables || null; // element 1
   const primeOffering = pos.prime_core_offering || null; // element 2
   const gap = Array.isArray(pos.gaps_addressed) // element 3
@@ -106,7 +106,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
         </div>
       </div>
 
-      {/* CORE NARRATIVE — award scope -> prime capability -> gap -> how Mason fills it */}
+      {/* CORE NARRATIVE — award scope -> prime capability -> gap -> how the subscriber fills it */}
       {(awardScope || primeOffering || gap.length > 0 || fillImpact) && (
         <>
           <Section title="Award scope">
@@ -124,7 +124,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180 }) {
               </p>
             )}
           </Section>
-          <Section title="How Mason fills the gap">
+          <Section title={subscriberName ? `How ${subscriberName} fills the gap` : "How you fill the gap"}>
             {fillImpact ? <p className="wq-rep-p blurable">{fillImpact}</p> : null}
           </Section>
         </>

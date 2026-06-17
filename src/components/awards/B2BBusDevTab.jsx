@@ -24,6 +24,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
   const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState("");
   const [openAward, setOpenAward] = useState(null);
+  const [subscriberName, setSubscriberName] = useState(null);
   const [pocket, setPocket] = useState(null);
   const listRef = useRef(null);
 
@@ -52,6 +53,22 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
         recompeteDays: w.recompete_days ?? 180,
         awardDays: w.award_recency_days ?? 120,
       });
+    })();
+    return () => {
+      live = false;
+    };
+  }, [oipId]);
+
+  // Subscriber = this OIP's own company; names the "How … fills the gap" heading.
+  // Resolved via the canonical-profile RPC — same source as the busdev prose.
+  useEffect(() => {
+    if (!oipId) return;
+    let live = true;
+    (async () => {
+      const { data } = await supabase.rpc("get_canonical_profile", { p_oip_id: oipId });
+      if (!live) return;
+      const prof = Array.isArray(data) ? data[0] : data;
+      setSubscriberName(prof?.company_name || null);
     })();
     return () => {
       live = false;
@@ -196,7 +213,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
             >
               &times;
             </button>
-            <B2BBusDevReport award={openAward} recompeteDays={windows.recompeteDays} />
+            <B2BBusDevReport award={openAward} recompeteDays={windows.recompeteDays} subscriberName={subscriberName} />
           </div>
         </div>
       )}
