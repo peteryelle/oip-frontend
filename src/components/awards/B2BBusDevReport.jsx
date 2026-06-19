@@ -255,7 +255,11 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
       </Section>
 
       <div className="wq-rep-actions">
-        <button type="button" className="wq-btn" onClick={() => downloadAwardBrief(award)}>
+        <button
+          type="button"
+          className="wq-btn"
+          onClick={() => downloadAwardBrief(award, { subscriberName, recompeteDays })}
+        >
           Download B2B Brief
         </button>
         {award.awardId && (
