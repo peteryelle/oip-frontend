@@ -1211,6 +1211,7 @@ function MarketReviewPage() {
   const [stateFilter, setStateFilter] = useState('')
   const [groupFilter, setGroupFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [showStale, setShowStale] = useState(false) // relevance: hide stale rows from the working list by default (migration 008)
   const [search, setSearch] = useState('')
   const [openSignal, setOpenSignal] = useState(null)
   const [openEntity, setOpenEntity] = useState(null)
@@ -1239,7 +1240,7 @@ function MarketReviewPage() {
         .from('oip_signals')
         .select(`
           oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
-          match_reason, text_excerpt, status, notes, scored_at, scores, matched_sentinels,
+          match_reason, text_excerpt, status, relevance_status, notes, scored_at, scores, matched_sentinels,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
                               meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind)
         `)
@@ -1247,13 +1248,14 @@ function MarketReviewPage() {
         .order('scored_at', { ascending: false })
         .limit(2500)
       if (statusFilter) q = q.eq('status', statusFilter)
+      if (!showStale) q = q.eq('relevance_status', 'active') // working list = active; stale kept in DB, revealed by toggle
       const { data } = await q
       if (cancelled) return
       setSignals(data || [])
       setLoading(false)
     })()
     return () => { cancelled = true }
-  }, [selectedOip, statusFilter])
+  }, [selectedOip, statusFilter, showStale])
 
   // Realtime: signals workflow updates
   useEffect(() => {
@@ -1420,6 +1422,10 @@ function MarketReviewPage() {
           <option value="dismissed">Dismissed</option>
           <option value="">All statuses</option>
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-fade)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={showStale} onChange={e => setShowStale(e.target.checked)} />
+          Show stale
+        </label>
         {isSam ? (
           <input type="search"
             placeholder={samTab === 'dib' ? 'Search company or agency…' : 'Search title or department…'}
@@ -1897,6 +1903,9 @@ function DibProspectTable({ signals, onRowClick, naicsFilter, setNaicsFilter }) 
                   <td style={{ padding: '12px 8px' }}>
                     <div style={{ fontWeight: 600, color: 'var(--ink)', marginBottom: 3 }}>
                       {company.length > 45 ? company.slice(0, 45) + '…' : company}
+                      {s.relevance_status && s.relevance_status !== 'active' && (
+                        <span style={{ marginLeft: 8, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: '.06em', color: '#9a3412', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 3, padding: '1px 5px', verticalAlign: 'middle' }}>stale</span>
+                      )}
                     </div>
                     <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
                       {meta.uei && <span style={{ marginRight: 8 }}>UEI: {meta.uei}</span>}

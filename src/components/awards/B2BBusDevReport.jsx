@@ -77,8 +77,30 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
     : [];
   const fillImpact = pos.impact || null; // element 4
 
+  // Relevance is the worker's "still surfaced by the latest scan" axis (migration 008).
+  // A row the customer moved into their pipeline can go stale without being deleted; flag
+  // it here so an opened stale item reads as "kept, not current" rather than fresh.
+  const relStatus = award.relevanceStatus || award.relevance_status || "active";
+  const isStale = relStatus !== "active";
+  const staleLabel =
+    {
+      stale: "Not in the latest scan",
+      outside_window: "Aged past the recency window",
+      archived: "Archived",
+    }[relStatus] || "Not in the latest scan";
+  const staleNote =
+    relStatus === "archived"
+      ? "Archived — kept on record, not shown in the working list."
+      : "No longer surfaced by the latest scan. Kept because it's still in your pipeline.";
+
   return (
     <div className="wq-awards wq-report">
+      {isStale && (
+        <div className="wq-rep-stale" role="status">
+          <span className="wq-rep-stale-lbl">{staleLabel}</span>
+          <span className="wq-rep-stale-note">{staleNote}</span>
+        </div>
+      )}
       <div className="wq-rep-header">
         <div className="wq-rep-score">
           <span className="wq-rep-score-num">{award.score ?? "—"}</span>

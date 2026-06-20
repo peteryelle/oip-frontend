@@ -22,6 +22,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
   });
   const toggle = (k) => setStates((s) => ({ ...s, [k]: !s[k] }));
   const [showArchived, setShowArchived] = useState(false);
+  const [showStale, setShowStale] = useState(false); // relevance: hide rows the latest rescore didn't reproduce (migration 008)
   const [search, setSearch] = useState("");
   const [openAward, setOpenAward] = useState(null);
   const [subscriberName, setSubscriberName] = useState(null);
@@ -85,6 +86,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
     awardDays: windows.awardDays,
     search,
     includeArchived: showArchived,
+    includeStale: showStale,
     pocket,
   });
 
@@ -152,6 +154,14 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
             onChange={(e) => setShowArchived(e.target.checked)}
           />
           Show archived (&le;39){archivedCount ? ` · ${archivedCount}` : ""}
+        </label>
+        <label className="wq-check">
+          <input
+            type="checkbox"
+            checked={showStale}
+            onChange={(e) => setShowStale(e.target.checked)}
+          />
+          Show stale
         </label>
         <input
           type="search"

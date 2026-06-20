@@ -382,6 +382,22 @@
 .wq-health-strong { color: #166534; }
 .wq-rep-health-na { font-size: 13px; color: var(--wq-muted); font-style: italic; }
 
+/* Stale banner — relevance_status != active (migration 008): kept on record but
+   no longer surfaced by the latest scan. Shown atop the brief when a stale item
+   is opened (e.g. a pursuing row the latest rescore didn't reproduce). */
+.wq-rep-stale {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+.wq-rep-stale-lbl { font-weight: 600; font-size: 13px; color: #9a3412; }
+.wq-rep-stale-note { font-size: 12px; color: var(--wq-muted); }
+
 /* ── Pocket scope chip (drill-in from demand grid) ──────────────── */
 .wq-pocket-scope {
   display: flex;

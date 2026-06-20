@@ -48,6 +48,7 @@ export function useAwards(oipId, opts = {}) {
     states = null,
     search = "",
     includeArchived = false,
+    includeStale = false,
     pocket = null,
   } = opts;
 
@@ -62,17 +63,20 @@ export function useAwards(oipId, opts = {}) {
     if (!oipId) return;
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
+    let query = supabase
       .from("oip_signals")
       .select(`
-        signal_id, status,
+        signal_id, status, relevance_status,
         b2b_busdev, b2b_score, disposition, motion, displacement_difficulty,
         incumbent_method, prime_uei, why_now,
         signals!inner ( id, title, doc_url, source_meta, signal_kind )
       `)
       .eq("oip_id", oipId)
-      .eq("signals.signal_kind", "award")
-      .order("b2b_score", { ascending: false, nullsFirst: false });
+      .eq("signals.signal_kind", "award");
+    // Relevance: hide rows the latest rescore didn't reproduce, unless asked (migration 008)
+    if (!includeStale) query = query.eq("relevance_status", "active");
+    query = query.order("b2b_score", { ascending: false, nullsFirst: false });
+    const { data, error } = await query;
 
     if (error) {
       setError(error);
@@ -81,7 +85,7 @@ export function useAwards(oipId, opts = {}) {
       setRows((data || []).map(normalize));
     }
     setLoading(false);
-  }, [oipId]);
+  }, [oipId, includeStale]);
 
   useEffect(() => {
     load();
@@ -166,6 +170,7 @@ function normalize(r) {
     incumbentMethod: r.incumbent_method || null,
     whyNow: r.why_now || null,
     busdev: r.b2b_busdev || {},
+    relevanceStatus: r.relevance_status || "active",
   };
 }
 
