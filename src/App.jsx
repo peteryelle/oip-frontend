@@ -2567,6 +2567,7 @@ Write for a sales director. Direct, no hedging. No markdown, plain text only.`
 
 
 function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
+  const { selectedOip } = useOip()
   const sig    = os.signals || {}
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
@@ -2750,6 +2751,8 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
     const naics     = meta.naics_code || '—'
     const solNum    = meta.solicitation_number || '—'
     const noticeType = meta.notice_type || '—'
+    const briefTenant = selectedOip?.tenants?.name || ''
+    const briefOip    = selectedOip?.name || 'WinQuest OIP'
 
     const w = window.open('', '_blank', 'width=920,height=750')
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -2802,7 +2805,7 @@ ${analysisHtml}
   <tr><td>Groups</td><td>${groups}</td></tr>
   <tr><td>Keywords</td><td>${keywords}</td></tr>
 </tbody></table>
-<div class="footer"><span>SMCIS &middot; WinQuest SAM OIP</span><span>Scored ${scored}</span></div>
+<div class="footer"><span>${briefTenant} &middot; ${briefOip}</span><span>Scored ${scored}</span></div>
 </body></html>`)
     w.document.close()
   }
