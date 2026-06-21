@@ -44,6 +44,11 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
   const port = perf.prime_portfolio || {};
   const crossSell = Array.isArray(pos.cross_sell) ? pos.cross_sell : [];
 
+  // Named FFATA subs on the incumbent's current award (worker _profile_subs).
+  // Each: { name, uei, dominant, won_naics[], subaward_amount }. Empty [] or
+  // absent means "not disclosed" (FFATA reporting gap) — NOT "prime self-performs".
+  const subs = Array.isArray(bd.subs) ? bd.subs : [];
+
   // Recompete state drives whether the incumbent-health banner shows at top.
   const isRecompete =
     award.daysToPopEnd != null && award.daysToPopEnd >= 0 && award.daysToPopEnd <= recompeteDays;
@@ -151,6 +156,44 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           </Section>
         </>
       )}
+
+      {/* SUBCONTRACTORS — named FFATA teaming on the incumbent's award = displacement
+          targets / the seam to slot into. Empty or absent renders as "not disclosed",
+          deliberately distinct from "none": absence is a reporting gap, not evidence the
+          prime self-performs. Inferred/likely subs (new-award lane) are a later add. */}
+      <Section title="Subcontractors">
+        {subs.length > 0 ? (
+          <>
+            <p className="wq-rep-muted">
+              Named on the incumbent's current award (FFATA) — the teaming you'd displace or slot into.
+            </p>
+            <ul className="wq-rep-bullets">
+              {subs.map((s, i) => {
+                const naics = Array.isArray(s.won_naics) ? s.won_naics : [];
+                const primary = s.dominant || naics[0] || null;
+                const more = naics.length > 1 ? ` (+${naics.length - 1})` : "";
+                const amt =
+                  typeof s.subaward_amount === "number"
+                    ? ` — $${Math.round(s.subaward_amount).toLocaleString()}`
+                    : "";
+                return (
+                  <li key={s.uei || i}>
+                    <span className="blurable">{s.name || "Unnamed sub"}</span>
+                    {amt}
+                    {primary ? ` · NAICS ${primary}${more}` : ""}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        ) : (
+          <p className="wq-rep-muted">
+            Not disclosed — no FFATA subcontract data on this award (absent or not yet filed).
+            That's a reporting gap, not evidence the prime self-performs; current teaming simply
+            isn't public here.
+          </p>
+        )}
+      </Section>
 
       {isRecompete && (
         <div className="wq-rep-health">
