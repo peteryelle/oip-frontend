@@ -1515,33 +1515,35 @@ function MarketReviewPage() {
 function EntityBoard({ signals, onEntityClick }) {
   const [search, setSearch] = useState('')
 
-  // Group signals by entity and compute composite score
+  // Group signals by entity. Score is the absolute LLM profile_fit (0-100),
+  // written per-entity by the scorer and stamped on each of its signals — it is
+  // NOT relative to other entities, so removing one entity never changes another's
+  // score. We take the max profile_fit across an entity's signals as a safety in
+  // case rows differ; entities with no profile_fit yet sort last with a null score.
   const entityMap = new Map()
   for (const s of signals) {
     const name = s.signals?.source_name || 'Unknown'
     const state = s.signals?.state || ''
     if (!entityMap.has(name)) {
-      entityMap.set(name, { name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '' })
+      entityMap.set(name, { name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null })
     }
     const e = entityMap.get(name)
     e.total++
     if (s.signal_tier === 'tier1_strong') { e.strong++; if (!e.topReason) e.topReason = s.match_reason || '' }
     else if (s.signal_tier === 'tier1')   { e.tier1++;  if (!e.topReason) e.topReason = s.match_reason || '' }
     else                                  { e.tier2++;  if (!e.topReason) e.topReason = s.match_reason || '' }
+    const pf = s.scores?.profile_fit
+    if (typeof pf === 'number') e.fit = e.fit === null ? pf : Math.max(e.fit, pf)
   }
 
-  // Compute raw scores and normalize
-  const entities = Array.from(entityMap.values()).map(e => ({
-    ...e,
-    rawScore: (e.strong * 3) + (e.tier1 * 1.5) + (e.tier2 * 0.5),
-  }))
-  const maxScore = Math.max(...entities.map(e => e.rawScore), 1)
-  const ranked = entities
-    .map(e => ({ ...e, score: Math.round((e.rawScore / maxScore) * 100) }))
-    .sort((a, b) => b.score - a.score)
+  // Absolute score = the entity's profile_fit. Sort by it descending; unscored last.
+  const ranked = Array.from(entityMap.values())
+    .map(e => ({ ...e, score: e.fit }))
+    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
 
-  // Score label + color
+  // Score label + color — absolute thresholds on the LLM fit score
   const scoreLabel = (score) => {
+    if (score === null || score === undefined) return { label: 'Unscored', color: '#6b7280', bg: '#f3f4f6' }
     if (score >= 75) return { label: 'Priority',  color: '#16a34a', bg: '#dcfce7' }
     if (score >= 50) return { label: 'Strong',    color: '#2563eb', bg: '#dbeafe' }
     if (score >= 25) return { label: 'Moderate',  color: '#b45309', bg: '#fef3c7' }
@@ -1589,14 +1591,12 @@ function EntityBoard({ signals, onEntityClick }) {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6,
                   fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
                   color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
-                  <span>#{i + 1}</span>
-                  <span>·</span>
                   <span>{e.state}</span>
                   <span>·</span>
-                  {/* Score badge */}
+                  {/* Score badge — absolute profile_fit */}
                   <span style={{ padding: '3px 10px', borderRadius: 3, fontSize: 13,
                     fontWeight: 700, background: bg, color }}>
-                    {label} · {e.score}
+                    {e.score === null || e.score === undefined ? label : `${label} · ${e.score}`}
                   </span>
                   {/* Signal summary */}
                   <span>·</span>
