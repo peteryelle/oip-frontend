@@ -1221,9 +1221,12 @@ function MarketReviewPage() {
   const params = new URLSearchParams(useLocation().search)
   const entityFilter = params.get('entity')
 
-  // Multi-vertical: detect if tenant spans more than one vertical
+  // Multi-vertical: detect if tenant spans more than one vertical.
+  // Derived OIPs are single-lens by definition — the OIP selector pins the lens,
+  // so they must NOT aggregate signals across the tenant's other verticals/OIPs
+  // (that bled SAM-derived rows into the SLED-derived board with dead drawers).
   const uniqueVerticals = [...new Set((oips || []).map(o => o.vertical_id))]
-  const isMultiVertical = uniqueVerticals.length > 1
+  const isMultiVertical = uniqueVerticals.length > 1 && !selectedOip?.slug?.endsWith('-derived')
 
   // Multi-vertical hook — only active when tenant has multiple verticals
   const {
