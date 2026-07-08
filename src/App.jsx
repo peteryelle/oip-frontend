@@ -2609,6 +2609,7 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
   const isNerc   = sig.source === 'nerc_ea' || sig.source_name === 'NERC Event Analysis'
   const isGrants = sig.source === 'grants.gov' || sig.source_name === 'Grants.gov'
   const isPuc    = sig.source === 'puc'
+  const isNycAward = sig.source === 'nyc_contracts' || meta.award_source === 'nyc_contracts'
   const [aiSummary, setAiSummary] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [enriched, setEnriched] = useState(null)  // on-demand entity data
@@ -3399,6 +3400,60 @@ ${analysisHtml}
         )}
 
         {/* Why This Signal Matters moved to top */}
+
+        {/* NYC award facts — prime, amount, agency, performance, method */}
+        {isNycAward && (
+          <div style={{ marginBottom: 20 }}>
+            {lbl('Award Details')}
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 16px',
+              fontSize: 14, lineHeight: 1.5, fontFamily: "'IBM Plex Mono', monospace" }}>
+              {meta.vendor_name && (<>
+                <span style={{ color: 'var(--ink-fade)' }}>Prime</span>
+                <span style={{ fontWeight: 600 }}>{meta.vendor_name}</span>
+              </>)}
+              {meta.award_amount && (<>
+                <span style={{ color: 'var(--ink-fade)' }}>Amount</span>
+                <span>{(() => {
+                  const n = Number(meta.award_amount)
+                  return isNaN(n) ? meta.award_amount
+                    : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+                })()}</span>
+              </>)}
+              {meta.awarding_agency && (<>
+                <span style={{ color: 'var(--ink-fade)' }}>Agency</span>
+                <span>{meta.awarding_agency}</span>
+              </>)}
+              {(meta.pop_start_date || meta.pop_end_date) && (<>
+                <span style={{ color: 'var(--ink-fade)' }}>Performance</span>
+                <span>{(() => {
+                  const fmt = (d) => d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short' }) : ''
+                  const s = fmt(meta.pop_start_date), e = fmt(meta.pop_end_date)
+                  if (s && e && s === e) return `Awarded ${s}`
+                  if (s && e) return `${s} → ${e}`
+                  return s || e
+                })()}</span>
+              </>)}
+              {meta.selection_method && (<>
+                <span style={{ color: 'var(--ink-fade)' }}>Method</span>
+                <span>{meta.selection_method}</span>
+              </>)}
+              {meta.is_recompete && (<>
+                <span style={{ color: 'var(--ink-fade)' }}>Recompete</span>
+                <span style={{ color: '#b45309', fontWeight: 600 }}>Renewal — incumbent relationship</span>
+              </>)}
+            </div>
+            {meta.request_id && (
+              <a
+                href={`https://data.cityofnewyork.us/City-Government/Recent-Contract-Awards/qyyg-4tf5`}
+                target="_blank" rel="noopener noreferrer"
+                style={{ display: 'inline-block', marginTop: 10, fontSize: 13,
+                  fontFamily: "'IBM Plex Mono', monospace", color: 'var(--accent, #2563eb)' }}
+              >
+                View on NYC Open Data →
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Signal Categories */}
         {os.matched_keywords?.length > 0 && (
