@@ -1221,12 +1221,9 @@ function MarketReviewPage() {
   const params = new URLSearchParams(useLocation().search)
   const entityFilter = params.get('entity')
 
-  // Multi-vertical: detect if tenant spans more than one vertical.
-  // Derived OIPs are single-lens by definition — the OIP selector pins the lens,
-  // so they must NOT aggregate signals across the tenant's other verticals/OIPs
-  // (that bled SAM-derived rows into the SLED-derived board with dead drawers).
+  // Multi-vertical: detect if tenant spans more than one vertical
   const uniqueVerticals = [...new Set((oips || []).map(o => o.vertical_id))]
-  const isMultiVertical = uniqueVerticals.length > 1 && !selectedOip?.slug?.endsWith('-derived')
+  const isMultiVertical = uniqueVerticals.length > 1
 
   // Multi-vertical hook — only active when tenant has multiple verticals
   const {
@@ -1466,9 +1463,16 @@ function MarketReviewPage() {
             />
           )}
 
-          {/* SLED: Entity Board — single-vertical tenants only */}
+          {/* SLED: Entity Board — single-vertical tenants only.
+              Derived boards group by signal (each RFP = one opportunity card) and
+              open the signal drawer directly; non-derived group by source_name entity. */}
           {!isSam && !isMultiVertical && (
-            <EntityBoard signals={signals} onEntityClick={name => setOpenEntity(name)} />
+            <EntityBoard
+              signals={signals}
+              isDerived={isDerivedOip}
+              onEntityClick={name => setOpenEntity(name)}
+              onSignalClick={setOpenSignal}
+            />
           )}
           {/* SAM unchanged */}
           {isSam && (
@@ -1515,22 +1519,33 @@ function MarketReviewPage() {
 // ENTITY BOARD — ranked entity cards for Market Review
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EntityBoard({ signals, onEntityClick }) {
+function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false }) {
   const [search, setSearch] = useState('')
 
-  // Group signals by entity. Score is the absolute LLM profile_fit (0-100),
+  // Group signals into cards. Score is the absolute LLM profile_fit (0-100),
   // written per-entity by the scorer and stamped on each of its signals — it is
   // NOT relative to other entities, so removing one entity never changes another's
-  // score. We take the max profile_fit across an entity's signals as a safety in
-  // case rows differ; entities with no profile_fit yet sort last with a null score.
+  // score. We take the max profile_fit across a card's signals as a safety in
+  // case rows differ; cards with no profile_fit yet sort last with a null score.
+  //
+  // Derived boards are pre-award: there is no prime entity to group by, and
+  // source_name is only the portal (e.g. "NY State Contract Reporter"), which
+  // would collapse unrelated RFPs into one card. So for derived we key each card
+  // on the SIGNAL itself — one RFP = one opportunity card — and clicking opens
+  // the signal drawer directly. Non-derived keeps source_name entity grouping.
   const entityMap = new Map()
   for (const s of signals) {
-    const name = s.signals?.source_name || 'Unknown'
+    const key = isDerived
+      ? (s.signal_id || s.signals?.id)
+      : (s.signals?.source_name || 'Unknown')
+    const name = isDerived
+      ? (s.signals?.title || 'Untitled opportunity')
+      : (s.signals?.source_name || 'Unknown')
     const state = s.signals?.state || ''
-    if (!entityMap.has(name)) {
-      entityMap.set(name, { name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null })
+    if (!entityMap.has(key)) {
+      entityMap.set(key, { key, name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, row: s })
     }
-    const e = entityMap.get(name)
+    const e = entityMap.get(key)
     e.total++
     if (s.signal_tier === 'tier1_strong') { e.strong++; if (!e.topReason) e.topReason = s.match_reason || '' }
     else if (s.signal_tier === 'tier1')   { e.tier1++;  if (!e.topReason) e.topReason = s.match_reason || '' }
@@ -1572,13 +1587,13 @@ function EntityBoard({ signals, onEntityClick }) {
 
       <div style={{ marginBottom: 12, fontSize: 13, color: 'var(--ink-fade)',
         fontFamily: "'IBM Plex Mono', monospace" }}>
-        {filtered.length} entities · {signals.length} signals
+        {filtered.length} {isDerived ? 'opportunities' : 'entities'} · {signals.length} signals
       </div>
 
       {filtered.map((e, i) => {
         const { label, color, bg } = scoreLabel(e.score)
         return (
-          <div key={e.name} style={{
+          <div key={e.key} style={{
             background: 'var(--paper)',
             border: '2px solid var(--rule)',
             borderRadius: 4,
@@ -1586,7 +1601,9 @@ function EntityBoard({ signals, onEntityClick }) {
             marginBottom: 10,
             cursor: 'pointer',
           }}
-            onClick={() => onEntityClick && onEntityClick(e.name)}
+            onClick={() => isDerived
+              ? (onSignalClick && onSignalClick(e.row))
+              : (onEntityClick && onEntityClick(e.name))}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
