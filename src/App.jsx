@@ -447,9 +447,32 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
                   cursor: 'pointer',
                 }}
               >
-                {oips.map(o => (
-                  <option key={o.id} value={o.id}>{o.name}</option>
-                ))}
+                {(() => {
+                  const ungrouped = oips.filter(o => !o.derivation_grade)
+                  const rich = oips.filter(o => o.derivation_grade === 'rich')
+                  const aggregation = oips.filter(o => o.derivation_grade === 'aggregation')
+                  return (
+                    <>
+                      {ungrouped.map(o => (
+                        <option key={o.id} value={o.id}>{o.name}</option>
+                      ))}
+                      {rich.length > 0 && (
+                        <optgroup label="Derived — Rich">
+                          {rich.map(o => (
+                            <option key={o.id} value={o.id}>{o.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {aggregation.length > 0 && (
+                        <optgroup label="Derived — Aggregation">
+                          {aggregation.map(o => (
+                            <option key={o.id} value={o.id}>{o.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </>
+                  )
+                })()}
               </select>
             ) : (
               oipName ? <span style={{ marginLeft: 8, color: 'var(--ink-fade)' }}>· {oipName}</span> : null

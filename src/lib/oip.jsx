@@ -27,7 +27,7 @@ export function OipProvider({ children }) {
         .from('oips')
         .select(`
           id, slug, name, description, tenant_id, vertical_id,
-          subscription_tier, status,
+          subscription_tier, status, derivation_grade,
           tenants:tenant_id (id, slug, name),
           verticals:vertical_id (id, slug, name)
         `)
