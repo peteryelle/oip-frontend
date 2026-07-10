@@ -3021,7 +3021,7 @@ ${analysisHtml}
         )}
 
         {/* Why This Signal Matters — immediately below title */}
-        {isSam && !isDib && os.match_reason && (
+        {!isDib && os.match_reason && (
           <div style={{ marginBottom: 16, marginTop: 8 }}>
             <div style={{ fontSize: 20, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700,
               textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink)', marginBottom: 12 }}>
