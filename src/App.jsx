@@ -3817,6 +3817,47 @@ function ProfilePage() {
         </Block>
       )}
 
+      {/* ── COMMERCIAL CUSTOMERS (drives Derived Demand agency twins) ── */}
+      {(data.customers?.length > 0 || editing) && (
+        <Block label="Commercial customers">
+          {editing ? (
+            <>
+              <textarea
+                value={(draft.customers || [])
+                  .map(c => typeof c === 'string'
+                    ? c
+                    : [c.name, c.sector].filter(Boolean).join(' — '))
+                  .join('\n')}
+                onChange={e => {
+                  const parsed = e.target.value
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(Boolean)
+                    .map(line => {
+                      const parts = line.split(/\s+[—-]\s+/)
+                      const name = (parts[0] || '').trim()
+                      const sector = (parts[1] || '').trim()
+                      return sector ? { name, sector } : { name }
+                    })
+                  setDraft({ ...draft, customers: parsed })
+                }}
+                className="form-textarea" rows={6}
+                placeholder={"One customer per line, e.g.\nArrow Energy — Energy / Oil & Gas\nUS Bank — Financial Services\nState of Georgia DIT — State Government"}
+              />
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+                One customer per line. Add an optional sector after a dash. Derived Demand maps these to their federal agency twins.
+              </p>
+            </>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>
+              {(data.customers || []).map((c, i) => (
+                <li key={i}>{typeof c === 'string' ? c : [c.name, c.sector].filter(Boolean).join(' — ')}</li>
+              ))}
+            </ul>
+          )}
+        </Block>
+      )}
+
       {/* ── CONTRACT HISTORY ── */}
       <ProfileFieldList label="Contract history" arr={data.contract_history || []} editing={editing} onChange={a => setDraft({ ...draft, contract_history: a })} />
 
