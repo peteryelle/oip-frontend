@@ -4532,6 +4532,17 @@ function SentinelPage() {
     await supabase.from('sentinels').update({ is_active: false, status: 'inactive' }).eq('oip_id', selectedOip.id)
     // Insert new sentinel
     const newVersion = String(parseFloat(sentinel.version) + 0.1).slice(0, 4)
+    // Mirror the keyword list into pull_config.keyword_searches so the SCRAPE
+    // stage (which reads pull_config.keyword_searches) collects the same terms
+    // the SCORE stage tiers via sentinel_keywords. Watchlist terms score but do
+    // NOT drive collection, so they are excluded from the pull list.
+    const kwList = [...new Set(
+      (draft || [])
+        .filter(k => !k.is_watchlist)
+        .map(k => (k.keyword || '').toLowerCase().trim())
+        .filter(Boolean)
+    )]
+    const mergedPull = { ...pullConfig, keyword_searches: kwList }
       const { data: ns, error: nsErr } = await supabase.from('sentinels').insert({
       oip_id: selectedOip.id,
       version: newVersion,
@@ -4541,7 +4552,7 @@ function SentinelPage() {
       match_fields: sentinel.match_fields,
       groups: sentinel.groups,
       name: sentinelName,
-      pull_config: pullConfig,
+      pull_config: mergedPull,
     }).select().single()
     if (nsErr) { alert(nsErr.message); setSaving(false); return }
     // Insert keywords
@@ -4712,6 +4723,9 @@ function SentinelPage() {
                 <div><span style={{ color: 'var(--ink-fade)', marginRight: 12 }}>Notice types</span>{pullConfig.notice_types.join(', ')}</div>
               )}
               <div><span style={{ color: 'var(--ink-fade)', marginRight: 12 }}>Min deadline</span>{pullConfig.min_deadline_days ?? 30} days</div>
+              {pullConfig.keyword_searches?.length > 0 && (
+                <div><span style={{ color: 'var(--ink-fade)', marginRight: 12 }}>Keywords</span>{pullConfig.keyword_searches.join(', ')}</div>
+              )}
             </div>
           )}
         </Block>
