@@ -4,8 +4,10 @@
 // the subscriber's customer base by the fingerprint — this page is mostly a
 // readout of that, plus the one human knob (burden density) and an accept
 // control. Takes oipId + verticalId (verticalId is needed to enqueue populate).
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useDemandSetup } from "../../hooks/useDemandSetup";
+import { supabase } from "../../lib/supabase";
+import DerivedDemandEntailmentLens from "./DerivedDemandEntailmentLens";
 import "./demand.css";
 
 function fmtDate(iso) {
@@ -22,6 +24,40 @@ export default function DerivedDemandSetup({ oipId, verticalId }) {
   const [winEdits, setWinEdits] = useState({}); // recompeteDays|awardDays -> in-progress string
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(null);
+  const [oip, setOip] = useState(null);
+  const [activeSentinel, setActiveSentinel] = useState(null);
+
+  // Load OIP and active sentinel
+  useEffect(() => {
+    if (!oipId) return;
+    
+    const loadData = async () => {
+      try {
+        // Load OIP
+        const { data: oipData } = await supabase
+          .from("oips")
+          .select("*")
+          .eq("id", oipId)
+          .single();
+        
+        if (oipData) setOip(oipData);
+        
+        // Load active sentinel
+        const { data: sentinelData } = await supabase
+          .from("sentinels")
+          .select("*")
+          .eq("oip_id", oipId)
+          .eq("is_active", true)
+          .single();
+        
+        if (sentinelData) setActiveSentinel(sentinelData);
+      } catch (err) {
+        console.error("Error loading OIP/sentinel:", err);
+      }
+    };
+    
+    loadData();
+  }, [oipId]);
 
   if (loading) return <div className="wq-demand"><div className="wq-dem-empty">Loading…</div></div>;
   if (error)
@@ -248,6 +284,20 @@ export default function DerivedDemandSetup({ oipId, verticalId }) {
             Add scope manually only when launching a new product line the customer base
             doesn&rsquo;t yet reflect.
           </div>
+
+          {oip && activeSentinel && (
+            <DerivedDemandEntailmentLens
+              oip={oip}
+              sentinel={activeSentinel}
+              onSave={() => {
+                // Refresh sentinel to get updated pull_config
+                setActiveSentinel((prev) => ({
+                  ...prev,
+                  pull_config: activeSentinel.pull_config,
+                }));
+              }}
+            />
+          )}
         </>
       )}
     </div>
