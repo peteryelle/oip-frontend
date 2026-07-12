@@ -47,6 +47,7 @@ export function useAwards(oipId, opts = {}) {
     awardDays = null,
     states = null,
     search = "",
+    confidenceFilter = "all",
     includeArchived = false,
     includeStale = false,
     pocket = null,
@@ -68,7 +69,7 @@ export function useAwards(oipId, opts = {}) {
       .select(`
         signal_id, status, relevance_status,
         b2b_busdev, b2b_score, disposition, motion, displacement_difficulty,
-        incumbent_method, prime_uei, why_now,
+        incumbent_method, prime_uei, why_now, data_confidence_flag,
         signals!inner ( id, title, doc_url, source_meta, signal_kind )
       `)
       .eq("oip_id", oipId)
@@ -129,9 +130,12 @@ export function useAwards(oipId, opts = {}) {
           (a.piid || "").toLowerCase().includes(q)
       );
     }
+    if (confidenceFilter !== "all") {
+      list = list.filter((a) => a.dataConfidenceFlag === confidenceFilter);
+    }
     list.sort(SORTERS[sort] || SORTERS.score);
     return list;
-  }, [rows, sort, disposition, withinMonths, recompeteDays, awardDays, states, search, includeArchived, pocket]);
+  }, [rows, sort, disposition, withinMonths, recompeteDays, awardDays, states, search, confidenceFilter, includeArchived, pocket]);
 
   const archivedCount = useMemo(
     () => rows.filter((a) => a.score == null || a.score < ARCHIVE_BELOW).length,
@@ -169,6 +173,7 @@ function normalize(r) {
     difficulty: r.displacement_difficulty || null,
     incumbentMethod: r.incumbent_method || null,
     whyNow: r.why_now || null,
+    dataConfidenceFlag: r.data_confidence_flag || "✗ Low",
     busdev: r.b2b_busdev || {},
     relevanceStatus: r.relevance_status || "active",
   };

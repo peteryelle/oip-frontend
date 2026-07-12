@@ -14,6 +14,7 @@ import "./awards.css";
 export default function B2BBusDevTab({ oipId, isDerived }) {
   const [disposition, setDisposition] = useState("all");
   const [sort, setSort] = useState("recompete");
+  const [confidenceFilter, setConfidenceFilter] = useState("all");
   const [states, setStates] = useState({
     awardedNew: true,
     awardedOld: true,
@@ -82,6 +83,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
     sort,
     disposition,
     states,
+    confidenceFilter,
     recompeteDays: windows.recompeteDays,
     awardDays: windows.awardDays,
     search,
@@ -122,6 +124,12 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
           <option value="Hold">Hold</option>
           <option value="Route-B2G">Route-B2G</option>
           <option value="No">No</option>
+        </select>
+        <select value={confidenceFilter} onChange={(e) => setConfidenceFilter(e.target.value)}>
+          <option value="all">All confidence</option>
+          <option value="✓ High">High only</option>
+          <option value="⚠️ Borderline">Borderline only</option>
+          <option value="✗ Low">Low only</option>
         </select>
         <span className="wq-state-filters">
           <span className="wq-state-lbl">Awarded</span>

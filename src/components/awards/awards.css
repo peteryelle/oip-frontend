@@ -421,3 +421,25 @@
   padding: 0;
 }
 .wq-pocket-clear:hover { text-decoration: underline; }
+
+/* E Scoring Confidence Badge Styling */
+.wq-conf-high {
+  background-color: #d1fae5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+  font-weight: 500;
+}
+
+.wq-conf-borderline {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  font-weight: 500;
+}
+
+.wq-conf-low {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  font-weight: 500;
+}

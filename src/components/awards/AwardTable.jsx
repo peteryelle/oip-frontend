@@ -14,6 +14,12 @@ const DISPOSITION_CLASS = {
   No: "wq-disp-no",
 };
 const DISPOSITION_ORDER = { Yes: 0, Hold: 1, "Route-B2G": 2, No: 3 };
+const CONFIDENCE_CLASS = {
+  "✓ High": "wq-conf-high",
+  "⚠️ Borderline": "wq-conf-borderline",
+  "✗ Low": "wq-conf-low",
+};
+const CONFIDENCE_ORDER = { "✓ High": 0, "⚠️ Borderline": 1, "✗ Low": 2 };
 const MOTION_LABEL = {
   own_infra: "Own infra",
   partner_integrate: "Partner",
@@ -78,6 +84,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
       case "amount":      return a.amount ?? -1;
       case "recompete":   return rankMonths(a.monthsToPopEnd);
       case "disposition": return DISPOSITION_ORDER[a.disposition] ?? 9;
+      case "confidence":  return CONFIDENCE_ORDER[a.dataConfidenceFlag] ?? 9;
       case "score":
       default:            return a.score ?? -1;
     }
@@ -123,6 +130,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
             <SortTh label="Amount" k="amount" right />
             <SortTh label="Recompete" k="recompete" />
             <SortTh label="B2B" k="score" />
+            <SortTh label="Confidence" k="confidence" />
             <SortTh label="Disposition" k="disposition" />
             <th className="wq-atable-th">Motion</th>
           </tr>
@@ -159,8 +167,13 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                   )}
                 </td>
                 <td className="wq-atable-td">
-                  <span className={`wq-score wq-score-sm ${scoreBand(a.score)}`}>
+                  <span className={`wq-chip ${scoreBand(a.score)}`}>
                     {a.score ?? "—"}
+                  </span>
+                </td>
+                <td className="wq-atable-td">
+                  <span className={`wq-chip ${CONFIDENCE_CLASS[a.dataConfidenceFlag] || ""}`}>
+                    {a.dataConfidenceFlag || "—"}
                   </span>
                 </td>
                 <td className="wq-atable-td">
