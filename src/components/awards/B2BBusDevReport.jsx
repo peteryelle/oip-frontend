@@ -6,6 +6,7 @@
 // Entailment -> Solution -> Point of contact -> Performance read -> Cross-sell.
 import React from "react";
 import { downloadAwardBrief } from "../../lib/awardsBrief";
+import { SignalSubawardsPanel } from "../SignalSubawardsPanel";
 
 function Section({ title, children }) {
   if (!children) return null;
@@ -37,20 +38,26 @@ function healthBand(h) {
 
 export default function B2BBusDevReport({ award, recompeteDays = 180, subscriberName = null }) {
   const bd = award.busdev || {};
+  
+  // Detect schema: recompete (govcon_dd_v2) vs old award (USASpending)
+  const isRecompete = bd.incumbent_name != null;
+  
+  // OLD SCHEMA (USASpending awards)
   const ent = bd.entailment || {};
   const pos = bd.positioning || {};
   const perf = bd.performance || {};
   const tgt = perf.target_contract || {};
   const port = perf.prime_portfolio || {};
   const crossSell = Array.isArray(pos.cross_sell) ? pos.cross_sell : [];
-
-  // Named FFATA subs on the incumbent's current award (worker _profile_subs).
-  // Each: { name, uei, dominant, won_naics[], subaward_amount }. Empty [] or
-  // absent means "not disclosed" (FFATA reporting gap) — NOT "prime self-performs".
   const subs = Array.isArray(bd.subs) ? bd.subs : [];
+  
+  // NEW SCHEMA (Recompete / govcon_dd_v2)
+  const scores = bd.scores || {};
+  const primeCap = bd.prime_capability || {};
+  const recomSubs = Array.isArray(bd.subcontractors) ? bd.subcontractors : [];
 
   // Recompete state drives whether the incumbent-health banner shows at top.
-  const isRecompete =
+  const isRecompeteWindow =
     award.daysToPopEnd != null && award.daysToPopEnd >= 0 && award.daysToPopEnd <= recompeteDays;
   const portfolioHealth = port.portfolio_health ?? null;
 
@@ -98,6 +105,133 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
       ? "Archived — kept on record, not shown in the working list."
       : "No longer surfaced by the latest scan. Kept because it's still in your pipeline.";
 
+  // RECOMPETE: if incumbent_name exists, render recompete brief
+  if (isRecompete) {
+    return (
+      <div className="wq-awards wq-report">
+        {isStale && (
+          <div className="wq-rep-stale" role="status">
+            <span className="wq-rep-stale-lbl">{staleLabel}</span>
+            <span className="wq-rep-stale-note">{staleNote}</span>
+          </div>
+        )}
+        
+        <div className="wq-rep-header">
+          <div className="wq-rep-score">
+            <span className="wq-rep-score-num">{scores.b2b_score ?? "—"}</span>
+            <span className="wq-rep-score-lbl">B2B fit</span>
+          </div>
+          <div className="wq-rep-tags">
+            {award.disposition && <span className="wq-chip wq-disp-strong">{award.disposition}</span>}
+          </div>
+        </div>
+
+        {/* SUBJECT: Incumbent */}
+        <div className="wq-rep-subject">
+          <div className="wq-rep-subject-name blurable">{bd.incumbent_name || "Incumbent (unresolved)"}</div>
+          <div className="wq-rep-subject-meta">
+            {bd.piid ? <span className="blurable">{bd.piid}</span> : null}
+            {bd.agency ? <span className="blurable">{bd.agency}</span> : null}
+          </div>
+        </div>
+
+        {/* RECOMPETE TIMING */}
+        <Section title="Recompete timeline">
+          <div className="wq-rep-grid">
+            <span>Current end date</span>
+            <span>{bd.current_end_date ? new Date(bd.current_end_date).toLocaleDateString() : "—"}</span>
+            <span>Months until recompete</span>
+            <span>{bd.months_until_end != null ? `${bd.months_until_end} months` : "—"}</span>
+            <span>Set-aside</span>
+            <span>{bd.set_aside || "None"}</span>
+          </div>
+        </Section>
+
+        {/* CURRENT AWARD */}
+        <Section title="Current award">
+          <div className="wq-rep-grid">
+            <span>Award value</span>
+            <span>{bd.current_value ? `$${bd.current_value.toLocaleString()}` : "—"}</span>
+            <span>Started</span>
+            <span>{bd.current_start_date ? new Date(bd.current_start_date).toLocaleDateString() : "—"}</span>
+          </div>
+        </Section>
+
+        {/* SCORING BREAKDOWN */}
+        <Section title="Scoring breakdown">
+          <div className="wq-rep-grid">
+            <span>Gap (60%)</span>
+            <span>{scores.gap != null ? `${Math.round(scores.gap)}/100` : "—"}</span>
+            <span>Urgency (25%)</span>
+            <span>{scores.urgency != null ? `${Math.round(scores.urgency)}/100` : "—"}</span>
+            <span>Timing (15%)</span>
+            <span>{scores.timing != null ? `${Math.round(scores.timing)}/100` : "—"}</span>
+            <span><strong>B2B Score</strong></span>
+            <span><strong>{scores.b2b_score != null ? `${scores.b2b_score}/100` : "—"}</strong></span>
+          </div>
+        </Section>
+
+        {/* PRIME CAPABILITY */}
+        {primeCap && Object.keys(primeCap).length > 0 && (
+          <Section title="Incumbent capability">
+            <div className="wq-rep-grid">
+              <span>Total portfolio</span>
+              <span>{primeCap.total_portfolio ? `$${primeCap.total_portfolio.toLocaleString()}` : "—"}</span>
+              <span>Advertising % of portfolio</span>
+              <span>{primeCap.advertising_pct != null ? `${primeCap.advertising_pct.toFixed(1)}%` : "—"}</span>
+              <span>Registration status</span>
+              <span>{primeCap.registration_status || "—"}</span>
+            </div>
+            {Array.isArray(primeCap.top_naics) && primeCap.top_naics.length > 0 && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>Top NAICS:</p>
+                <ul className="wq-rep-bullets">
+                  {primeCap.top_naics.map((n, i) => (
+                    <li key={i}>{n.code} — ${n.value ? n.value.toLocaleString() : "—"}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </Section>
+        )}
+
+        {/* SUBCONTRACTORS */}
+        <Section title="Top subcontractors">
+          {recomSubs.length > 0 ? (
+            <ul className="wq-rep-bullets">
+              {recomSubs.map((s, i) => (
+                <li key={i}>
+                  <span className="blurable">{s.name || s.recipient_name || "Unnamed"}</span>
+                  {s.amount ? ` — $${s.amount.toLocaleString()}` : ""}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="wq-rep-muted">No subcontractor data available.</p>
+          )}
+        </Section>
+
+        <Section title="How this surfaced">
+          <p className="wq-rep-muted">
+            Surfaced from GovCon recompete intelligence (PIID <span className="blurable">{bd.piid}</span>), scored on
+            gap entailment, urgency (portfolio stress/churn), and recompete timing.
+          </p>
+        </Section>
+
+        <div className="wq-rep-actions">
+          <button
+            type="button"
+            className="wq-btn"
+            onClick={() => downloadAwardBrief(award, { subscriberName, recompeteDays })}
+          >
+            Download Brief
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // OLD SCHEMA: render traditional award brief
   return (
     <div className="wq-awards wq-report">
       {isStale && (
@@ -157,6 +291,9 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
         </>
       )}
 
+      {/* B2B SUBAWARDS ENRICHMENT — all subs under prime + POCs + agency CO */}
+      {award.b2b_subawards && <SignalSubawardsPanel b2b_subawards={award.b2b_subawards} />}
+
       {/* SUBCONTRACTORS — named FFATA teaming on the incumbent's award = displacement
           targets / the seam to slot into. Empty or absent renders as "not disclosed",
           deliberately distinct from "none": absence is a reporting gap, not evidence the
@@ -195,7 +332,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
         )}
       </Section>
 
-      {isRecompete && (
+      {isRecompeteWindow && (
         <div className="wq-rep-health">
           <div className="wq-rep-health-top">
             <span className="wq-rep-health-lbl">Incumbent health</span>
