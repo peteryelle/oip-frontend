@@ -70,10 +70,10 @@ export function useAwards(oipId, opts = {}) {
         signal_id, status, relevance_status,
         b2b_busdev, b2b_score, disposition, motion, displacement_difficulty,
         incumbent_method, prime_uei, why_now, data_confidence_flag,
-        signals!inner ( id, title, doc_url, source_meta, signal_kind )
+        signals!inner ( id, title, doc_url, source_meta, source_name, signal_kind )
       `)
       .eq("oip_id", oipId)
-      .eq("signals.signal_kind", "award");
+      .in("signals.signal_kind", ["award", "notice"]);
     // Relevance: hide rows the latest rescore didn't reproduce, unless asked (migration 008)
     if (!includeStale) query = query.eq("relevance_status", "active");
     query = query.order("b2b_score", { ascending: false, nullsFirst: false });
@@ -148,6 +148,42 @@ export function useAwards(oipId, opts = {}) {
 function normalize(r) {
   const sig = r.signals || {};
   const meta = sig.source_meta || {};
+  const busdev = r.b2b_busdev || {};
+  
+  // Recompete (govcon_dd_v2): extract from b2b_busdev
+  if (busdev.incumbent_name) {
+    return {
+      signalId: r.signal_id,
+      status: r.status,
+      title: busdev.incumbent_name + " - " + (busdev.agency || ""),
+      url: "",
+      piid: busdev.piid || "",
+      awardId: "",
+      recipient: busdev.incumbent_name || "",
+      uei: busdev.incumbent_uei || "",
+      agency: busdev.agency || "",
+      subAgency: "",
+      naics: "",
+      psc: "",
+      amount: toNum(busdev.current_value),
+      popStart: busdev.current_start_date || null,
+      popEnd: busdev.current_end_date || null,
+      monthsToPopEnd: busdev.months_until_end || null,
+      daysToPopEnd: null,
+      daysSincePopStart: null,
+      score: r.b2b_score,
+      disposition: r.disposition || null,
+      motion: r.motion || null,
+      difficulty: r.displacement_difficulty || null,
+      incumbentMethod: null,
+      whyNow: null,
+      dataConfidenceFlag: "✓ High",
+      busdev: busdev,
+      relevanceStatus: r.relevance_status || "active",
+    };
+  }
+  
+  // Award (old USASpending): extract from source_meta
   return {
     signalId: r.signal_id,
     status: r.status,
