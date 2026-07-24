@@ -249,6 +249,25 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           </Section>
         )}
 
+        {/* PERFORMANCE READ */}
+        {isRecompete && bd.performance?.prime_portfolio && (
+          <Section title="Performance read">
+            <p className="wq-rep-p">
+              <strong>Prime portfolio</strong> — health {bd.performance.prime_portfolio.portfolio_health}/100
+              {bd.performance.prime_portfolio.portfolio_health != null && bd.performance.prime_portfolio.portfolio_health < 50 ? (
+                <span style={{ color: "#b91c1c", marginLeft: "8px" }}>· chronic-risk flag</span>
+              ) : ""}
+            </p>
+            {Array.isArray(bd.performance.prime_portfolio.bullets) && bd.performance.prime_portfolio.bullets.length > 0 && (
+              <ul className="wq-rep-bullets">
+                {bd.performance.prime_portfolio.bullets.map((bullet, i) => (
+                  <li key={i}>{bullet}</li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        )}
+
         {/* PRIME CAPABILITY */}
         {primeCap && Object.keys(primeCap).length > 0 && (
           <Section title="Incumbent capability">
