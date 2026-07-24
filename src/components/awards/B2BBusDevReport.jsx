@@ -194,6 +194,61 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           </Section>
         )}
 
+        {/* AWARD SCOPE */}
+        {bd.lm_analysis?.award_scope && (
+          <Section title="Award scope">
+            <p className="wq-rep-p blurable">{bd.lm_analysis.award_scope}</p>
+            {bd.lm_confidence?.scope && (
+              <div className="wq-rep-confidence">
+                Confidence: <span className={`badge-${bd.lm_confidence.scope}`}>{bd.lm_confidence.scope.toUpperCase()}</span>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* THE GAP */}
+        {bd.lm_analysis?.advertising_gap && (
+          <Section title="The gap — entailed, not evidenced by the prime">
+            <p className="wq-rep-p blurable">{bd.lm_analysis.advertising_gap}</p>
+            {bd.lm_confidence?.gap && (
+              <div className="wq-rep-confidence">
+                Confidence: <span className={`badge-${bd.lm_confidence.gap}`}>{bd.lm_confidence.gap.toUpperCase()}</span>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* WHY NOW */}
+        {bd.lm_analysis?.why_now && (
+          <Section title="Why now">
+            <p className="wq-rep-p blurable">{bd.lm_analysis.why_now}</p>
+            {bd.lm_confidence?.urgency && (
+              <div className="wq-rep-confidence">
+                Confidence: <span className={`badge-${bd.lm_confidence.urgency}`}>{bd.lm_confidence.urgency.toUpperCase()}</span>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* SALES POSITIONING */}
+        {bd.lm_analysis?.sales_positioning && (
+          <Section title="Sales positioning">
+            <p className="wq-rep-p blurable">{bd.lm_analysis.sales_positioning}</p>
+            {bd.lm_confidence?.positioning && (
+              <div className="wq-rep-confidence">
+                Confidence: <span className={`badge-${bd.lm_confidence.positioning}`}>{bd.lm_confidence.positioning.toUpperCase()}</span>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* CAVEATS */}
+        {bd.lm_caveats && (
+          <Section title="Caveats & missing data">
+            <p className="wq-rep-muted">{bd.lm_caveats}</p>
+          </Section>
+        )}
+
         {/* PRIME CAPABILITY */}
         {primeCap && Object.keys(primeCap).length > 0 && (
           <Section title="Incumbent capability">
@@ -236,7 +291,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
 
         <Section title="How this surfaced">
           <p className="wq-rep-muted">
-            Surfaced from GovCon recompete intelligence (PIID <span className="blurable">{bd.piid}</span>), scored on
+            Surfaced from federal recompete intelligence (PIID <span className="blurable">{bd.piid}</span>), scored on
             gap entailment, urgency (portfolio stress/churn), and recompete timing.
           </p>
         </Section>
@@ -505,4 +560,59 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
       </div>
     </div>
   );
+}
+
+const badgeStyles = `
+  .wq-rep-confidence {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: #666;
+  }
+  
+  .badge-high {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    background: #d4edda;
+    color: #155724;
+    border-radius: 3px;
+    font-weight: 600;
+    font-size: 0.75rem;
+  }
+  
+  .badge-medium {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    background: #fff3cd;
+    color: #856404;
+    border-radius: 3px;
+    font-weight: 600;
+    font-size: 0.75rem;
+  }
+  
+  .badge-low {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    background: #f8d7da;
+    color: #721c24;
+    border-radius: 3px;
+    font-weight: 600;
+    font-size: 0.75rem;
+  }
+  
+  .badge-unavailable {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    background: #e2e3e5;
+    color: #383d41;
+    border-radius: 3px;
+    font-weight: 600;
+    font-size: 0.75rem;
+  }
+`;
+
+// Inject styles
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.innerHTML = badgeStyles;
+  document.head.appendChild(style);
 }
