@@ -94,6 +94,22 @@ export function useAwards(oipId, opts = {}) {
 
   const awards = useMemo(() => {
     let list = rows.slice();
+    
+    // Calculate total value per prime (incumbent_name)
+    const primeValueMap = {};
+    list.forEach((a) => {
+      const prime = a.recipient; // recipient = incumbent_name for recompetes
+      if (prime && a.amount) {
+        primeValueMap[prime] = (primeValueMap[prime] || 0) + a.amount;
+      }
+    });
+    
+    // Attach primeTotal to each award
+    list = list.map((a) => ({
+      ...a,
+      primeTotal: primeValueMap[a.recipient] || null,
+    }));
+    
     if (!includeArchived) {
       list = list.filter((a) => a.score != null && a.score >= ARCHIVE_BELOW);
     }
