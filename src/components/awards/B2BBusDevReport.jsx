@@ -171,6 +171,29 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           </div>
         </Section>
 
+        {/* AWARD SCOPE */}
+        {bd.scope_text && (
+          <Section title="Award scope">
+            <p className="wq-rep-p blurable">{bd.scope_text}</p>
+          </Section>
+        )}
+
+        {/* CROSS-SELL OPPORTUNITIES */}
+        {Array.isArray(bd.cross_sell) && bd.cross_sell.length > 0 && (
+          <Section title="Cross-sell opportunities">
+            <p className="wq-rep-muted">Other {bd.incumbent_name} contracts by incumbent (potential expansion):</p>
+            <ul className="wq-rep-bullets">
+              {bd.cross_sell.map((cs, i) => (
+                <li key={i}>
+                  <span className="blurable">{cs.agency}</span>
+                  {cs.value ? ` — $${cs.value.toLocaleString()}` : ""}
+                  {cs.naics ? ` · NAICS ${cs.naics}` : ""}
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
         {/* PRIME CAPABILITY */}
         {primeCap && Object.keys(primeCap).length > 0 && (
           <Section title="Incumbent capability">
