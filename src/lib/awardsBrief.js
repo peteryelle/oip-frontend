@@ -128,13 +128,60 @@ export function buildAwardBriefHtml(a, opts = {}) {
        </div>`
     : "";
 
-  // ── How this surfaced ──
-  const surfacedHtml = section(
-    "How this surfaced",
-    `<p class="muted">Surfaced from federal award data (${esc(a.agency || "—")}${
-      a.naics ? ` · NAICS ${esc(a.naics)}` : ""
-    }), then scored on delivery entailment — not a keyword match.</p>`
+  // ── Recompete (DD v2) schema detection — uses lm_analysis instead of positioning ──
+  const isDD2Recompete = bd.lm_analysis && typeof bd.lm_analysis === "object";
+  
+  // ── DD v2 LLM sections (recompete) ──
+  const confidenceBadge = (conf) => {
+    if (!conf) return "";
+    const bgColor = { high: "#d4edda", medium: "#fff3cd", low: "#f8d7da", unavailable: "#e2e3e5" }[conf] || "#e2e3e5";
+    const textColor = { high: "#155724", medium: "#856404", low: "#721c24", unavailable: "#383d41" }[conf] || "#383d41";
+    return `<div style="margin-top: 8px; font-size: 11px; color: #666;">Confidence: <span style="display: inline-block; padding: 2px 6px; background: ${bgColor}; color: ${textColor}; border-radius: 3px; font-weight: 600; font-size: 10px;">${conf.toUpperCase()}</span></div>`;
+  };
+
+  const dd2Html = isDD2Recompete
+    ? [
+        section("Award scope", para(bd.lm_analysis.award_scope) + confidenceBadge(bd.lm_confidence?.scope)),
+        section("The gap — entailed, not evidenced by the prime", para(bd.lm_analysis.advertising_gap) + confidenceBadge(bd.lm_confidence?.gap)),
+        section("Why now", para(bd.lm_analysis.why_now) + confidenceBadge(bd.lm_confidence?.urgency)),
+        section("Sales positioning", para(bd.lm_analysis.sales_positioning) + confidenceBadge(bd.lm_confidence?.positioning)),
+        section("Caveats & missing data", mutedP(bd.lm_caveats)),
+      ].join("")
+    : "";
+
+  // ── DD v2 Performance (recompete) ──
+  const perfPort = bd.performance?.prime_portfolio || {};
+  const dd2PerfHtml = isDD2Recompete && perfPort.scored
+    ? `<h2>Performance read</h2>
+       <p><strong>Prime portfolio</strong> — ${perfPort.scored} contract(s) scored</p>
+       ${list(perfPort.bullets || [])}
+       ${
+         perfPort.portfolio_health != null
+           ? `<div style="margin-top: 8px;"><strong>Portfolio health:</strong> ${perfPort.portfolio_health}/100</div>`
+           : ""
+       }
+       ${
+         perfPort.option_exercise_rate
+           ? `<div><strong>Options exercised:</strong> ${Math.round(perfPort.option_exercise_rate)}%</div>`
+           : ""
+       }
+       ${
+         perfPort.deobligation_rate
+           ? `<div><strong>Deobligations:</strong> ${Math.round(perfPort.deobligation_rate)}%</div>`
+           : ""
+       }
+       ${
+         perfPort.mean_amount_delta_pct
+           ? `<div><strong>Mean scope change:</strong> ${perfPort.mean_amount_delta_pct > 0 ? "+" : ""}${Math.round(perfPort.mean_amount_delta_pct)}%</div>`
+           : ""
+       }`
+    : "";
+
+  // ── DD v2 Cross-sell (recompete) ──
+  const dd2CrossSellList = (Array.isArray(bd.cross_sell_opportunities) || []).map((cs) =>
+    `${esc(cs.agency || "Unknown")}${cs.value ? ` — ${fmtMoney(cs.value)}` : ""}${cs.status ? ` · ${esc(cs.status)}` : ""}`
   );
+  const dd2CrossSellHtml = dd2CrossSellList.length ? section("Cross-sell opportunities", list(dd2CrossSellList)) : "";
 
   // ── Why now ──
   const whyNowHtml = section("Why now", para(a.whyNow || pos.why_now));
@@ -226,16 +273,16 @@ export function buildAwardBriefHtml(a, opts = {}) {
 
   <div class="badges">${chipsHtml}</div>
 
-  ${coreHtml}
-  ${healthBannerHtml}
-  ${surfacedHtml}
-  ${whyNowHtml}
-  ${entailmentHtml}
-  ${salesPlanHtml}
-  ${pocHtml}
-  ${perfHtml}
-  ${crossSellHtml}
-  ${confidenceHtml}
+  ${isDD2Recompete ? dd2Html : coreHtml}
+  ${isDD2Recompete ? dd2PerfHtml : healthBannerHtml}
+  ${isDD2Recompete ? (section("How this surfaced", `<p class="muted">Surfaced from federal recompete intelligence (PIID ${esc(a.piid || "—")}), scored on gap entailment, urgency (portfolio stress/churn), and recompete timing.</p>`)) : surfacedHtml}
+  ${isDD2Recompete ? dd2CrossSellHtml : whyNowHtml}
+  ${isDD2Recompete ? "" : entailmentHtml}
+  ${isDD2Recompete ? "" : salesPlanHtml}
+  ${isDD2Recompete ? "" : pocHtml}
+  ${isDD2Recompete ? "" : perfHtml}
+  ${isDD2Recompete ? "" : crossSellHtml}
+  ${isDD2Recompete ? "" : confidenceHtml}
 </body></html>`;
 }
 
