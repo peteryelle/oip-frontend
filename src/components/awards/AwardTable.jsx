@@ -77,6 +77,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
     switch (key) {
       case "prime":       return (a.recipient || "").toLowerCase();
       case "amount":      return a.amount ?? -1;
+      case "primeTotal":  return a.primeTotal ?? -1;
       case "recompete":   return rankMonths(a.monthsToPopEnd);
       case "disposition": return DISPOSITION_ORDER[a.disposition] ?? 9;
       case "score":
@@ -122,6 +123,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
             <SortTh label="Prime" k="prime" />
             <th className="wq-atable-th">Agency</th>
             <SortTh label="Amount" k="amount" right />
+            <SortTh label="Prime Total" k="primeTotal" right />
             <SortTh label="Recompete" k="recompete" />
             <SortTh label="B2B" k="score" />
             <SortTh label="Disposition" k="disposition" />
@@ -148,6 +150,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                   {a.subAgency || a.agency || "—"}
                 </td>
                 <td className="wq-atable-td wq-atable-r wq-atable-amt">{fmtMoney(a.amount)}</td>
+                <td className="wq-atable-td wq-atable-r wq-atable-amt">{fmtMoney(a.primeTotal)}</td>
                 <td className="wq-atable-td">
                   {!t.active ? (
                     <span className="wq-atable-state wq-state-ended">Ended · {pop.date}</span>
