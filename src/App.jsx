@@ -11,6 +11,7 @@ import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
 import { DemoGateProvider } from './hooks/useDemoGate'
 import DemoIndicator from './components/demo/DemoIndicator'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
+import PrimeAccountPage from './pages/PrimeAccountPage'
 import { supabase } from './lib/supabase'
 import { AuthProvider, useAuth } from './lib/auth'
 import { OipProvider, useOip } from './lib/oip'
@@ -60,6 +61,7 @@ export default function App() {
               <Route path="objectives" element={<ObjectivesPage />} />
               <Route path="sentinel" element={<SentinelPage />} />
               <Route path="demand" element={<DerivedDemandPage />} />
+              <Route path="prime/:uei" element={<PrimeAccountPage />} />
               <Route path="pursued" element={<PursuedPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="settings/team" element={<TeamPage />} />

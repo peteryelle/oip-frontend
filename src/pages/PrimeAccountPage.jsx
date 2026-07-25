@@ -82,7 +82,9 @@ export default function PrimeAccountPage() {
       })
       if (cancelled) return
       if (error) setErr(error.message)
-      else setBrief(data)
+      // supabase-js returns a scalar jsonb directly, but wraps set-returning
+      // functions in an array. Handle both so the shape is not a deploy risk.
+      else setBrief(Array.isArray(data) ? (data[0] ?? null) : data)
       setLoading(false)
     })()
     return () => { cancelled = true }
