@@ -286,8 +286,14 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           </Section>
         )}
 
-        {/* THE ACCOUNT — thin strip; depth lives on the account route */}
-        {!gated && (book.awards != null || book.total != null) && (
+        {/* THE ACCOUNT — thin strip only. Depth (addressable book by code,
+            recompete calendar, agency map, vehicles, contacts) lives on the
+            account route, because it is per-PRIME while this drawer is
+            per-AWARD: DDB Chicago appears five times on the board and would
+            otherwise repeat one account profile five times over.
+            Rendered for gated rows too — the contract may be dead while the
+            account is not. */}
+        {(book.awards != null || book.total != null || bd.incumbent_uei) && (
           <Section title="The account">
             <div className="wq-rep-grid">
               <span>Federal book</span>
@@ -302,6 +308,18 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
                 </>
               )}
             </div>
+            {bd.incumbent_uei && (
+              <p style={{ marginTop: "0.6rem" }}>
+                <a
+                  href={`/prime/${bd.incumbent_uei}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: "0.85rem", color: "#2563eb", textDecoration: "none" }}
+                >
+                  View full account — addressable book, recompete calendar, vehicles, contacts &#8599;
+                </a>
+              </p>
+            )}
           </Section>
         )}
 
