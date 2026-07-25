@@ -16,6 +16,15 @@ const SORTERS = {
 };
 const rank = (m) => (m == null || m < 0 ? Number.POSITIVE_INFINITY : m);
 
+// The confidence dropdown filters on these exact labels; the handler emits
+// high|medium|low. Previously hardcoded to "✓ High" on every recompete, which
+// made the filter a no-op.
+const CONFIDENCE_LABEL = {
+  high: "✓ High",
+  medium: "⚠️ Borderline",
+  low: "✗ Low",
+};
+
 // Two-axis tags the B2B view filters and flags by. Award axis: new vs old
 // (pop_start). Recompete axis: soon vs outside-window (pop_end). Only active
 // awards (future or open-ended PoP) are tagged; past-PoP awards are untagged
@@ -110,8 +119,14 @@ export function useAwards(oipId, opts = {}) {
       primeTotal: primeValueMap[a.recipient] || null,
     }));
     
+    // Two different reasons a row is hidden, deliberately not merged:
+    //   gated   — the entailment gate rejected it. Never a candidate.
+    //   low     — it passed the gate but scored below the floor.
+    // Calling gated rows "archived (≤39)" reads as something the user set
+    // aside, when it is the product's own judgement that the work does not
+    // need what they sell.
     if (!includeArchived) {
-      list = list.filter((a) => a.score != null && a.score >= ARCHIVE_BELOW);
+      list = list.filter((a) => !a.gated && a.score != null && a.score >= ARCHIVE_BELOW);
     }
     // Pocket scope: a clicked demand-grid cell (sub-agency × NAICS).
     if (pocket && pocket.agency && pocket.naics) {
@@ -153,12 +168,17 @@ export function useAwards(oipId, opts = {}) {
     return list;
   }, [rows, sort, disposition, withinMonths, recompeteDays, awardDays, states, search, confidenceFilter, includeArchived, pocket]);
 
+  const gatedCount = useMemo(() => rows.filter((a) => a.gated).length, [rows]);
+
   const archivedCount = useMemo(
-    () => rows.filter((a) => a.score == null || a.score < ARCHIVE_BELOW).length,
+    () => rows.filter((a) => !a.gated && (a.score == null || a.score < ARCHIVE_BELOW)).length,
     [rows]
   );
 
-  return { awards, loading, error, refetch: load, total: rows.length, archivedCount };
+  return {
+    awards, loading, error, refetch: load,
+    total: rows.length, archivedCount, gatedCount,
+  };
 }
 
 function normalize(r) {
@@ -166,8 +186,19 @@ function normalize(r) {
   const meta = sig.source_meta || {};
   const busdev = r.b2b_busdev || {};
   
-  // Recompete (govcon_dd_v2): extract from b2b_busdev
+  // Recompete (govcon_dd_v2): extract from b2b_busdev.
+  //
+  // The handler's key names changed with the gate/size rewrite. Notably
+  // current_end_date -> pop_end_date and months_until_end is no longer written,
+  // so BOTH are derived from pop_end_date here. daysToPopEnd used to be
+  // hardcoded null, which made awardTags() treat every recompete as inactive —
+  // that is why the table read "Outside window · —" on every row.
   if (busdev.incumbent_name) {
+    const popEnd = busdev.pop_end_date || busdev.current_end_date || null;
+    const ent = busdev.entailment || {};
+    // Gated = the entailment gate rejected it. Distinct from a low score: the
+    // work does not need what the tenant sells, so it was never a candidate.
+    const gated = busdev.scores?.gated === true || r.disposition === "No";
     return {
       signalId: r.signal_id,
       status: r.status,
@@ -178,22 +209,23 @@ function normalize(r) {
       recipient: busdev.incumbent_name || "",
       uei: busdev.incumbent_uei || "",
       agency: busdev.agency || "",
-      subAgency: "",
-      naics: "",
-      psc: "",
+      subAgency: busdev.sub_agency || "",
+      naics: busdev.naics_code || "",
+      psc: busdev.psc_code || "",
       amount: toNum(busdev.current_value),
-      popStart: busdev.current_start_date || null,
-      popEnd: busdev.current_end_date || null,
-      monthsToPopEnd: busdev.months_until_end || null,
-      daysToPopEnd: null,
+      popStart: null,
+      popEnd,
+      monthsToPopEnd: monthsTo(popEnd),
+      daysToPopEnd: daysFromToday(popEnd),
       daysSincePopStart: null,
       score: r.b2b_score,
+      gated,
       disposition: r.disposition || null,
       motion: r.motion || null,
-      difficulty: r.displacement_difficulty || null,
-      incumbentMethod: null,
-      whyNow: null,
-      dataConfidenceFlag: "✓ High",
+      difficulty: ent.delivery_mode || r.displacement_difficulty || null,
+      incumbentMethod: ent.incumbent_method || null,
+      whyNow: busdev.why_now || null,
+      dataConfidenceFlag: CONFIDENCE_LABEL[ent.confidence] || CONFIDENCE_LABEL[busdev.scope_confidence] || "✗ Low",
       busdev: busdev,
       relevanceStatus: r.relevance_status || "active",
     };

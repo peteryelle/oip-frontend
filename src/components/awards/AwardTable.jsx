@@ -22,6 +22,15 @@ const MOTION_LABEL = {
   unknown: "Unknown",
 };
 
+// delivery_mode from the entailment pass — how the incumbent performs this work
+// today. Populated into `difficulty` by useAwards for recompete rows.
+const DELIVERY_LABEL = {
+  own_platform: "Own platform",
+  outsourced: "Outsourced",
+  manual: "Manual",
+  unknown: "Unknown",
+};
+
 function scoreBand(score) {
   if (score == null) return "wq-score-na";
   if (score >= 75) return "wq-score-high";
@@ -127,7 +136,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
             <SortTh label="Recompete" k="recompete" />
             <SortTh label="B2B" k="score" />
             <SortTh label="Disposition" k="disposition" />
-            <th className="wq-atable-th">Motion</th>
+            <th className="wq-atable-th">Delivery</th>
           </tr>
         </thead>
         <tbody>
@@ -138,7 +147,24 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
             return (
               <tr key={a.signalId} className="wq-atable-row" onClick={() => onRowClick(a)}>
                 <td className="wq-atable-td">
-                  <div className="wq-atable-prime blurable">{a.recipient || "Unknown prime"}</div>
+                  {/* Prime name links to the account page. Opens in a new tab and
+                      stops propagation so the row's onRowClick does not also fire
+                      and open the award drawer underneath. */}
+                  {a.uei ? (
+                    <a
+                      href={`/prime/${a.uei}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="wq-atable-prime blurable"
+                      style={{ color: "inherit", textDecoration: "none", borderBottom: "1px dotted #9ca3af" }}
+                      title="Open account"
+                    >
+                      {a.recipient || "Unknown prime"}
+                    </a>
+                  ) : (
+                    <div className="wq-atable-prime blurable">{a.recipient || "Unknown prime"}</div>
+                  )}
                   {t.awardedNew && <span className="wq-chip wq-flag-new">New award</span>}
                   {scope && <div className="wq-atable-scope blurable">{scope}</div>}
                   <div className="wq-atable-sub blurable">
@@ -163,9 +189,15 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                   )}
                 </td>
                 <td className="wq-atable-td">
-                  <span className={`wq-chip ${scoreBand(a.score)}`}>
-                    {a.score ?? "—"}
-                  </span>
+                  {a.gated ? (
+                    <span className="wq-chip wq-score-na" title="Rejected at the entailment gate">
+                      —
+                    </span>
+                  ) : (
+                    <span className={`wq-chip ${scoreBand(a.score)}`}>
+                      {a.score ?? "—"}
+                    </span>
+                  )}
                 </td>
                 <td className="wq-atable-td">
                   {a.disposition ? (
@@ -177,7 +209,8 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                   )}
                 </td>
                 <td className="wq-atable-td wq-atable-motion">
-                  {a.motion ? MOTION_LABEL[a.motion] || a.motion : "—"}
+                  {DELIVERY_LABEL[a.difficulty] ||
+                    (a.motion ? MOTION_LABEL[a.motion] || a.motion : "—")}
                 </td>
               </tr>
             );

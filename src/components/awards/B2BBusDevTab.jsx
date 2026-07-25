@@ -79,7 +79,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
 
   // Default order is recompete-soonest (near-term PoP-end floats up); the sort
   // control below switches it, and the table's column headers still re-sort locally.
-  const { awards, loading, error, total, archivedCount } = useAwards(oipId, {
+  const { awards, loading, error, total, archivedCount, gatedCount } = useAwards(oipId, {
     sort,
     disposition,
     states,
@@ -161,7 +161,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
             checked={showArchived}
             onChange={(e) => setShowArchived(e.target.checked)}
           />
-          Show archived (&le;39){archivedCount ? ` · ${archivedCount}` : ""}
+          Show gated &amp; low-fit{gatedCount + archivedCount ? ` · ${gatedCount + archivedCount}` : ""}
         </label>
         <label className="wq-check">
           <input

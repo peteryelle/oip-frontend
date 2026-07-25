@@ -75,7 +75,7 @@ export function buildAwardBriefHtml(a, opts = {}) {
 
   // ── Header chips ──
   const chipsHtml = [
-    `<span class="badge score">${a.score ?? "—"}<span class="badge-sub"> B2B fit</span></span>`,
+    `<span class="badge score">${dd2Gated ? "—" : (a.score ?? "—")}<span class="badge-sub"> ${dd2Gated ? "not scored" : "B2B fit"}</span></span>`,
     a.disposition ? `<span class="badge disp">${esc(a.disposition)}</span>` : "",
     a.motion ? `<span class="badge chip">${esc(a.motion)}</span>` : "",
     a.difficulty ? `<span class="badge chip">displace: ${esc(a.difficulty)}</span>` : "",
@@ -128,60 +128,188 @@ export function buildAwardBriefHtml(a, opts = {}) {
        </div>`
     : "";
 
-  // ── Recompete (DD v2) schema detection — uses lm_analysis instead of positioning ──
-  const isDD2Recompete = bd.lm_analysis && typeof bd.lm_analysis === "object";
-  
-  // ── DD v2 LLM sections (recompete) ──
+  // ── Recompete (DD v2) schema detection ────────────────────────────────────
+  // MIRRORS the rewritten recompete branch of B2BBusDevReport.jsx. The handler
+  // no longer writes lm_analysis / lm_confidence / scope_text / prime_capability
+  // — gap is the entailment GATE (binary, not scored) and what replaced it as a
+  // score is SIZE (deliverable 35% + contract value 65%), composited S40 U30 T30.
+  const isDD2Recompete = bd.entailment != null && bd.incumbent_name != null;
+
+  const entail = bd.entailment || {};
+  const dd2Gated = bd.scores?.gated === true || a.disposition === "No";
+  const scores = bd.scores || {};
+  const book = bd.prime_book || {};
+  const perfNew = bd.performance || {};
+  const dd2Contact = bd.contacts?.contact || null;
+  const inefficiency = entail.delivery_inefficiency || entail.missing_capability || null;
+
+  const deliveryModeLabel = {
+    own_platform: "Runs their own platform for this",
+    outsourced: "Buys this capability from third parties",
+    manual: "Delivers with people and process",
+    unknown: "Delivery method not evidenced",
+  }[entail.delivery_mode] || null;
+
+  const bandLabel = {
+    central: "Central — the contract is principally this work",
+    meaningful: "Meaningful — one substantial component among several",
+    peripheral: "Peripheral — a minor element",
+  }[scores.deliverable_band] || null;
+
+  const daysOut = bd.pop_end_date
+    ? Math.round((new Date(bd.pop_end_date) - new Date()) / 86400000)
+    : null;
+
   const confidenceBadge = (conf) => {
     if (!conf) return "";
-    const bgColor = { high: "#d4edda", medium: "#fff3cd", low: "#f8d7da", unavailable: "#e2e3e5" }[conf] || "#e2e3e5";
-    const textColor = { high: "#155724", medium: "#856404", low: "#721c24", unavailable: "#383d41" }[conf] || "#383d41";
-    return `<div style="margin-top: 8px; font-size: 11px; color: #666;">Confidence: <span style="display: inline-block; padding: 2px 6px; background: ${bgColor}; color: ${textColor}; border-radius: 3px; font-weight: 600; font-size: 10px;">${conf.toUpperCase()}</span></div>`;
+    const bgColor = { high: "#d4edda", medium: "#fff3cd", low: "#f8d7da" }[conf] || "#e2e3e5";
+    const textColor = { high: "#155724", medium: "#856404", low: "#721c24" }[conf] || "#383d41";
+    return `<div style="margin-top:8px;font-size:11px;color:#666;">Confidence: <span style="display:inline-block;padding:2px 6px;background:${bgColor};color:${textColor};border-radius:3px;font-weight:600;font-size:10px;">${esc(conf.toUpperCase())}</span></div>`;
   };
 
-  const dd2Html = isDD2Recompete
-    ? [
-        section("Award scope", para(bd.lm_analysis.award_scope) + confidenceBadge(bd.lm_confidence?.scope)),
-        section("The gap — entailed, not evidenced by the prime", para(bd.lm_analysis.advertising_gap) + confidenceBadge(bd.lm_confidence?.gap)),
-        section("Why now", para(bd.lm_analysis.why_now) + confidenceBadge(bd.lm_confidence?.urgency)),
-        section("Sales positioning", para(bd.lm_analysis.sales_positioning) + confidenceBadge(bd.lm_confidence?.positioning)),
-        section("Caveats & missing data", mutedP(bd.lm_caveats)),
-      ].join("")
+  // Gated: lead with why and stop. A contract that does not need what the
+  // tenant sells is not a weak opportunity — it is not an opportunity.
+  const dd2GatedHtml = dd2Gated
+    ? section(
+        "Not an opportunity",
+        para(bd.why_no || entail.reason || "Entailment failed.") +
+          mutedP(bd.work_summary ? `What this contract buys: ${bd.work_summary}` : null)
+      )
     : "";
 
-  // ── DD v2 Performance (recompete) ──
-  const perfPort = bd.performance?.prime_portfolio || {};
-  const dd2PerfHtml = isDD2Recompete && perfPort.scored
-    ? `<h2>Performance read</h2>
-       <p><strong>Prime portfolio</strong> — ${perfPort.scored} contract(s) scored</p>
-       ${list(perfPort.bullets || [])}
-       ${
-         perfPort.portfolio_health != null
-           ? `<div style="margin-top: 8px;"><strong>Portfolio health:</strong> ${perfPort.portfolio_health}/100</div>`
-           : ""
-       }
-       ${
-         perfPort.option_exercise_rate
-           ? `<div><strong>Options exercised:</strong> ${Math.round(perfPort.option_exercise_rate)}%</div>`
-           : ""
-       }
-       ${
-         perfPort.deobligation_rate
-           ? `<div><strong>Deobligations:</strong> ${Math.round(perfPort.deobligation_rate)}%</div>`
-           : ""
-       }
-       ${
-         perfPort.mean_amount_delta_pct
-           ? `<div><strong>Mean scope change:</strong> ${perfPort.mean_amount_delta_pct > 0 ? "+" : ""}${Math.round(perfPort.mean_amount_delta_pct)}%</div>`
-           : ""
-       }`
+  const dd2ScopeHtml = !dd2Gated && bd.work_summary
+    ? section(
+        "What this contract buys",
+        para(bd.work_summary) +
+          (Array.isArray(bd.required_capabilities) && bd.required_capabilities.length
+            ? `<p class="muted">Capabilities the work requires:</p>${list(bd.required_capabilities)}`
+            : "") +
+          confidenceBadge(bd.scope_confidence)
+      )
     : "";
 
-  // ── DD v2 Cross-sell (recompete) ──
-  const dd2CrossSellList = (Array.isArray(bd.cross_sell_opportunities) || []).map((cs) =>
-    `${esc(cs.agency || "Unknown")}${cs.value ? ` — ${fmtMoney(cs.value)}` : ""}${cs.status ? ` · ${esc(cs.status)}` : ""}`
+  const dd2DeliveryHtml = !dd2Gated && (inefficiency || entail.incumbent_method)
+    ? section(
+        "How the incumbent delivers this today",
+        para(entail.incumbent_method) +
+          mutedP(deliveryModeLabel) +
+          (inefficiency ? `<p class="muted">The opening:</p>${para(inefficiency)}` : "") +
+          (entail.chain ? `<p class="muted">Entailment:</p>${para(entail.chain)}` : "") +
+          confidenceBadge(entail.confidence)
+      )
+    : "";
+
+  const dd2WhyNowHtml = !dd2Gated ? section("Why now", para(bd.why_now)) : "";
+
+  const dd2AwardHtml = section(
+    "Current award",
+    grid([
+      ["Award value", fmtMoney(bd.current_value)],
+      [
+        "Period ends",
+        bd.pop_end_date
+          ? `${new Date(bd.pop_end_date).toLocaleDateString()}${daysOut != null && daysOut >= 0 ? ` · ${daysOut} days out` : ""}`
+          : "—",
+      ],
+      ["Agency", bd.sub_agency || bd.agency || "—"],
+      ["NAICS", bd.naics_code ? `${bd.naics_code} — ${bd.naics_description || ""}` : "—"],
+      ["Set-aside", bd.set_aside || "None"],
+    ])
   );
-  const dd2CrossSellHtml = dd2CrossSellList.length ? section("Cross-sell opportunities", list(dd2CrossSellList)) : "";
+
+  const dd2ScoreHtml = !dd2Gated
+    ? section(
+        "Scoring breakdown",
+        grid([
+          ["Size (40%)", scores.size != null ? `${Math.round(scores.size)}/100` : "—"],
+          [
+            "· deliverable (35% of size)",
+            scores.deliverable != null
+              ? `${scores.deliverable}/100${scores.deliverable_band ? ` — ${scores.deliverable_band}` : ""}`
+              : "—",
+          ],
+          [
+            "· contract value (65% of size)",
+            scores.value != null ? `${scores.value}/100${scores.value_note ? ` — ${scores.value_note}` : ""}` : "—",
+          ],
+          ["Urgency (30%)", scores.urgency != null ? `${Math.round(scores.urgency)}/100` : "—"],
+          ["Timing (30%)", scores.timing != null ? `${Math.round(scores.timing)}/100` : "—"],
+          ["B2B score", scores.b2b_score != null ? `${scores.b2b_score}/100` : "—"],
+        ]) + mutedP(bandLabel)
+      )
+    : "";
+
+  const dd2RawScopeHtml = section("Award scope (as filed)", para(bd.award_scope));
+
+  const dd2AccountHtml =
+    book.awards != null || book.total != null
+      ? section(
+          "The account",
+          grid([
+            [
+              "Federal book",
+              `${book.total ? fmtMoney(book.total) : "—"}${book.awards ? ` · ${book.awards} awards` : ""}`,
+            ],
+            ...(book.growth_pct != null
+              ? [["Book trajectory", `${book.growth_pct > 0 ? "+" : ""}${book.growth_pct}% recent vs prior`]]
+              : []),
+          ])
+        )
+      : "";
+
+  // Denominators stated, never blended: performance covers only the awards
+  // whose transaction ledgers were fetched, not the whole book.
+  const dd2PerfHtml =
+    !dd2Gated && perfNew.ledger_count > 0
+      ? section(
+          "Performance read",
+          grid([
+            [
+              "Deobligations",
+              `${perfNew.deoblig_total ? fmtMoney(perfNew.deoblig_total) : "none"}${
+                perfNew.deoblig_rate != null ? ` · ${Math.round(perfNew.deoblig_rate * 100)}% of scored awards` : ""
+              }`,
+            ],
+            ["Terminations", String(perfNew.terminations ?? 0)],
+          ]) +
+            mutedP(
+              `Based on ${perfNew.ledger_count} of ${perfNew.book_count} awards — highest-value transaction ledgers only.`
+            )
+        )
+      : "";
+
+  const dd2ContactHtml =
+    !dd2Gated && dd2Contact
+      ? section(
+          "Point of contact",
+          `<p><strong>${esc(dd2Contact.name)}</strong>${dd2Contact.title ? ` — ${esc(dd2Contact.title)}` : ""}</p>` +
+            mutedP([dd2Contact.city, dd2Contact.state].filter(Boolean).join(", ")) +
+            mutedP("Source: SAM entity registration")
+        )
+      : "";
+
+  const dd2SurfacedHtml = section(
+    "How this surfaced",
+    `<p class="muted">Surfaced from federal recompete intelligence (PIID ${esc(bd.piid || a.piid || "—")}).${
+      dd2Gated
+        ? " Rejected at the entailment gate — the work does not require what you supply."
+        : " Passed the entailment gate, then scored on size, urgency and recompete timing."
+    }</p>`
+  );
+
+  const dd2Html = [
+    dd2GatedHtml,
+    dd2ScopeHtml,
+    dd2DeliveryHtml,
+    dd2WhyNowHtml,
+    dd2AwardHtml,
+    dd2ScoreHtml,
+    dd2RawScopeHtml,
+    dd2AccountHtml,
+    dd2PerfHtml,
+    dd2ContactHtml,
+    dd2SurfacedHtml,
+  ].join("");
 
   // ── Why now ──
   const whyNowHtml = section("Why now", para(a.whyNow || pos.why_now));
@@ -273,16 +401,10 @@ export function buildAwardBriefHtml(a, opts = {}) {
 
   <div class="badges">${chipsHtml}</div>
 
-  ${isDD2Recompete ? dd2Html : coreHtml}
-  ${isDD2Recompete ? dd2PerfHtml : healthBannerHtml}
-  ${isDD2Recompete ? (section("How this surfaced", `<p class="muted">Surfaced from federal recompete intelligence (PIID ${esc(a.piid || "—")}), scored on gap entailment, urgency (portfolio stress/churn), and recompete timing.</p>`)) : surfacedHtml}
-  ${isDD2Recompete ? dd2CrossSellHtml : whyNowHtml}
-  ${isDD2Recompete ? "" : entailmentHtml}
-  ${isDD2Recompete ? "" : salesPlanHtml}
-  ${isDD2Recompete ? "" : pocHtml}
-  ${isDD2Recompete ? "" : perfHtml}
-  ${isDD2Recompete ? "" : crossSellHtml}
-  ${isDD2Recompete ? "" : confidenceHtml}
+  ${isDD2Recompete ? dd2Html : [
+    coreHtml, healthBannerHtml, whyNowHtml, entailmentHtml,
+    salesPlanHtml, pocHtml, perfHtml, crossSellHtml, confidenceHtml,
+  ].join("")}
 </body></html>`;
 }
 
