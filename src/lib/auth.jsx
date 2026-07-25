@@ -16,10 +16,17 @@ export function AuthProvider({ children }) {
       setUser(data.session?.user ?? null)
     })
 
-    // Listen for changes
+    // Listen for changes.
+    //
+    // supabase-js re-emits auth events when a tab regains focus (TOKEN_REFRESHED
+    // / SIGNED_IN), even though nothing changed. Setting state unconditionally
+    // hands down a NEW user object each time, which re-runs the memberships
+    // effect below, flips loading true, and unmounts everything downstream —
+    // OipProvider reloads, the market list remounts, and any open drawer is
+    // lost. Only update when the identity actually changed.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess)
-      setUser(sess?.user ?? null)
+      setSession(prev => (prev?.access_token === sess?.access_token ? prev : sess))
+      setUser(prev => (prev?.id === sess?.user?.id ? prev : (sess?.user ?? null)))
     })
 
     return () => subscription.unsubscribe()
