@@ -1,6 +1,7 @@
 import { useEffect, useState, Component } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
 import B2BBusDevTab from './components/awards/B2BBusDevTab'
+import { SignalSubawardsPanel } from './components/SignalSubawardsPanel'
 import ActivityLog from './components/audit/ActivityLog'
 import AuditHistory from './components/audit/AuditHistory'
 import PipelineRadar from './components/radar/PipelineRadar'
