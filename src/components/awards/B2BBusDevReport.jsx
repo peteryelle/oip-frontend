@@ -105,8 +105,38 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
       ? "Archived — kept on record, not shown in the working list."
       : "No longer surfaced by the latest scan. Kept because it's still in your pipeline.";
 
-  // RECOMPETE: if incumbent_name exists, render recompete brief
+  // RECOMPETE (govcon_dd_v2) — rewritten for the gate/size/urgency/timing brief.
+  //
+  // The handler's output shape changed: gap is no longer a scored term (it is
+  // the entailment GATE, which is binary), and what replaced it as a score is
+  // SIZE — deliverable centrality 35% + contract value 65%. Composite is
+  // S40 * U30 * T30. Every lm_analysis.* / lm_confidence.* / scope_text /
+  // prime_capability key this branch used to read is gone.
   if (isRecompete) {
+    const entail = bd.entailment || {};
+    const gated = scores.gated === true || award.disposition === "No";
+    const book = bd.prime_book || {};
+    const perfNew = bd.performance || {};
+    const contact = bd.contacts?.contact || null;
+    const inefficiency = entail.delivery_inefficiency || entail.missing_capability || null;
+
+    const deliveryModeLabel = {
+      own_platform: "Runs their own platform for this",
+      outsourced: "Buys this capability from third parties",
+      manual: "Delivers with people and process",
+      unknown: "Delivery method not evidenced",
+    }[entail.delivery_mode] || null;
+
+    const bandLabel = {
+      central: "Central — the contract is principally this work",
+      meaningful: "Meaningful — one substantial component among several",
+      peripheral: "Peripheral — a minor element",
+    }[scores.deliverable_band] || null;
+
+    const daysOut = bd.pop_end_date
+      ? Math.round((new Date(bd.pop_end_date) - new Date()) / 86400000)
+      : null;
+
     return (
       <div className="wq-awards wq-report">
         {isStale && (
@@ -115,14 +145,21 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             <span className="wq-rep-stale-note">{staleNote}</span>
           </div>
         )}
-        
+
         <div className="wq-rep-header">
           <div className="wq-rep-score">
-            <span className="wq-rep-score-num">{scores.b2b_score ?? "—"}</span>
-            <span className="wq-rep-score-lbl">B2B fit</span>
+            <span className="wq-rep-score-num">{gated ? "—" : (scores.b2b_score ?? "—")}</span>
+            <span className="wq-rep-score-lbl">{gated ? "not scored" : "B2B fit"}</span>
           </div>
           <div className="wq-rep-tags">
-            {award.disposition && <span className="wq-chip wq-disp-strong">{award.disposition}</span>}
+            {award.disposition && (
+              <span className={`wq-chip ${gated ? "wq-disp-none" : "wq-disp-strong"}`}>
+                {award.disposition}
+              </span>
+            )}
+            {!gated && bandLabel && (
+              <span className="wq-chip">{scores.deliverable_band}</span>
+            )}
           </div>
         </div>
 
@@ -132,186 +169,187 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           <div className="wq-rep-subject-meta">
             {bd.piid ? <span className="blurable">{bd.piid}</span> : null}
             {bd.agency ? <span className="blurable">{bd.agency}</span> : null}
+            {bd.naics_code ? <span className="blurable">NAICS {bd.naics_code}</span> : null}
           </div>
         </div>
 
-        {/* RECOMPETE TIMING */}
-        <Section title="Recompete timeline">
-          <div className="wq-rep-grid">
-            <span>Current end date</span>
-            <span>{bd.current_end_date ? new Date(bd.current_end_date).toLocaleDateString() : "—"}</span>
-            <span>Months until recompete</span>
-            <span>{bd.months_until_end != null ? `${bd.months_until_end} months` : "—"}</span>
-            <span>Set-aside</span>
-            <span>{bd.set_aside || "None"}</span>
-          </div>
-        </Section>
-
-        {/* CURRENT AWARD */}
-        <Section title="Current award">
-          <div className="wq-rep-grid">
-            <span>Award value</span>
-            <span>{bd.current_value ? `$${bd.current_value.toLocaleString()}` : "—"}</span>
-            <span>Started</span>
-            <span>{bd.current_start_date ? new Date(bd.current_start_date).toLocaleDateString() : "—"}</span>
-          </div>
-        </Section>
-
-        {/* SCORING BREAKDOWN */}
-        <Section title="Scoring breakdown">
-          <div className="wq-rep-grid">
-            <span>Gap (60%)</span>
-            <span>{scores.gap != null ? `${Math.round(scores.gap)}/100` : "—"}</span>
-            <span>Urgency (25%)</span>
-            <span>{scores.urgency != null ? `${Math.round(scores.urgency)}/100` : "—"}</span>
-            <span>Timing (15%)</span>
-            <span>{scores.timing != null ? `${Math.round(scores.timing)}/100` : "—"}</span>
-            <span><strong>B2B Score</strong></span>
-            <span><strong>{scores.b2b_score != null ? `${scores.b2b_score}/100` : "—"}</strong></span>
-          </div>
-        </Section>
-
-        {/* AWARD SCOPE */}
-        {bd.scope_text && (
-          <Section title="Award scope">
-            <p className="wq-rep-p blurable">{bd.scope_text}</p>
+        {/* GATED — the entailment gate rejected this. Lead with why and stop.
+            No score, no breakdown: a contract that does not need what you sell
+            is not a weak opportunity, it is not an opportunity. */}
+        {gated && (
+          <Section title="Not an opportunity">
+            <p className="wq-rep-p blurable">{bd.why_no || entail.reason || "Entailment failed."}</p>
+            {bd.work_summary && (
+              <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
+                What this contract buys: {bd.work_summary}
+              </p>
+            )}
           </Section>
         )}
 
-        {/* CROSS-SELL OPPORTUNITIES */}
-        {Array.isArray(bd.cross_sell) && bd.cross_sell.length > 0 && (
-          <Section title="Cross-sell opportunities">
-            <p className="wq-rep-muted">Other {bd.incumbent_name} contracts by incumbent (potential expansion):</p>
-            <ul className="wq-rep-bullets">
-              {bd.cross_sell.map((cs, i) => (
-                <li key={i}>
-                  <span className="blurable">{cs.agency}</span>
-                  {cs.value ? ` — $${cs.value.toLocaleString()}` : ""}
-                  {cs.naics ? ` · NAICS ${cs.naics}` : ""}
-                </li>
-              ))}
-            </ul>
-          </Section>
-        )}
-
-        {/* AWARD SCOPE */}
-        {bd.lm_analysis?.award_scope && (
-          <Section title="Award scope">
-            <p className="wq-rep-p blurable">{bd.lm_analysis.award_scope}</p>
-            {bd.lm_confidence?.scope && (
+        {/* WHAT THE WORK IS — read blind, before any vendor context */}
+        {!gated && bd.work_summary && (
+          <Section title="What this contract buys">
+            <p className="wq-rep-p blurable">{bd.work_summary}</p>
+            {Array.isArray(bd.required_capabilities) && bd.required_capabilities.length > 0 && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>Capabilities the work requires:</p>
+                <Bullets items={bd.required_capabilities} />
+              </>
+            )}
+            {bd.scope_confidence && (
               <div className="wq-rep-confidence">
-                Confidence: <span className={`badge-${bd.lm_confidence.scope}`}>{bd.lm_confidence.scope.toUpperCase()}</span>
+                Scope confidence: <span className={`badge-${bd.scope_confidence}`}>{bd.scope_confidence.toUpperCase()}</span>
               </div>
             )}
           </Section>
         )}
 
-        {/* THE GAP */}
-        {bd.lm_analysis?.advertising_gap && (
-          <Section title="The gap — entailed, not evidenced by the prime">
-            <p className="wq-rep-p blurable">{bd.lm_analysis.advertising_gap}</p>
-            {bd.lm_confidence?.gap && (
+        {/* THE OPENING — delivery inefficiency, not a capability gap */}
+        {!gated && (inefficiency || entail.incumbent_method) && (
+          <Section title="How the incumbent delivers this today">
+            {entail.incumbent_method && <p className="wq-rep-p blurable">{entail.incumbent_method}</p>}
+            {deliveryModeLabel && (
+              <p className="wq-rep-muted" style={{ marginTop: "0.35rem" }}>{deliveryModeLabel}</p>
+            )}
+            {inefficiency && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.75rem" }}>The opening:</p>
+                <p className="wq-rep-p blurable">{inefficiency}</p>
+              </>
+            )}
+            {entail.chain && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.75rem" }}>Entailment:</p>
+                <p className="wq-rep-p blurable">{entail.chain}</p>
+              </>
+            )}
+            {entail.confidence && (
               <div className="wq-rep-confidence">
-                Confidence: <span className={`badge-${bd.lm_confidence.gap}`}>{bd.lm_confidence.gap.toUpperCase()}</span>
+                Confidence: <span className={`badge-${entail.confidence}`}>{entail.confidence.toUpperCase()}</span>
               </div>
             )}
           </Section>
         )}
 
         {/* WHY NOW */}
-        {bd.lm_analysis?.why_now && (
+        {!gated && bd.why_now && (
           <Section title="Why now">
-            <p className="wq-rep-p blurable">{bd.lm_analysis.why_now}</p>
-            {bd.lm_confidence?.urgency && (
-              <div className="wq-rep-confidence">
-                Confidence: <span className={`badge-${bd.lm_confidence.urgency}`}>{bd.lm_confidence.urgency.toUpperCase()}</span>
-              </div>
-            )}
+            <p className="wq-rep-p blurable">{bd.why_now}</p>
           </Section>
         )}
 
-        {/* SALES POSITIONING */}
-        {bd.lm_analysis?.sales_positioning && (
-          <Section title="Sales positioning">
-            <p className="wq-rep-p blurable">{bd.lm_analysis.sales_positioning}</p>
-            {bd.lm_confidence?.positioning && (
-              <div className="wq-rep-confidence">
-                Confidence: <span className={`badge-${bd.lm_confidence.positioning}`}>{bd.lm_confidence.positioning.toUpperCase()}</span>
-              </div>
-            )}
-          </Section>
-        )}
-
-        {/* CAVEATS */}
-        {bd.lm_caveats && (
-          <Section title="Caveats & missing data">
-            <p className="wq-rep-muted">{bd.lm_caveats}</p>
-          </Section>
-        )}
-
-        {/* PERFORMANCE READ */}
-        {isRecompete && bd.performance?.prime_portfolio && (
-          <Section title="Performance read">
-            <p className="wq-rep-p">
-              <strong>Prime portfolio</strong> — health {bd.performance.prime_portfolio.portfolio_health}/100
-              {bd.performance.prime_portfolio.portfolio_health != null && bd.performance.prime_portfolio.portfolio_health < 50 ? (
-                <span style={{ color: "#b91c1c", marginLeft: "8px" }}>· chronic-risk flag</span>
-              ) : ""}
-            </p>
-            {Array.isArray(bd.performance.prime_portfolio.bullets) && bd.performance.prime_portfolio.bullets.length > 0 && (
-              <ul className="wq-rep-bullets">
-                {bd.performance.prime_portfolio.bullets.map((bullet, i) => (
-                  <li key={i}>{bullet}</li>
-                ))}
-              </ul>
-            )}
-          </Section>
-        )}
-
-        {/* PRIME CAPABILITY */}
-        {primeCap && Object.keys(primeCap).length > 0 && (
-          <Section title="Incumbent capability">
-            <div className="wq-rep-grid">
-              <span>Total portfolio</span>
-              <span>{primeCap.total_portfolio ? `$${primeCap.total_portfolio.toLocaleString()}` : "—"}</span>
-              <span>Advertising % of portfolio</span>
-              <span>{primeCap.advertising_pct != null ? `${primeCap.advertising_pct.toFixed(1)}%` : "—"}</span>
-              <span>Registration status</span>
-              <span>{primeCap.registration_status || "—"}</span>
-            </div>
-            {Array.isArray(primeCap.top_naics) && primeCap.top_naics.length > 0 && (
-              <>
-                <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>Top NAICS:</p>
-                <ul className="wq-rep-bullets">
-                  {primeCap.top_naics.map((n, i) => (
-                    <li key={i}>{n.code} — ${n.value ? n.value.toLocaleString() : "—"}</li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </Section>
-        )}
-
-        {/* SUBCONTRACTORS */}
-        <Section title="Top subcontractors">
-          {recomSubs.length > 0 ? (
-            <ul className="wq-rep-bullets">
-              {recomSubs.map((s, i) => (
-                <li key={i}>
-                  <span className="blurable">{s.name || s.recipient_name || "Unnamed"}</span>
-                  {s.amount ? ` — $${s.amount.toLocaleString()}` : ""}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="wq-rep-muted">No subcontractor data available.</p>
-          )}
+        {/* CURRENT AWARD */}
+        <Section title="Current award">
+          <div className="wq-rep-grid">
+            <span>Award value</span>
+            <span>{bd.current_value ? `$${Math.round(bd.current_value).toLocaleString()}` : "—"}</span>
+            <span>Period ends</span>
+            <span>
+              {bd.pop_end_date ? new Date(bd.pop_end_date).toLocaleDateString() : "—"}
+              {daysOut != null && daysOut >= 0 ? ` · ${daysOut} days out` : ""}
+            </span>
+            <span>Agency</span>
+            <span className="blurable">{bd.sub_agency || bd.agency || "—"}</span>
+            <span>NAICS</span>
+            <span>{bd.naics_code ? `${bd.naics_code} — ${bd.naics_description || ""}` : "—"}</span>
+            <span>Set-aside</span>
+            <span>{bd.set_aside || "None"}</span>
+          </div>
         </Section>
+
+        {/* SCORING — S40 U30 T30, with SIZE decomposed */}
+        {!gated && (
+          <Section title="Scoring breakdown">
+            <div className="wq-rep-grid">
+              <span>Size (40%)</span>
+              <span>{scores.size != null ? `${Math.round(scores.size)}/100` : "—"}</span>
+              <span style={{ paddingLeft: "1rem" }}>· deliverable (35% of size)</span>
+              <span>{scores.deliverable != null ? `${scores.deliverable}/100` : "—"}{bandLabel ? ` — ${scores.deliverable_band}` : ""}</span>
+              <span style={{ paddingLeft: "1rem" }}>· contract value (65% of size)</span>
+              <span>{scores.value != null ? `${scores.value}/100` : "—"}{scores.value_note ? ` — ${scores.value_note}` : ""}</span>
+              <span>Urgency (30%)</span>
+              <span>{scores.urgency != null ? `${Math.round(scores.urgency)}/100` : "—"}</span>
+              <span>Timing (30%)</span>
+              <span>{scores.timing != null ? `${Math.round(scores.timing)}/100` : "—"}</span>
+              <span><strong>B2B score</strong></span>
+              <span><strong>{scores.b2b_score != null ? `${scores.b2b_score}/100` : "—"}</strong></span>
+            </div>
+            {bandLabel && <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>{bandLabel}</p>}
+          </Section>
+        )}
+
+        {/* AWARD SCOPE — the raw USASpending text, not a model summary */}
+        {bd.award_scope && (
+          <Section title="Award scope (as filed)">
+            <p className="wq-rep-p blurable">{bd.award_scope}</p>
+          </Section>
+        )}
+
+        {/* THE ACCOUNT — thin strip; depth lives on the account route */}
+        {!gated && (book.awards != null || book.total != null) && (
+          <Section title="The account">
+            <div className="wq-rep-grid">
+              <span>Federal book</span>
+              <span>
+                {book.total ? `$${Math.round(book.total).toLocaleString()}` : "—"}
+                {book.awards ? ` · ${book.awards} awards` : ""}
+              </span>
+              {book.growth_pct != null && (
+                <>
+                  <span>Book trajectory</span>
+                  <span>{book.growth_pct > 0 ? "+" : ""}{book.growth_pct}% recent vs prior</span>
+                </>
+              )}
+            </div>
+          </Section>
+        )}
+
+        {/* PERFORMANCE — denominators always stated */}
+        {!gated && perfNew.ledger_count > 0 && (
+          <Section title="Performance read">
+            <div className="wq-rep-grid">
+              <span>Deobligations</span>
+              <span>
+                {perfNew.deoblig_total ? `$${Math.round(perfNew.deoblig_total).toLocaleString()}` : "none"}
+                {perfNew.deoblig_rate != null ? ` · ${Math.round(perfNew.deoblig_rate * 100)}% of scored awards` : ""}
+              </span>
+              <span>Terminations</span>
+              <span>{perfNew.terminations ?? 0}</span>
+              {perfNew.mean_delta_pct != null && (
+                <>
+                  <span>Mean scope change</span>
+                  <span>{perfNew.mean_delta_pct}%</span>
+                </>
+              )}
+            </div>
+            <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
+              Based on {perfNew.ledger_count} of {perfNew.book_count} awards — highest-value transaction ledgers only.
+            </p>
+          </Section>
+        )}
+
+        {/* CONTACT */}
+        {!gated && contact && (
+          <Section title="Point of contact">
+            <p className="wq-rep-p blurable">
+              <strong>{contact.name}</strong>{contact.title ? ` — ${contact.title}` : ""}
+            </p>
+            {(contact.city || contact.state) && (
+              <p className="wq-rep-muted">{[contact.city, contact.state].filter(Boolean).join(", ")}</p>
+            )}
+            <p className="wq-rep-muted" style={{ marginTop: "0.35rem" }}>
+              Source: SAM entity registration
+            </p>
+          </Section>
+        )}
 
         <Section title="How this surfaced">
           <p className="wq-rep-muted">
-            Surfaced from federal recompete intelligence (PIID <span className="blurable">{bd.piid}</span>), scored on
-            gap entailment, urgency (portfolio stress/churn), and recompete timing.
+            Surfaced from federal recompete intelligence (PIID <span className="blurable">{bd.piid}</span>).
+            {gated
+              ? " Rejected at the entailment gate — the work does not require what you supply."
+              : " Passed the entailment gate, then scored on size, urgency and recompete timing."}
           </p>
         </Section>
 
