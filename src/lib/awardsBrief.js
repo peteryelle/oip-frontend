@@ -206,7 +206,7 @@ export function buildAwardBriefHtml(a, opts = {}) {
 
   const dd2PlayHtml = !dd2Gated && play
     ? section(
-        "Where to start",
+        "Suggested sales play",
         para(play.opening) +
           (play.anchor ? `<p class="muted">What makes it credible:</p>${para(play.anchor)}` : "") +
           (play.timing_rationale ? `<p class="muted">Why this moment:</p>${para(play.timing_rationale)}` : "") +

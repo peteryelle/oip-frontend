@@ -245,7 +245,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
         {/* ENTRY PLAY — survivors only. Placed high because it is the thing a
             seller acts on; everything below is the evidence behind it. */}
         {!gated && play && (
-          <Section title="Where to start">
+          <Section title="Suggested sales play">
             {play.opening && <p className="wq-rep-p blurable">{play.opening}</p>}
 
             {play.anchor && (
