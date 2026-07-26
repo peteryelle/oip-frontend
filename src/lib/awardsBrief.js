@@ -141,7 +141,10 @@ export function buildAwardBriefHtml(a, opts = {}) {
   const book = bd.prime_book || {};
   const perfNew = bd.performance || {};
   const dd2Contact = bd.contacts?.contact || null;
-  const inefficiency = entail.delivery_inefficiency || entail.missing_capability || null;
+  const inefficiency = entail.capability_called_for || entail.delivery_inefficiency || entail.missing_capability || null;
+  const play = bd.entry_play || null;
+  const siteRead = bd.site_read || null;
+  const siteProfile = siteRead && siteRead._profile ? siteRead._profile : null;
 
   const deliveryModeLabel = {
     own_platform: "Runs their own platform for this",
@@ -200,6 +203,55 @@ export function buildAwardBriefHtml(a, opts = {}) {
     : "";
 
   const dd2WhyNowHtml = !dd2Gated ? section("Why now", para(bd.why_now)) : "";
+
+  const dd2PlayHtml = !dd2Gated && play
+    ? section(
+        "Where to start",
+        para(play.opening) +
+          (play.anchor ? `<p class="muted">What makes it credible:</p>${para(play.anchor)}` : "") +
+          (play.timing_rationale ? `<p class="muted">Why this moment:</p>${para(play.timing_rationale)}` : "") +
+          (Array.isArray(play.their_language) && play.their_language.length
+            ? `<p class="muted">Their words, worth using:</p>${para(play.their_language.join(" \u00B7 "))}`
+            : "") +
+          (play.find_out_first ? `<p class="muted">Find out first:</p>${para(play.find_out_first)}` : "") +
+          (play.avoid
+            ? `<div class="avoid"><span class="avoid-lbl">Do not assert</span>${esc(play.avoid)}</div>`
+            : "") +
+          (play.strength ? mutedP(`Opening strength: ${play.strength}`) : "")
+      )
+    : "";
+
+  const dd2SiteHtml = siteProfile
+    ? section(
+        "How they describe themselves",
+        para(siteProfile.self_description) +
+          grid([
+            ["Presents as", String(siteProfile.posture || "\u2014").replace(/_/g, " ")],
+            [
+              "Technology named",
+              Array.isArray(siteProfile.named_technology) && siteProfile.named_technology.length
+                ? siteProfile.named_technology.join(", ")
+                : "none named on their site",
+            ],
+            ...(Array.isArray(siteProfile.service_lines) && siteProfile.service_lines.length
+              ? [["Service lines", siteProfile.service_lines.join(", ")]]
+              : []),
+          ]) +
+          (siteRead && siteRead.overlap
+            ? `<p class="muted">Overlap with what you do:</p>${para(siteRead.overlap)}`
+            : "") +
+          (siteRead && siteRead.complementarity
+            ? `<p class="muted">Where you would sit alongside:</p>${para(siteRead.complementarity)}`
+            : "") +
+          (siteRead && siteRead.conversation_note
+            ? `<p class="muted">Before the call:</p>${para(siteRead.conversation_note)}`
+            : "") +
+          mutedP(
+            "Read from their public website. Marketing copy, not a finding about how they operate." +
+              (siteRead && siteRead.read_quality ? ` Read quality: ${siteRead.read_quality}.` : "")
+          )
+      )
+    : "";
 
   const dd2AwardHtml = section(
     "Current award",
@@ -302,10 +354,12 @@ export function buildAwardBriefHtml(a, opts = {}) {
     dd2ScopeHtml,
     dd2DeliveryHtml,
     dd2WhyNowHtml,
+    dd2PlayHtml,
     dd2AwardHtml,
     dd2ScoreHtml,
     dd2RawScopeHtml,
     dd2AccountHtml,
+    dd2SiteHtml,
     dd2PerfHtml,
     dd2ContactHtml,
     dd2SurfacedHtml,
@@ -394,6 +448,11 @@ export function buildAwardBriefHtml(a, opts = {}) {
   .health-lbl { font-family: Arial, sans-serif; font-size: 11px; text-transform: uppercase;
                 letter-spacing: .06em; color: #555; }
   .health-score { font-weight: 700; }
+  .avoid { margin-top: 10px; padding: 8px 12px; background: #fdf6f6;
+           border-left: 3px solid #b91c1c; font-size: 12px; color: #4b5563; }
+  .avoid-lbl { display: block; font-family: Arial, sans-serif; font-size: 10px;
+               text-transform: uppercase; letter-spacing: .06em; color: #b91c1c;
+               font-weight: 700; margin-bottom: 3px; }
   @media print { body { margin: 0; } }
 </style></head><body>
   <h1>${esc(a.recipient || "Prime (unresolved)")}</h1>

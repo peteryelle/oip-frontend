@@ -118,7 +118,10 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
     const book = bd.prime_book || {};
     const perfNew = bd.performance || {};
     const contact = bd.contacts?.contact || null;
-    const inefficiency = entail.delivery_inefficiency || entail.missing_capability || null;
+    const inefficiency = entail.capability_called_for || entail.delivery_inefficiency || entail.missing_capability || null;
+    const play = bd.entry_play || null;
+    const siteRead = bd.site_read || null;
+    const siteProfile = siteRead?._profile || null;
 
     const deliveryModeLabel = {
       own_platform: "Runs their own platform for this",
@@ -239,6 +242,59 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           </Section>
         )}
 
+        {/* ENTRY PLAY — survivors only. Placed high because it is the thing a
+            seller acts on; everything below is the evidence behind it. */}
+        {!gated && play && (
+          <Section title="Where to start">
+            {play.opening && <p className="wq-rep-p blurable">{play.opening}</p>}
+
+            {play.anchor && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.7rem" }}>What makes it credible:</p>
+                <p className="wq-rep-p blurable">{play.anchor}</p>
+              </>
+            )}
+
+            {play.timing_rationale && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.7rem" }}>Why this moment:</p>
+                <p className="wq-rep-p blurable">{play.timing_rationale}</p>
+              </>
+            )}
+
+            {Array.isArray(play.their_language) && play.their_language.length > 0 && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.7rem" }}>Their words, worth using:</p>
+                <p className="wq-rep-p blurable">{play.their_language.join(" · ")}</p>
+              </>
+            )}
+
+            {play.find_out_first && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.7rem" }}>Find out first:</p>
+                <p className="wq-rep-p blurable">{play.find_out_first}</p>
+              </>
+            )}
+
+            {/* The guard rail. This names what the analysis cannot support, and
+                it is the field that keeps a seller from overclaiming on a call. */}
+            {play.avoid && (
+              <div className="wq-rep-avoid">
+                <span className="wq-rep-avoid-lbl">Do not assert</span>
+                <span className="blurable">{play.avoid}</span>
+              </div>
+            )}
+
+            {play.strength && (
+              <div className="wq-rep-confidence">
+                Opening strength: <span className={`badge-${
+                  play.strength === "strong" ? "high" : play.strength === "moderate" ? "medium" : "low"
+                }`}>{play.strength.toUpperCase()}</span>
+              </div>
+            )}
+          </Section>
+        )}
+
         {/* CURRENT AWARD */}
         <Section title="Current award">
           <div className="wq-rep-grid">
@@ -320,6 +376,67 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
                 </a>
               </p>
             )}
+          </Section>
+        )}
+
+        {/* HOW THEY DESCRIBE THEMSELVES — from the prime's own website.
+            CONTEXT ONLY: this did not inform the gate and carries no weight in
+            the score. Marketing copy is not evidence about a contract. */}
+        {siteProfile && (
+          <Section title="How they describe themselves">
+            {siteProfile.self_description && (
+              <p className="wq-rep-p blurable">{siteProfile.self_description}</p>
+            )}
+
+            <div className="wq-rep-grid" style={{ marginTop: "0.5rem" }}>
+              {siteProfile.posture && (
+                <>
+                  <span>Presents as</span>
+                  <span className="blurable">{String(siteProfile.posture).replace(/_/g, " ")}</span>
+                </>
+              )}
+              {Array.isArray(siteProfile.named_technology) && (
+                <>
+                  <span>Technology named</span>
+                  <span className="blurable">
+                    {siteProfile.named_technology.length
+                      ? siteProfile.named_technology.join(", ")
+                      : "none named on their site"}
+                  </span>
+                </>
+              )}
+              {Array.isArray(siteProfile.service_lines) && siteProfile.service_lines.length > 0 && (
+                <>
+                  <span>Service lines</span>
+                  <span className="blurable">{siteProfile.service_lines.join(", ")}</span>
+                </>
+              )}
+            </div>
+
+            {siteRead?.overlap && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.7rem" }}>Overlap with what you do:</p>
+                <p className="wq-rep-p blurable">{siteRead.overlap}</p>
+              </>
+            )}
+            {siteRead?.complementarity && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.7rem" }}>Where you would sit alongside:</p>
+                <p className="wq-rep-p blurable">{siteRead.complementarity}</p>
+              </>
+            )}
+            {siteRead?.conversation_note && (
+              <>
+                <p className="wq-rep-muted" style={{ marginTop: "0.7rem" }}>Before the call:</p>
+                <p className="wq-rep-p blurable">{siteRead.conversation_note}</p>
+              </>
+            )}
+
+            <p className="wq-rep-muted" style={{ marginTop: "0.7rem" }}>
+              Read from their public website. Marketing copy, not a finding about
+              how they operate.
+              {siteRead?.read_quality ? ` Read quality: ${siteRead.read_quality}.` : ""}
+            </p>
           </Section>
         )}
 
@@ -642,6 +759,27 @@ const badgeStyles = `
     margin-top: 0.5rem;
     font-size: 0.85rem;
     color: #666;
+  }
+
+  /* The "do not assert" guard. Deliberately visually distinct — it is the one
+     line on the brief that restrains the reader rather than informing them. */
+  .wq-rep-avoid {
+    margin-top: 0.8rem;
+    padding: 0.6rem 0.8rem;
+    background: #fdf6f6;
+    border-left: 3px solid #b91c1c;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.85rem;
+    color: #4b5563;
+  }
+  .wq-rep-avoid-lbl {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #b91c1c;
+    font-weight: 600;
+    margin-bottom: 0.2rem;
   }
   
   .badge-high {
