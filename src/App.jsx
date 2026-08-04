@@ -8,6 +8,7 @@ import PipelineRadar from './components/radar/PipelineRadar'
 import DerivedDemandSetup from './components/demand/DerivedDemandSetup'
 import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
 import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
+import { useKeywordTierMap } from './hooks/useKeywordTierMap'
 import { DemoGateProvider } from './hooks/useDemoGate'
 import DemoIndicator from './components/demo/DemoIndicator'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
@@ -1229,8 +1230,51 @@ function WeeklyUpdatePage() {
 // MARKET REVIEW — full signals list with filters and detail drawer
 // ────────────────────────────────────────────────────────────────────────────
 
+// scoreSignalRow
+// ===============
+// Computes a numeric 0-100 score for a single signal from three components:
+//   1. base    — weight from the signal's assigned tier (tier1_strong/tier1/tier2)
+//   2. keyword — bonus for each of the signal's matched_keywords, weighted by
+//                that keyword's live tier in keywordTierMap (rewards multi-keyword
+//                corroboration beyond whatever single match set the base tier)
+//   3. group   — bonus for breadth across matched_groups (capital_construction,
+//                fire_code, etc.) — a signal hitting multiple demand groups is
+//                a stronger fit signal than one hitting only one
+// This replaces the old letter-grade (Priority/Strong/Moderate/Watch) label with
+// a real number so two signals in the same bucket are still distinguishable.
+function scoreSignalRow(s, keywordTierMap = {}) {
+  const BASE_WEIGHT   = { tier1_strong: 60, tier1: 40, tier2: 20 }
+  const KEYWORD_WEIGHT = { tier1_strong: 6, tier1: 4, tier2: 2 }
+
+  const base = BASE_WEIGHT[s.signal_tier] ?? 0
+
+  const keywords = s.matched_keywords || []
+  const keywordBonusRaw = keywords.reduce((sum, kw) => {
+    const tier = keywordTierMap[String(kw).toLowerCase()]
+    return sum + (KEYWORD_WEIGHT[tier] ?? 0)
+  }, 0)
+  const keywordBonus = Math.min(keywordBonusRaw, 30)
+
+  const groups = s.matched_groups || []
+  const groupBonus = Math.min(groups.length * 3, 10)
+
+  const score = Math.min(base + keywordBonus + groupBonus, 100)
+
+  return { score, scoreBase: base, scoreKeywordBonus: keywordBonus, scoreGroupBonus: groupBonus }
+}
+
+// Score badge color bucket — numeric score drives the color, same thresholds
+// used everywhere a score badge renders (SignalDrawer, EntityDrawer).
+function scoreGradeColor(score) {
+  if (score >= 90) return { color: '#16a34a', bg: '#dcfce7' } // green
+  if (score >= 80) return { color: '#2563eb', bg: '#dbeafe' } // blue
+  if (score >= 70) return { color: '#b45309', bg: '#fef3c7' } // amber
+  return               { color: '#6b7280', bg: '#f3f4f6' }    // gray
+}
+
 function MarketReviewPage() {
   const { selectedOip, oips } = useOip()
+  const keywordTierMap = useKeywordTierMap(selectedOip?.id)
   const [signals, setSignals] = useState([])
   const [loading, setLoading] = useState(true)
   const [tierFilter, setTierFilter] = useState('')
@@ -1359,6 +1403,7 @@ function MarketReviewPage() {
   const [samTab, setSamTab] = useState(isDibOip ? 'dib' : isDerivedOip ? 'busdev' : 'opportunities')
   const drawerProps = openSignal ? {
     os: openSignal,
+    keywordTierMap,
     onClose: () => setOpenSignal(null),
     onUpdateStatus: (status) => { updateStatus(openSignal.signal_id, status); setOpenSignal(prev => ({ ...prev, status })) },
     onPursue: () => { moveToPursued(openSignal); setOpenSignal(null) },
@@ -1499,6 +1544,7 @@ function MarketReviewPage() {
             <EntityBoard
               signals={signals}
               isDerived={isDerivedOip}
+              keywordTierMap={keywordTierMap}
               onEntityClick={name => setOpenEntity(name)}
               onSignalClick={setOpenSignal}
             />
@@ -1536,6 +1582,7 @@ function MarketReviewPage() {
           entityName={openEntity}
           signals={signals.filter(s => s.signals?.source_name === openEntity)}
           oipId={selectedOip?.id}
+          keywordTierMap={keywordTierMap}
           onClose={() => setOpenEntity(null)}
         />
       )}
@@ -1548,7 +1595,7 @@ function MarketReviewPage() {
 // ENTITY BOARD — ranked entity cards for Market Review
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false }) {
+function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false, keywordTierMap = {} }) {
   const [search, setSearch] = useState('')
 
   // Group signals into cards. Score is the absolute LLM profile_fit (0-100),
@@ -1572,7 +1619,7 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false 
       : (s.signals?.source_name || 'Unknown')
     const state = s.signals?.state || ''
     if (!entityMap.has(key)) {
-      entityMap.set(key, { key, name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, row: s })
+      entityMap.set(key, { key, name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, kwScore: null, row: s })
     }
     const e = entityMap.get(key)
     e.total++
@@ -1581,11 +1628,17 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false 
     else                                  { e.tier2++;  if (!e.topReason) e.topReason = s.match_reason || '' }
     const pf = s.scores?.profile_fit
     if (typeof pf === 'number') e.fit = e.fit === null ? pf : Math.max(e.fit, pf)
+    // Keyword-derived score — used as a fallback ranking signal when profile_fit
+    // hasn't been scored yet (LLM scoring runs behind keyword matching).
+    const { score: kwScore } = scoreSignalRow(s, keywordTierMap)
+    e.kwScore = e.kwScore === null ? kwScore : Math.max(e.kwScore, kwScore)
   }
 
-  // Absolute score = the entity's profile_fit. Sort by it descending; unscored last.
+  // Absolute score = the entity's profile_fit when available, else fall back to
+  // the keyword-derived score so unscored entities still rank sensibly instead
+  // of all collapsing to "Unscored" at the bottom.
   const ranked = Array.from(entityMap.values())
-    .map(e => ({ ...e, score: e.fit }))
+    .map(e => ({ ...e, score: e.fit ?? e.kwScore }))
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
 
   // Score label + color — absolute thresholds on the LLM fit score
@@ -2195,21 +2248,21 @@ function tierLabel(t) {
 // ENTITY DRAWER — right-side panel for entity intelligence
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EntityDrawer({ entityName, signals, oipId, onClose }) {
+function EntityDrawer({ entityName, signals, oipId, onClose, keywordTierMap = {} }) {
   const [briefing, setBriefing]       = useState(null)
   const [briefingLoading, setBriefingLoading] = useState(true)
   const [contact, setContact]         = useState(null)
   const [contactLoading, setContactLoading] = useState(true)
 
-  // Score
+  // Score — display-only strong/tier1 counts (no longer feed the score itself,
+  // just shown in the header text alongside it) plus a real numeric score taken
+  // as the max scoreSignalRow() across this entity's signals.
   const strong = signals.filter(s => s.signal_tier === 'tier1_strong').length
   const tier1  = signals.filter(s => s.signal_tier === 'tier1').length
   const groups = [...new Set(signals.flatMap(s => s.matched_groups || []))]
-  const score  = Math.min(Math.min(strong,5)*12 + Math.min(tier1,3)*8 + Math.min(groups.length,5)*3, 100)
-  const { label, color, bg } = score >= 75 ? { label:'Priority', color:'#16a34a', bg:'#dcfce7' }
-    : score >= 50 ? { label:'Strong',   color:'#2563eb', bg:'#dbeafe' }
-    : score >= 25 ? { label:'Moderate', color:'#b45309', bg:'#fef3c7' }
-    :               { label:'Watch',    color:'#dc2626', bg:'#fee2e2' }
+  const scored = signals.map(s => ({ ...s, ...scoreSignalRow(s, keywordTierMap) }))
+  const score  = scored.length ? Math.max(...scored.map(s => s.score)) : 0
+  const { color, bg } = scoreGradeColor(score)
 
   // Top signals for evidence list (tier1_strong + tier1 only)
   const topSignals = signals
@@ -2382,7 +2435,7 @@ Write for a sales director. Direct, no hedging. No markdown, plain text only.`
           <span>Entity Profile</span>
           <span>·</span>
           <span style={{ padding:'2px 8px', borderRadius:3, fontSize:11, fontWeight:700, background:bg, color }}>
-            {label} · {score}
+            {score}
           </span>
           <span>·</span>
           <span>{strong > 0 && `${strong} strong`}{strong>0&&tier1>0&&' · '}{tier1>0&&`${tier1} tier-1`} · {signals.length} total</span>
@@ -2624,11 +2677,13 @@ Write for a sales director. Direct, no hedging. No markdown, plain text only.`
 }
 
 
-function SignalDrawer({ os, onClose, onUpdateStatus, onPursue }) {
+function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = {} }) {
   const { selectedOip } = useOip()
   const sig    = os.signals || {}
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
+  const { score: sigScore, scoreBase, scoreKeywordBonus, scoreGroupBonus } = scoreSignalRow(os, keywordTierMap)
+  const { color: sigScoreColor, bg: sigScoreBg } = scoreGradeColor(sigScore)
   const isSam    = !sig.state && sig.source_name === 'SAM.gov'
   const isDib    = isSam && meta.signal_type === 'award'
   const isOe417  = sig.source === 'oe417'  || sig.source_name === 'DOE OE-417'
@@ -2906,6 +2961,21 @@ ${analysisHtml}
                       : <>{sig.source || sig.source_name || sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
           }
         </div>
+
+        {/* Score badge — numeric, colored by grade bucket. SAM signals carry
+            their own ScoreBadge (llm_relevance/technical_fit) elsewhere in this
+            drawer, so this one is scoped to keyword-scored SLED signals. */}
+        {!isSam && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <span style={{ padding: '4px 12px', borderRadius: 3, fontSize: 16, fontWeight: 700,
+              fontFamily: "'IBM Plex Mono', monospace", background: sigScoreBg, color: sigScoreColor }}>
+              {sigScore}
+            </span>
+            <span style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+              {scoreBase} base · {scoreKeywordBonus} keyword · {scoreGroupBonus} group
+            </span>
+          </div>
+        )}
 
         {/* Title / Entity */}
         <h2 className="blurable" style={{ fontFamily: "'Spectral', serif", fontSize: 28, marginBottom: 4,
