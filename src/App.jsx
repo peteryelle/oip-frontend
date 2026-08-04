@@ -1648,17 +1648,23 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
     else                                  { e.tier2++;  if (!e.topReason) e.topReason = s.match_reason || '' }
     const pf = s.scores?.profile_fit
     if (typeof pf === 'number') e.fit = e.fit === null ? pf : Math.max(e.fit, pf)
-    // Keyword-derived score — used as a fallback ranking signal when profile_fit
-    // hasn't been scored yet (LLM scoring runs behind keyword matching).
+    // Keyword-derived score — currently the PRIMARY ranking signal, not just a
+    // fallback. Confirmed via direct query (2026-08-04) that profile_fit is
+    // broken: every district in tessco-sled-boards has exactly one distinct
+    // profile_fit value across ALL its signals (Arlington's tier1_strong bond
+    // authorization and its tier2 easement paperwork both scored 22) — the LLM
+    // scorer is stamping one number per district, not per signal, so it can't
+    // discriminate signal strength within an entity. Revert this priority once
+    // the backend scorer is fixed to vary profile_fit per signal.
     const { score: kwScore } = scoreSignalRow(s, keywordTierMap)
     e.kwScore = e.kwScore === null ? kwScore : Math.max(e.kwScore, kwScore)
   }
 
-  // Absolute score = the entity's profile_fit when available, else fall back to
-  // the keyword-derived score so unscored entities still rank sensibly instead
-  // of all collapsing to "Unscored" at the bottom.
+  // Absolute score = keyword-derived score (see note above on why this leads
+  // over profile_fit for now), falling back to profile_fit only if keyword
+  // scoring somehow produced nothing.
   const ranked = Array.from(entityMap.values())
-    .map(e => ({ ...e, score: e.fit ?? e.kwScore }))
+    .map(e => ({ ...e, score: e.kwScore ?? e.fit }))
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
 
   // Score label + color — absolute thresholds on the LLM fit score
