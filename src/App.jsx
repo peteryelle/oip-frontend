@@ -1272,6 +1272,25 @@ function scoreGradeColor(score) {
   return               { color: '#6b7280', bg: '#f3f4f6' }    // gray
 }
 
+// Lifecycle stage — the shared, fixed 8-value enum on oip_signals (verified
+// against the table's CHECK constraint). Order here is the assumed chronological
+// capital-project sequence for timeline display; adjust if the real-world sequence
+// diverges (e.g., design-build projects can procure before design finalizes).
+const LIFECYCLE_STAGE_ORDER = [
+  'assessment', 'planning', 'pre_bond', 'authorization',
+  'design', 'procurement', 'oversight', 'execution',
+]
+const LIFECYCLE_STAGE_LABELS = {
+  assessment:    'Assessment',
+  planning:      'Planning',
+  pre_bond:      'Pre-Bond',
+  authorization: 'Authorization',
+  design:        'Design',
+  procurement:   'Procurement',
+  oversight:     'Oversight',
+  execution:     'Execution',
+}
+
 function MarketReviewPage() {
   const { selectedOip, oips } = useOip()
   const keywordTierMap = useKeywordTierMap(selectedOip?.id)
@@ -1314,6 +1333,7 @@ function MarketReviewPage() {
         .select(`
           oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
           match_reason, text_excerpt, status, relevance_status, notes, scored_at, scores, matched_sentinels,
+          lifecycle_stage,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
                               meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind)
         `)
@@ -1542,7 +1562,7 @@ function MarketReviewPage() {
               open the signal drawer directly; non-derived group by source_name entity. */}
           {!isSam && !isMultiVertical && (
             <EntityBoard
-              signals={signals}
+              signals={filtered}
               isDerived={isDerivedOip}
               keywordTierMap={keywordTierMap}
               onEntityClick={name => setOpenEntity(name)}
@@ -2272,6 +2292,21 @@ function EntityDrawer({ entityName, signals, oipId, onClose, keywordTierMap = {}
       return (order[a.signal_tier] ?? 3) - (order[b.signal_tier] ?? 3)
     })
 
+  // Lifecycle stage map — every one of this entity's signals, grouped by
+  // lifecycle_stage, in the fixed LIFECYCLE_STAGE_ORDER so multiple entities'
+  // drawers are scannable in the same layout. Within a stage, signals are
+  // chronological (meeting_date ascending), not ranked by score — this is
+  // meant to read as a timeline, not another ranked list. Signals with no
+  // lifecycle_stage (not yet scored, or older rows predating the column)
+  // are tracked separately so they don't silently disappear from the drawer.
+  const stageMap = LIFECYCLE_STAGE_ORDER.map(stage => ({
+    stage,
+    items: signals
+      .filter(s => s.lifecycle_stage === stage)
+      .sort((a, b) => new Date(a.signals?.meeting_date || 0) - new Date(b.signals?.meeting_date || 0)),
+  })).filter(g => g.items.length > 0)
+  const unstagedSignals = signals.filter(s => !s.lifecycle_stage)
+
   // Extract named contacts from signal titles
   // Pattern: "FirstName [Middle] LastName, [Modifier] TitleWord"
   const TITLE_WORDS = ['Superintendent','Director','Principal','CFO','CEO','CIO',
@@ -2546,6 +2581,59 @@ Write for a sales director. Direct, no hedging. No markdown, plain text only.`
             : <div style={{ fontSize:14, lineHeight:1.8 }}>{renderBriefing(briefing||'')}</div>
           }
         </div>
+
+        {divider}
+
+        {/* Lifecycle Stage Timeline — this entity's signals grouped by
+            lifecycle_stage in chronological project-sequence order, so the
+            drawer reads as "where is this project right now" rather than
+            another flat, tier-ranked list. */}
+        {stageMap.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            {lbl('Project Timeline')}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {stageMap.map((g, i) => (
+                <div key={g.stage} style={{ display: 'flex', gap: 14 }}>
+                  {/* Rail: dot + connecting line */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 14 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%',
+                      background: 'var(--primary)', flexShrink: 0, marginTop: 4 }} />
+                    {i < stageMap.length - 1 && (
+                      <div style={{ width: 2, flex: 1, background: 'var(--rule)', minHeight: 24 }} />
+                    )}
+                  </div>
+                  <div style={{ paddingBottom: i < stageMap.length - 1 ? 16 : 0, flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
+                      textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink)',
+                      fontWeight: 700, marginBottom: 6 }}>
+                      {LIFECYCLE_STAGE_LABELS[g.stage] || g.stage} · {g.items.length}
+                    </div>
+                    {g.items.map((s, j) => (
+                      <div key={s.signal_id || j} style={{
+                        fontSize: 13, lineHeight: 1.5, color: 'var(--ink-light)',
+                        marginBottom: j < g.items.length - 1 ? 6 : 0,
+                      }}>
+                        {s.signals?.title || 'Untitled item'}
+                        {s.signals?.meeting_date && (
+                          <span style={{ color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace",
+                            fontSize: 11, marginLeft: 6 }}>
+                            {new Date(s.signals.meeting_date).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {unstagedSignals.length > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--ink-fade)', fontStyle: 'italic',
+                fontFamily: "'IBM Plex Mono', monospace", marginTop: 10 }}>
+                {unstagedSignals.length} signal{unstagedSignals.length !== 1 ? 's' : ''} not yet staged
+              </div>
+            )}
+          </div>
+        )}
 
         {divider}
 
