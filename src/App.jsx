@@ -881,12 +881,12 @@ function HomePage() {
         .eq('oip_id', selectedOip.id)
         .eq('is_active', true)
 
-      // Aggregate top-10 entities (source_name) by tier1_strong then tier1
+      // Aggregate top-10 entities (entity_key, falling back to source_name) by tier1_strong then tier1
       const { data: scoredSignals } = await supabase
         .from('oip_signals')
         .select(`
           signal_id, signal_tier, matched_keywords, matched_groups,
-          signals:signal_id (id, source_name, state, portal_id, scraped_at)
+          signals:signal_id (id, source_name, entity_key, state, portal_id, scraped_at)
         `)
         .eq('oip_id', selectedOip.id)
 
@@ -901,10 +901,11 @@ function HomePage() {
       ;(scoredSignals || []).forEach(os => {
         const sig = os.signals
         if (!sig) return
-        const entity = sig.source_name || 'Unknown'
-        if (!entityMap.has(entity)) {
-          entityMap.set(entity, {
-            name: entity,
+        const entityKey = sig.entity_key || sig.source_name || 'Unknown'
+        const entityName = sig.source_name || 'Unknown'
+        if (!entityMap.has(entityKey)) {
+          entityMap.set(entityKey, {
+            name: entityName,
             state: sig.state,
             signals: 0,
             strongHits: 0,
@@ -913,7 +914,7 @@ function HomePage() {
             latestAt: sig.scraped_at,
           })
         }
-        const e = entityMap.get(entity)
+        const e = entityMap.get(entityKey)
         e.signals++
         if (os.signal_tier === 'tier1_strong') e.strongHits++
         ;(os.matched_keywords || []).forEach(k => e.allKws.add(k))
@@ -1160,7 +1161,7 @@ function WeeklyUpdatePage() {
         .from('oip_signals')
         .select(`
           signal_tier, matched_keywords, matched_groups, scored_at,
-          signals:signal_id (state, source_name, title, doc_url, scraped_at)
+          signals:signal_id (state, source_name, entity_key, title, doc_url, scraped_at)
         `)
         .eq('oip_id', selectedOip.id)
         .gte('scored_at', new Date(new Date(since).getTime() - 1000 * 60 * 60 * 12).toISOString())
@@ -1172,11 +1173,12 @@ function WeeklyUpdatePage() {
       const strong = (newSinceRun || []).filter(r => r.signal_tier === 'tier1_strong')
       const byEntity = new Map()
       ;(newSinceRun || []).forEach(os => {
-        const e = os.signals?.source_name
-        if (!e) return
-        if (!byEntity.has(e)) byEntity.set(e, { name: e, state: os.signals.state, count: 0, strong: 0 })
-        byEntity.get(e).count++
-        if (os.signal_tier === 'tier1_strong') byEntity.get(e).strong++
+        const key = os.signals?.entity_key || os.signals?.source_name
+        const name = os.signals?.source_name
+        if (!key) return
+        if (!byEntity.has(key)) byEntity.set(key, { name, state: os.signals.state, count: 0, strong: 0 })
+        byEntity.get(key).count++
+        if (os.signal_tier === 'tier1_strong') byEntity.get(key).strong++
       })
       const topEntities = Array.from(byEntity.values()).sort((a, b) => b.strong - a.strong).slice(0, 3)
 
@@ -1335,7 +1337,7 @@ function MarketReviewPage() {
           match_reason, text_excerpt, status, relevance_status, notes, scored_at, scores, matched_sentinels,
           lifecycle_stage,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
-                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind)
+                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key)
         `)
         .eq('oip_id', selectedOip.id)
         .order('scored_at', { ascending: false })
@@ -1559,13 +1561,14 @@ function MarketReviewPage() {
 
           {/* SLED: Entity Board — single-vertical tenants only.
               Derived boards group by signal (each RFP = one opportunity card) and
-              open the signal drawer directly; non-derived group by source_name entity. */}
+              open the signal drawer directly; non-derived group by entity_key
+              (falling back to source_name — see EntityBoard for detail). */}
           {!isSam && !isMultiVertical && (
             <EntityBoard
               signals={filtered}
               isDerived={isDerivedOip}
               keywordTierMap={keywordTierMap}
-              onEntityClick={name => setOpenEntity(name)}
+              onEntityClick={(key, name) => setOpenEntity({ key, name })}
               onSignalClick={setOpenSignal}
             />
           )}
@@ -1599,8 +1602,8 @@ function MarketReviewPage() {
       {openSignal && <SignalDrawer {...drawerProps} />}
       {openEntity && (
         <EntityDrawer
-          entityName={openEntity}
-          signals={signals.filter(s => s.signals?.source_name === openEntity)}
+          entityName={openEntity.name}
+          signals={signals.filter(s => (s.signals?.entity_key || s.signals?.source_name) === openEntity.key)}
           oipId={selectedOip?.id}
           keywordTierMap={keywordTierMap}
           onClose={() => setOpenEntity(null)}
@@ -1628,12 +1631,20 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
   // source_name is only the portal (e.g. "NY State Contract Reporter"), which
   // would collapse unrelated RFPs into one card. So for derived we key each card
   // on the SIGNAL itself — one RFP = one opportunity card — and clicking opens
-  // the signal drawer directly. Non-derived keeps source_name entity grouping.
+  // the signal drawer directly.
+  //
+  // Non-derived groups on entity_key, the canonical per-entity id written by
+  // the scraper (district org_id for BoardBook, agency slug for NYC CROL/
+  // NYSCR, subdomain for PrimeGov, etc — see workers/sled/scrapers/base.py
+  // _normalize()). Falls back to source_name for sources/older rows that
+  // don't have entity_key set. Before this fix, every NYC agency posted
+  // through the citywide City Record portal shared the constant source_name
+  // "NYC City Record" and collapsed into one card regardless of entity_key.
   const entityMap = new Map()
   for (const s of signals) {
     const key = isDerived
       ? (s.signal_id || s.signals?.id)
-      : (s.signals?.source_name || 'Unknown')
+      : (s.signals?.entity_key || s.signals?.source_name || 'Unknown')
     const name = isDerived
       ? (s.signals?.title || 'Untitled opportunity')
       : (s.signals?.source_name || 'Unknown')
@@ -1711,7 +1722,7 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
           }}
             onClick={() => isDerived
               ? (onSignalClick && onSignalClick(e.row))
-              : (onEntityClick && onEntityClick(e.name))}
+              : (onEntityClick && onEntityClick(e.key, e.name))}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
