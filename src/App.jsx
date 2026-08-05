@@ -195,15 +195,6 @@ function Layout() {
           <Link to="/radar" className={`sec-nav-btn ${activeSection === 'radar' ? 'active' : ''}`}>Pipeline Radar</Link>
         )}
         <Link to="/help"       className={`sec-nav-btn ${path.startsWith('/help') ? 'active' : ''}`}>User Guide</Link>
-        <button
-          type="button"
-          onClick={() => setDemoBlur(v => !v)}
-          className={`sec-nav-btn ${demoBlur ? 'active' : ''}`}
-          title="Blur identifying details (company / opportunity / person) for screen-sharing. Hover any blurred item to reveal."
-          style={{ marginLeft: 'auto', border: 'none', background: demoBlur ? undefined : 'none', cursor: 'pointer', font: 'inherit' }}
-        >
-          {demoBlur ? 'Demo blur: ON' : 'Demo blur'}
-        </button>
         <DemoIndicator />
       </nav>
 

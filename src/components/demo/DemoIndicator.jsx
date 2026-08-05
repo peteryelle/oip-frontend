@@ -25,6 +25,7 @@ export default function DemoIndicator() {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
+        marginLeft: 'auto',
         padding: '3px 10px',
         borderRadius: 999,
         fontSize: 12,

@@ -5,7 +5,7 @@
 .wq-demand {
   --wq-line: #e6e8eb;
   --wq-ink: #1a1d21;
-  --wq-muted: #6b7280;
+  --wq-muted: #40454f;
   --wq-faint: #a3a192;
   font-family: inherit;
   color: var(--wq-ink);
@@ -125,16 +125,16 @@
   margin-bottom: 18px;
 }
 .wq-dds-title { font-size: 22px; font-weight: 500; }
-.wq-dds-sub { font-size: 12.5px; color: var(--wq-muted); margin-top: 3px; }
+.wq-dds-sub { font-size: 14px; color: var(--wq-muted); margin-top: 3px; }
 .wq-dds-chip {
-  font-size: 11px;
-  font-weight: 500;
-  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 12px;
   border-radius: 999px;
   white-space: nowrap;
 }
-.wq-dds-chip-yes  { background: #d8efe0; color: #2e7d52; }
-.wq-dds-chip-hold { background: #f4ecc8; color: #8a7320; }
+.wq-dds-chip-yes  { background: #d8efe0; color: #0d5e2f; }
+.wq-dds-chip-hold { background: #f4ecc8; color: #6b5710; }
 .wq-dds-chip-na   { background: #efeae3; color: var(--wq-muted); }
 
 .wq-dds-accept {
