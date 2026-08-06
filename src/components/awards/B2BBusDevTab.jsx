@@ -206,7 +206,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
             </>
           ) : (
             <>
-              No scored awards yet. Queue a <code>busdev</code> job for this OIP and run the dispatcher.
+              No scored awards yet. Queue a <code>busdev_dd_v2_collect</code> job for this OIP, then <code>busdev_dd_v2_brief</code>.
             </>
           )}
         </div>

@@ -38,7 +38,7 @@ export default function DemandGrid({ oipId, onCellClick, selected }) {
     return (
       <div className="wq-demand">
         <div className="wq-dem-empty">
-          No demand cells yet. Run a <code>dd_sweep populate</code> for this OIP, then calibrate.
+          No demand cells yet. Queue <code>busdev_dd_v2_collect</code>, then <code>busdev_dd_v2_brief</code>, for this OIP.
         </div>
       </div>
     );
