@@ -1313,8 +1313,21 @@ function MarketReviewPage() {
   // rendering under the gridx-sled label). Both the vertical count and the
   // OIPs passed to the hook must exclude -derived OIPs.
   const nonDerivedOips = (oips || []).filter(o => !o.slug?.endsWith('-derived'))
-  const uniqueVerticals = [...new Set(nonDerivedOips.map(o => o.vertical_id))]
-  const isMultiVertical = uniqueVerticals.length > 1 && !selectedOip?.slug?.endsWith('-derived')
+  // isMultiVertical originally counted ANY non-derived OIP across the whole
+  // tenant, on any vertical, as "multi-vertical" — correct for a tenant with
+  // e.g. two SLED boards that should merge into one feed, but WRONG for a
+  // tenant like GridX with SAM + SLED: two unrelated verticals for two
+  // different sales motions, not a pairing that should merge. That bug
+  // caused gridx-sled to render the flat MultiVerticalSignalList instead of
+  // EntityBoard's per-entity grouping, purely because gridx-sam existed.
+  // Scope to OIPs sharing the CURRENTLY SELECTED OIP's vertical instead —
+  // preserves the original intent (multiple same-vertical OIPs merge) while
+  // excluding cross-vertical tenants that just happen to have >1 OIP total.
+  const oipsInSelectedVertical = nonDerivedOips.filter(
+    o => o.vertical_id === selectedOip?.vertical_id
+  )
+  const uniqueVerticals = [...new Set(oipsInSelectedVertical.map(o => o.vertical_id))]
+  const isMultiVertical = oipsInSelectedVertical.length > 1 && !selectedOip?.slug?.endsWith('-derived')
 
   // Multi-vertical hook — only active when tenant has multiple verticals.
   // Pass nonDerivedOips, never the raw oips list, so a -derived OIP's signals
@@ -1322,7 +1335,7 @@ function MarketReviewPage() {
   const {
     signals: mvSignals,
     loading: mvLoading,
-  } = useMultiVerticalSignals(isMultiVertical ? nonDerivedOips : [], statusFilter)
+  } = useMultiVerticalSignals(isMultiVertical ? oipsInSelectedVertical : [], statusFilter)
 
   useEffect(() => {
     if (!selectedOip) return
