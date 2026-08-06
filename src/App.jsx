@@ -1615,6 +1615,7 @@ function MarketReviewPage() {
       {openEntity && (
         <EntityDrawer
           entityName={openEntity.name}
+          entityKey={openEntity.key}
           signals={signals.filter(s => (s.signals?.entity_key || s.signals?.source_name) === openEntity.key)}
           oipId={selectedOip?.id}
           keywordTierMap={keywordTierMap}
@@ -2297,11 +2298,13 @@ function tierLabel(t) {
 // ENTITY DRAWER — right-side panel for entity intelligence
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EntityDrawer({ entityName, signals, oipId, onClose, keywordTierMap = {} }) {
+function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, keywordTierMap = {} }) {
   const [briefing, setBriefing]       = useState(null)
   const [briefingLoading, setBriefingLoading] = useState(true)
   const [contact, setContact]         = useState(null)
   const [contactLoading, setContactLoading] = useState(true)
+  const [eiaFacts, setEiaFacts]       = useState(null)
+  const [eiaLoading, setEiaLoading]   = useState(true)
 
   // Score — display-only strong/tier1 counts (no longer feed the score itself,
   // just shown in the header text alongside it) plus a real numeric score taken
@@ -2365,6 +2368,25 @@ function EntityDrawer({ entityName, signals, oipId, onClose, keywordTierMap = {}
       }
     }
   })
+
+  // EIA-861 utility facts — joined on entity_key, not entityName. Most
+  // entity_key values won't have a match yet (only GridX's MA CivicPlus
+  // signals + the eia861_utility_facts backfill cover this so far) — that's
+  // expected, not an error, so this fails silently into "no panel" rather
+  // than showing an error state.
+  useEffect(() => {
+    if (!entityKey) { setEiaLoading(false); return }
+    supabase
+      .from('eia861_utility_facts')
+      .select('*')
+      .eq('entity_key', entityKey)
+      .order('report_year', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => setEiaFacts(data))
+      .catch(() => setEiaFacts(null))
+      .finally(() => setEiaLoading(false))
+  }, [entityKey])
 
   // Contact fetch — only if no named contacts found in titles
   useEffect(() => {
@@ -2515,6 +2537,62 @@ Write for a sales director. Direct, no hedging. No markdown, plain text only.`
         {groups.length > 0 && (
           <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:4 }}>
             {groups.map(g => <span key={g} className="kw-pill">{g}</span>)}
+          </div>
+        )}
+
+        {divider}
+
+        {/* EIA-861 utility facts */}
+        {!eiaLoading && eiaFacts && (
+          <div style={{ marginBottom:20 }}>
+            {lbl(`Utility Profile · EIA-861 (${eiaFacts.report_year})`)}
+            <div style={{
+              padding:'14px 16px', background:'var(--paper-alt, #f7f5f0)',
+              borderLeft:'3px solid var(--ink-fade)', borderRadius:'0 4px 4px 0',
+              display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 20px',
+            }}>
+              {eiaFacts.customer_count_total != null && (
+                <div>
+                  <div style={{ fontSize:10, fontFamily:"'IBM Plex Mono', monospace", color:'var(--ink-fade)',
+                    textTransform:'uppercase', letterSpacing:'.08em' }}>Customers</div>
+                  <div style={{ fontSize:16, fontWeight:600 }}>{Math.round(eiaFacts.customer_count_total).toLocaleString()}</div>
+                </div>
+              )}
+              {eiaFacts.revenue_total_usd != null && (
+                <div>
+                  <div style={{ fontSize:10, fontFamily:"'IBM Plex Mono', monospace", color:'var(--ink-fade)',
+                    textTransform:'uppercase', letterSpacing:'.08em' }}>Annual Revenue</div>
+                  <div style={{ fontSize:16, fontWeight:600 }}>${Math.round(eiaFacts.revenue_total_usd * 1000).toLocaleString()}</div>
+                </div>
+              )}
+              {eiaFacts.ami_meter_count != null && (
+                <div>
+                  <div style={{ fontSize:10, fontFamily:"'IBM Plex Mono', monospace", color:'var(--ink-fade)',
+                    textTransform:'uppercase', letterSpacing:'.08em' }}>AMI Meters</div>
+                  <div style={{ fontSize:16, fontWeight:600 }}>
+                    {Math.round(eiaFacts.ami_meter_count).toLocaleString()}
+                    {eiaFacts.customer_count_total > 0 && (
+                      <span style={{ fontSize:12, color:'var(--ink-fade)', fontWeight:400, marginLeft:6 }}>
+                        (~{Math.round(100 * eiaFacts.ami_meter_count / eiaFacts.customer_count_total)}% of customers)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {(eiaFacts.net_metering_flag || eiaFacts.dsm_flag || eiaFacts.dynamic_pricing_flag) && (
+                <div>
+                  <div style={{ fontSize:10, fontFamily:"'IBM Plex Mono', monospace", color:'var(--ink-fade)',
+                    textTransform:'uppercase', letterSpacing:'.08em' }}>Programs</div>
+                  <div style={{ fontSize:13, marginTop:2 }}>
+                    {[
+                      eiaFacts.net_metering_flag === 'Y' && 'Net Metering',
+                      eiaFacts.dsm_flag === 'Y' && 'Demand-Side Mgmt',
+                      eiaFacts.dynamic_pricing_flag === 'Y' && 'Time-Based Pricing',
+                    ].filter(Boolean).join(' · ') || '—'}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
