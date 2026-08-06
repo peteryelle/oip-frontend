@@ -1305,16 +1305,24 @@ function MarketReviewPage() {
 
   // Multi-vertical: detect if tenant spans more than one vertical.
   // Derived OIPs are single-lens by definition — the OIP selector pins the lens,
-  // so they must NOT aggregate signals across the tenant's other verticals/OIPs
-  // (that bled SAM-derived rows into the SLED-derived board with dead drawers).
-  const uniqueVerticals = [...new Set((oips || []).map(o => o.vertical_id))]
+  // so they must NOT aggregate signals across the tenant's other verticals/OIPs.
+  // FIX (2026-08-06): the previous check only excluded aggregation when the
+  // SELECTED OIP was itself a -derived slug — it did not exclude -derived OIPs
+  // from the aggregation SET. That let a -derived OIP's signals leak into
+  // whatever non-derived OIP was selected (e.g. gridx-sam-derived's 417 rows
+  // rendering under the gridx-sled label). Both the vertical count and the
+  // OIPs passed to the hook must exclude -derived OIPs.
+  const nonDerivedOips = (oips || []).filter(o => !o.slug?.endsWith('-derived'))
+  const uniqueVerticals = [...new Set(nonDerivedOips.map(o => o.vertical_id))]
   const isMultiVertical = uniqueVerticals.length > 1 && !selectedOip?.slug?.endsWith('-derived')
 
-  // Multi-vertical hook — only active when tenant has multiple verticals
+  // Multi-vertical hook — only active when tenant has multiple verticals.
+  // Pass nonDerivedOips, never the raw oips list, so a -derived OIP's signals
+  // can never be aggregated into another OIP's board.
   const {
     signals: mvSignals,
     loading: mvLoading,
-  } = useMultiVerticalSignals(isMultiVertical ? oips : [], statusFilter)
+  } = useMultiVerticalSignals(isMultiVertical ? nonDerivedOips : [], statusFilter)
 
   useEffect(() => {
     if (!selectedOip) return
