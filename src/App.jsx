@@ -7,6 +7,7 @@ import AuditHistory from './components/audit/AuditHistory'
 import PipelineRadar from './components/radar/PipelineRadar'
 import DerivedDemandSetup from './components/demand/DerivedDemandSetup'
 import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
+import BidPackageUploadForm from './components/bidreview/BidPackageUploadForm'
 import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
 import { useKeywordTierMap } from './hooks/useKeywordTierMap'
 import { DemoGateProvider } from './hooks/useDemoGate'
@@ -1297,6 +1298,7 @@ function MarketReviewPage() {
   const [search, setSearch] = useState('')
   const [openSignal, setOpenSignal] = useState(null)
   const [openEntity, setOpenEntity] = useState(null)
+  const [showUploadForm, setShowUploadForm] = useState(false)
   const [agencyAllowlist, setAgencyAllowlist] = useState([]) // profile target_agencies (empty = show all)
 
   // Read entity filter from URL
@@ -1374,7 +1376,21 @@ function MarketReviewPage() {
           if (payload.eventType === 'UPDATE') {
             setSignals(prev => prev.map(s => s.signal_id === payload.new.signal_id ? { ...s, ...payload.new } : s))
           } else if (payload.eventType === 'INSERT') {
-            // Could add to list, but require refetch for the joined signal data
+            // payload.new is the bare oip_signals row — the list needs the
+            // joined `signals` record (title, metadata, etc.) to render, so
+            // fetch it once and append. Guards against duplicates in case the
+            // row already arrived via a manual refetch.
+            const sid = payload.new.signal_id
+            supabase
+              .from('signals')
+              .select('id, title, source_name, source, state, doc_url, doc_type, meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key')
+              .eq('id', sid)
+              .maybeSingle()
+              .then(({ data: sigData }) => {
+                setSignals(prev => prev.some(s => s.signal_id === sid)
+                  ? prev
+                  : [{ ...payload.new, signals: sigData }, ...prev])
+              })
           }
         })
       .subscribe()
@@ -1434,6 +1450,13 @@ function MarketReviewPage() {
   const isSam = selectedOip?.verticals?.slug === 'sam'
   const isDibOip = selectedOip?.slug === 'sam-dib'
   const isDerivedOip = selectedOip?.slug?.endsWith('-derived')
+  // Bid/No-Bid packages are one-signal-per-upload, same as a derived board's
+  // "one RFP = one opportunity card" — reuses EntityBoard's per-signal keying
+  // via the isDerived prop below, WITHOUT coupling to the -derived slug
+  // convention (which is DD v2's concept, not this vertical's). Without this,
+  // every bid package would share source_name='Customer Upload' and collapse
+  // into a single entity card in EntityBoard's default entity_key grouping.
+  const isBidReview = selectedOip?.verticals?.slug === 'bid_review'
   const [samTab, setSamTab] = useState(isDibOip ? 'dib' : isDerivedOip ? 'busdev' : 'opportunities')
   const drawerProps = openSignal ? {
     os: openSignal,
@@ -1480,18 +1503,39 @@ function MarketReviewPage() {
   return (
     <>
       <div className="hero" style={{ marginBottom: 16 }}>
-        <div className="hero-eyebrow">{isSam ? 'SAM.gov' : 'Market Review'}</div>
+        <div className="hero-eyebrow">{isSam ? 'SAM.gov' : isBidReview ? 'Bid/No-Bid' : 'Market Review'}</div>
         <h1 className="hero-title" style={{ fontSize: 30 }}>
           {isSam
             ? (samTab === 'dib' ? 'DIB Prospects' : samTab === 'busdev' ? 'B2B Bus Dev' : 'Opportunities')
+            : isBidReview ? 'Bid Packages'
             : (entityFilter ? entityFilter : 'Entity Board')}
         </h1>
-        {entityFilter && !isSam && (
+        {entityFilter && !isSam && !isBidReview && (
           <Link to="/market" style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
             ← Clear entity filter
           </Link>
         )}
+        {isBidReview && (
+          <button onClick={() => setShowUploadForm(true)} style={{
+            marginTop: 10, background: 'var(--primary)', color: '#fff', border: 'none',
+            borderRadius: 4, padding: '9px 20px', fontWeight: 600, cursor: 'pointer',
+            fontFamily: "'IBM Plex Mono', monospace", fontSize: 13,
+          }}>
+            + New Bid Package
+          </button>
+        )}
       </div>
+
+      {showUploadForm && selectedOip && (
+        <BidPackageUploadForm
+          oipId={selectedOip.id}
+          tenantId={selectedOip.tenant_id}
+          oipSlug={selectedOip.slug}
+          verticalId={selectedOip.vertical_id}
+          onUploaded={() => {}}
+          onClose={() => setShowUploadForm(false)}
+        />
+      )}
 
       {/* SAM tabs — hidden for single-lens derived OIPs (OIP selector already pins the lens) */}
       {isSam && !isDerivedOip && (
@@ -1578,7 +1622,7 @@ function MarketReviewPage() {
           {!isSam && !isMultiVertical && (
             <EntityBoard
               signals={filtered}
-              isDerived={isDerivedOip}
+              isDerived={isDerivedOip || isBidReview}
               keywordTierMap={keywordTierMap}
               onEntityClick={(key, name) => setOpenEntity({ key, name })}
               onSignalClick={setOpenSignal}
