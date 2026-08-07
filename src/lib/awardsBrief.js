@@ -74,6 +74,7 @@ export function buildAwardBriefHtml(a, opts = {}) {
   ].filter(Boolean);
 
   // ── Header chips ──
+  const dd2Gated = bd.scores?.gated === true || a.disposition === "No";
   const chipsHtml = [
     `<span class="badge score">${dd2Gated ? "—" : (a.score ?? "—")}<span class="badge-sub"> ${dd2Gated ? "not scored" : "B2B fit"}</span></span>`,
     a.disposition ? `<span class="badge disp">${esc(a.disposition)}</span>` : "",
@@ -136,7 +137,6 @@ export function buildAwardBriefHtml(a, opts = {}) {
   const isDD2Recompete = bd.entailment != null && bd.incumbent_name != null;
 
   const entail = bd.entailment || {};
-  const dd2Gated = bd.scores?.gated === true || a.disposition === "No";
   const scores = bd.scores || {};
   const book = bd.prime_book || {};
   const perfNew = bd.performance || {};
