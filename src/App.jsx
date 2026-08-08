@@ -2930,6 +2930,7 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
   const isGrants = sig.source === 'grants.gov' || sig.source_name === 'Grants.gov'
   const isPuc    = sig.source === 'puc'
   const isNycAward = sig.source === 'nyc_contracts' || meta.award_source === 'nyc_contracts'
+  const isDocUpload = meta.signal_type === 'document_upload'
   const [aiSummary, setAiSummary] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [enriched, setEnriched] = useState(null)  // on-demand entity data
@@ -2937,6 +2938,31 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
   const [contactLoading, setContactLoading] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(true)
   const [primaryEntity, setPrimaryEntity] = useState(null)
+  const [docLinks, setDocLinks] = useState([])       // signed URLs for uploaded_documents
+  const [docLinksLoading, setDocLinksLoading] = useState(false)
+
+  // Bid/No-Bid: generate signed URLs for the originally uploaded documents.
+  // Bucket is private (bid-documents-raw), so a plain public URL won't work —
+  // each link needs a fresh signed URL, regenerated per drawer open rather
+  // than cached, since these expire.
+  useEffect(() => {
+    if (!isDocUpload) { setDocLinks([]); return }
+    const docs = meta.uploaded_documents || []
+    if (!docs.length) { setDocLinks([]); return }
+    let cancelled = false
+    setDocLinksLoading(true)
+    Promise.all(docs.map(async (doc) => {
+      const { data, error } = await supabase.storage
+        .from('bid-documents-raw')
+        .createSignedUrl(doc.storage_path, 3600) // 1hr — regenerated each open, not persisted
+      return { filename: doc.filename, url: error ? null : data?.signedUrl }
+    })).then(results => {
+      if (!cancelled) setDocLinks(results)
+    }).finally(() => {
+      if (!cancelled) setDocLinksLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [os.signal_id, isDocUpload])
 
   // Fetch signal_entities on-demand when drawer opens
   useEffect(() => {
@@ -3373,8 +3399,12 @@ ${analysisHtml}
 
         {divider}
 
-        {/* WinQuest Analysis — opportunities only */}
-        {isSam && !isDib && (
+        {/* WinQuest Analysis — opportunities only. Also covers Bid/No-Bid
+            document-upload signals: they share the identical scores.llm_analysis
+            shape (opportunity/concerns/gaps + recommendation) produced by
+            document_review_handler.py's synthesis pass, same contract as
+            score_handler's _llm_score_opportunity. */}
+        {(isSam || isDocUpload) && !isDib && (
           <div style={{ marginBottom: 24 }}>
             <div
               onClick={() => setAnalysisOpen(o => !o)}
@@ -3871,6 +3901,42 @@ ${analysisHtml}
           }
           return null
         })()}
+
+        {/* Bid/No-Bid: links to the customer's originally uploaded documents.
+            Bucket is private — links are signed URLs generated on drawer open,
+            not stored, since signed URLs expire. Sits at the bottom alongside
+            the other verticals' single "View source" link above, since this
+            is the same concept (source material) just multi-document. */}
+        {isDocUpload && (
+          <div style={{ marginBottom: 20 }}>
+            {lbl('Original Documents')}
+            {docLinksLoading ? (
+              <div style={{ fontSize: 13, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+                Loading document links…
+              </div>
+            ) : docLinks.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--ink-fade)' }}>No documents attached.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {docLinks.map((doc, i) => (
+                  doc.url ? (
+                    <a key={i} href={doc.url} target="_blank" rel="noopener noreferrer" style={{
+                      fontSize: 13, color: 'var(--primary)', textDecoration: 'none',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      <span style={{ fontSize: 11, opacity: 0.6 }}>↗</span>
+                      {doc.filename}
+                    </a>
+                  ) : (
+                    <span key={i} style={{ fontSize: 13, color: 'var(--ink-fade)' }}>
+                      {doc.filename} (link unavailable)
+                    </span>
+                  )
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {divider}
 
