@@ -1305,39 +1305,39 @@ function MarketReviewPage() {
   const params = new URLSearchParams(useLocation().search)
   const entityFilter = params.get('entity')
 
-  // Multi-vertical: detect if tenant spans more than one vertical.
-  // Derived OIPs are single-lens by definition — the OIP selector pins the lens,
-  // so they must NOT aggregate signals across the tenant's other verticals/OIPs.
-  // FIX (2026-08-06): the previous check only excluded aggregation when the
-  // SELECTED OIP was itself a -derived slug — it did not exclude -derived OIPs
-  // from the aggregation SET. That let a -derived OIP's signals leak into
-  // whatever non-derived OIP was selected (e.g. gridx-sam-derived's 417 rows
-  // rendering under the gridx-sled label). Both the vertical count and the
-  // OIPs passed to the hook must exclude -derived OIPs.
-  const nonDerivedOips = (oips || []).filter(o => !o.slug?.endsWith('-derived'))
-  // isMultiVertical originally counted ANY non-derived OIP across the whole
-  // tenant, on any vertical, as "multi-vertical" — correct for a tenant with
-  // e.g. two SLED boards that should merge into one feed, but WRONG for a
-  // tenant like GridX with SAM + SLED: two unrelated verticals for two
-  // different sales motions, not a pairing that should merge. That bug
-  // caused gridx-sled to render the flat MultiVerticalSignalList instead of
-  // EntityBoard's per-entity grouping, purely because gridx-sam existed.
-  // Scope to OIPs sharing the CURRENTLY SELECTED OIP's vertical instead —
-  // preserves the original intent (multiple same-vertical OIPs merge) while
-  // excluding cross-vertical tenants that just happen to have >1 OIP total.
-  const oipsInSelectedVertical = nonDerivedOips.filter(
-    o => o.vertical_id === selectedOip?.vertical_id
-  )
-  const uniqueVerticals = [...new Set(oipsInSelectedVertical.map(o => o.vertical_id))]
-  const isMultiVertical = oipsInSelectedVertical.length > 1 && !selectedOip?.slug?.endsWith('-derived')
+  // Multi-vertical auto-merge — REMOVED 2026-08-09. This used to decide
+  // whether to render the flat MultiVerticalSignalList (combining signals
+  // across multiple OIPs into one feed) instead of EntityBoard (this OIP's
+  // own signals, grouped per-entity with the Intelligence Briefing and
+  // Project Timeline). Every version of the trigger condition tried here
+  // was wrong for some real tenant:
+  //   - Originally: any 2+ non-derived OIPs anywhere in the tenant. Wrong
+  //     for GridX (SAM + SLED are different sales motions, never should
+  //     merge) — gridx-sled rendered flat purely because gridx-sam existed.
+  //   - Then: scoped to OIPs sharing a vertical_id. Wrong for Tessco —
+  //     tessco-sled (Procurement Track) and tessco-sled-boards (Planning
+  //     Track) are a deliberate separate-by-design pair (distinct scoring
+  //     scopes per architecture notes, not a shared signal pool), and
+  //     merging them silently lost the Briefing/Timeline with no error.
+  //   - A slug-suffix heuristic (collapsing "-boards" pairs) fixed Tessco
+  //     specifically but wasn't a real signal — any tenant naming its
+  //     Planning Track OIP differently would still incorrectly merge.
+  // No tenant has ever had a validated-correct use for the merge. Every
+  // OIP now always renders its own EntityBoard via `filtered`, which is
+  // already scoped to selectedOip.id by the signals fetch above. If a
+  // genuine cross-OIP combined view is wanted later, it should be an
+  // explicit, opt-in feature — not implicit based on OIP/vertical counts.
+  const isMultiVertical = false
 
-  // Multi-vertical hook — only active when tenant has multiple verticals.
-  // Pass nonDerivedOips, never the raw oips list, so a -derived OIP's signals
-  // can never be aggregated into another OIP's board.
+
+  // Multi-vertical hook — disabled now that isMultiVertical is always false
+  // (see above). Left wired to an empty array, not removed outright, so the
+  // hook/component/mvFiltered plumbing stays intact if an explicit opt-in
+  // combined view is built later.
   const {
     signals: mvSignals,
     loading: mvLoading,
-  } = useMultiVerticalSignals(isMultiVertical ? oipsInSelectedVertical : [], statusFilter)
+  } = useMultiVerticalSignals([], statusFilter)
 
   useEffect(() => {
     if (!selectedOip) return
@@ -2483,7 +2483,24 @@ function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, keywordT
     const summaries = signals.slice(0,12).map((s,i) =>
       `${i+1}. [${s.signal_tier}] ${s.signals?.title || ''}\n   ${s.match_reason||''}`
     ).join('\n')
+    // Stage mix from the same stageMap the Project Timeline section renders
+    // (computed above) — previously this prompt never saw lifecycle_stage
+    // at all, so the narrative brief and the visual timeline were two
+    // disconnected views of the same entity: the timeline correctly showed
+    // WHERE Arlington sits in the capital lifecycle, but the AI briefing
+    // text next to it never mentioned it. Wiring the same data through here
+    // so the brief can actually discuss timing/influence window, matching
+    // the framing already used in the entity-level profile_fit scoring.
+    const stageSummary = stageMap.map(g => `${g.stage}×${g.items.length}`).join(', ') || 'none staged'
+    const unstagedNote = unstagedSignals.length > 0 ? ` (${unstagedSignals.length} unstaged)` : ''
     const prompt = `You are a senior BD analyst. Based on these ${signals.length} procurement signals about ${entityName}, write an intelligence briefing.
+
+LIFECYCLE STAGE MIX: ${stageSummary}${unstagedNote}
+Stages earlier in the sequence (assessment, planning, pre_bond, authorization, design) indicate
+an open window to influence the spec before it locks in. Stages concentrated in procurement or
+execution mean the design is likely already written. Reference the actual stage mix above in
+your OPPORTUNITY section — do not write generically about "opportunity" without saying where in
+the lifecycle this entity actually sits.
 
 SIGNALS:
 ${summaries}
