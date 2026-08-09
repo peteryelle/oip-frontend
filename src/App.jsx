@@ -1500,6 +1500,33 @@ function MarketReviewPage() {
     return true
   })
 
+  // mvSignals (from useMultiVerticalSignals) previously bypassed every filter
+  // above — entity, state, group, search, tier all silently no-op'd whenever
+  // isMultiVertical was true. That path triggers for ANY tenant with 2+
+  // non-derived OIPs sharing a vertical (e.g. Tessco's tessco-sled +
+  // tessco-sled-boards both being SLED-vertical), not just true cross-
+  // vertical tenants. Confirmed 2026-08-09: clicking "View signals" for
+  // Arlington ISD set entityFilter correctly (header showed "Arlington ISD"
+  // + Clear entity filter), but the list underneath rendered ALL 243
+  // unfiltered SLED signals — including Syracuse City School District —
+  // because MultiVerticalSignalList was fed raw mvSignals, not a filtered
+  // copy. Mirrors the same predicate used for `filtered` above; the isSam
+  // branch is omitted since this path only ever renders when !isSam (see
+  // the render guard below).
+  const mvFiltered = mvSignals.filter(s => {
+    if (tierFilter && s.signal_tier !== tierFilter) return false
+    if (stateFilter && s.signals?.state !== stateFilter) return false
+    if (groupFilter && !(s.matched_groups || []).includes(groupFilter)) return false
+    if (entityFilter && s.signals?.source_name !== entityFilter) return false
+    if (search) {
+      const q  = search.toLowerCase()
+      const t  = (s.signals?.title || '').toLowerCase()
+      const sn = (s.signals?.source_name || '').toLowerCase()
+      if (!t.includes(q) && !sn.includes(q)) return false
+    }
+    return true
+  })
+
   return (
     <>
       <div className="hero" style={{ marginBottom: 16 }}>
@@ -1609,7 +1636,7 @@ function MarketReviewPage() {
           {/* Multi-vertical: unified signal list across all OIPs */}
           {!isSam && isMultiVertical && (
             <MultiVerticalSignalList
-              signals={mvSignals}
+              signals={mvFiltered}
               loading={mvLoading}
               onSignalClick={setOpenSignal}
             />
