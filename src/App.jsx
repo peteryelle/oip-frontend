@@ -2480,67 +2480,88 @@ function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, keywordT
 
   // Briefing fetch
   useEffect(() => {
-    const summaries = signals.slice(0,12).map((s,i) =>
-      `${i+1}. [${s.signal_tier}] ${s.signals?.title || ''}\n   ${s.match_reason||''}`
-    ).join('\n')
-    // Stage mix from the same stageMap the Project Timeline section renders
-    // (computed above) — previously this prompt never saw lifecycle_stage
-    // at all, so the narrative brief and the visual timeline were two
-    // disconnected views of the same entity: the timeline correctly showed
-    // WHERE Arlington sits in the capital lifecycle, but the AI briefing
-    // text next to it never mentioned it. Wiring the same data through here
-    // so the brief can actually discuss timing/influence window, matching
-    // the framing already used in the entity-level profile_fit scoring.
-    const stageSummary = stageMap.map(g => `${g.stage}×${g.items.length}`).join(', ') || 'none staged'
-    const unstagedNote = unstagedSignals.length > 0 ? ` (${unstagedSignals.length} unstaged)` : ''
-    const prompt = `You are a senior BD analyst. Based on these ${signals.length} procurement signals about ${entityName}, write an intelligence briefing.
+    let cancelled = false
+    ;(async () => {
+      const summaries = signals.slice(0,12).map((s,i) =>
+        `${i+1}. [${s.signal_tier}] ${s.signals?.title || ''}\n   ${s.match_reason||''}`
+      ).join('\n')
+      const stageSummary = stageMap.map(g => `${g.stage}×${g.items.length}`).join(', ') || 'none staged'
+      const unstagedNote = unstagedSignals.length > 0 ? ` (${unstagedSignals.length} unstaged)` : ''
+
+      // Tenant's canonical profile — NOT oip_id-scoped. Fetched via the same
+      // RPC score_handler.py uses (_load_active_profile), which resolves the
+      // tenant's one canonical profile regardless of which sibling OIP is
+      // passed in. Tessco's profile is stored against tessco-sled but this
+      // correctly resolves it even when called with tessco-sled-boards's id.
+      // Without this, the brief had no access to the tenant's own product
+      // focus/compliance drivers (e.g. Tessco's IFC 510/ERRCS/Alyssa's Law
+      // thesis) and could only ever write generically — this is also why
+      // the fix generalizes to every tenant instead of hardcoding one
+      // tenant's regulatory language into a shared prompt.
+      let profileBlock = 'No profile on file.'
+      try {
+        const { data: profileData } = await supabase.rpc('get_canonical_profile', { p_oip_id: oipId })
+        if (profileData) {
+          const desc = profileData.description || ''
+          const drivers = (profileData.key_funding_programs || []).join('; ')
+          profileBlock = `${desc}\nKey funding/compliance drivers: ${drivers}`
+        }
+      } catch (e) { /* fall through to default profileBlock */ }
+      if (cancelled) return
+
+      const prompt = `You are a senior BD analyst. Based on these ${signals.length} procurement signals about ${entityName}, write an intelligence briefing.
+
+ORGANIZATION PROFILE:
+${profileBlock}
 
 LIFECYCLE STAGE MIX: ${stageSummary}${unstagedNote}
-Stages earlier in the sequence (assessment, planning, pre_bond, authorization, design) indicate
-an open window to influence the spec before it locks in. Stages concentrated in procurement or
-execution mean the design is likely already written. Reference the actual stage mix above in
-your OPPORTUNITY section — do not write generically about "opportunity" without saying where in
-the lifecycle this entity actually sits.
+
+GROUND RULES — do not violate these:
+- State only what the signal data directly supports. Never invent a reason for why
+  something is absent ("suggesting it's embedded in documents you haven't seen" is a
+  guess, not a fact) — either state the absence neutrally, or explain it using the
+  profile's compliance drivers if genuinely relevant (see rule below).
+- Opportunity is not limited to early lifecycle stages. A board actively bringing items
+  forward — at ANY stage — demonstrates real, live activity. Never declare a window
+  "closed." A later-stage signal still gets an actionable next step; the action changes
+  (request the scope directly), not whether one exists.
+- Any signal naming a specific facility AND specific scope matching the profile's focus
+  areas is the highest-value output this brief can produce. Always end it with: contact
+  the district directly and request the full specification.
+- Any signal describing a new standing governance or financing vehicle (authority,
+  corporation, master financing structure) always gets exactly two actions: (1) flag for
+  ongoing monitoring, (2) recommend requesting vendor-notification-list registration.
+- New construction or major renovation items that do NOT name a scope matching the
+  profile's compliance drivers are not a gap to speculate about — they are the highest-
+  value outreach target. Code-driven requirements are routinely not itemized at board
+  level; state that pattern once, factually, then recommend direct outreach to confirm
+  applicability and offer scoping help.
 
 SIGNALS:
 ${summaries}
 
-Write three sections: OPPORTUNITY, CONCERNS, GAPS.
-Each section has exactly 3 bullets and one paragraph.
-STRICT RULE: Each bullet must be 8 words or fewer. No exceptions.
-Format exactly:
-OPPORTUNITY:
-• [8 words max]
-• [8 words max]
-• [8 words max]
-[paragraph]
+Write two sections: WHAT'S HAPPENING, WHERE TO ENGAGE.
+WHAT'S HAPPENING: factual synthesis only. Stage mix, dollar figures, facility count, named
+programs. No inference about intent, momentum, or timing beyond what's stated.
+WHERE TO ENGAGE: one line per actionable item, each ending in a concrete instruction.
+Order by concreteness (named facility + named scope first), not by lifecycle stage.
 
-CONCERNS:
-• [8 words max]
-• [8 words max]
-• [8 words max]
-[paragraph]
+Format: 3 bullets (8 words max each) + one paragraph per section. No markdown, plain text.`
 
-GAPS:
-• [8 words max]
-• [8 words max]
-• [8 words max]
-[paragraph]
-
-Write for a sales director. Direct, no hedging. No markdown, plain text only.`
-
-    fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json',
-        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900, prompt })
-    })
-    .then(r => r.json())
-    .then(d => setBriefing(d.content?.find(b => b.type==='text')?.text || ''))
-    .catch(() => setBriefing('Unable to generate briefing.'))
-    .finally(() => setBriefingLoading(false))
-  }, [entityName])
+      fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900, prompt })
+      })
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setBriefing(d.content?.find(b => b.type==='text')?.text || '') })
+      .catch(() => { if (!cancelled) setBriefing('Unable to generate briefing.') })
+      .finally(() => { if (!cancelled) setBriefingLoading(false) })
+    })()
+    return () => { cancelled = true }
+  }, [entityName, oipId])
 
   const divider = <hr style={{ border:'none', borderTop:'1px solid var(--rule)', margin:'20px 0' }} />
   const lbl = (txt) => (
@@ -2551,8 +2572,8 @@ Write for a sales director. Direct, no hedging. No markdown, plain text only.`
   )
 
   const renderBriefing = (text) => {
-    const labels = ['OPPORTUNITY:', 'CONCERNS:', 'GAPS:']
-    const labelColors = { 'OPPORTUNITY:': 'var(--primary)', 'CONCERNS:': '#b45309', 'GAPS:': 'var(--ink-fade)' }
+    const labels = ["WHAT'S HAPPENING:", 'WHERE TO ENGAGE:']
+    const labelColors = { "WHAT'S HAPPENING:": 'var(--ink-fade)', 'WHERE TO ENGAGE:': 'var(--primary)' }
     return text.split('\n')
       .map(l => l.replace(/^#+\s*/,'').replace(/\*\*/g,'').trim())
       .filter(Boolean)
