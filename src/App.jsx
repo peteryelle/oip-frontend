@@ -2540,13 +2540,22 @@ GROUND RULES — do not violate these:
 SIGNALS:
 ${summaries}
 
-Write two sections: WHAT'S HAPPENING, WHERE TO ENGAGE.
-WHAT'S HAPPENING: factual synthesis only. Stage mix, dollar figures, facility count, named
-programs. No inference about intent, momentum, or timing beyond what's stated.
-WHERE TO ENGAGE: one line per actionable item, each ending in a concrete instruction.
-Order by concreteness (named facility + named scope first), not by lifecycle stage.
+Write three sections: EXECUTIVE SUMMARY, WHAT'S HAPPENING, WHERE TO ENGAGE.
+EXECUTIVE SUMMARY: 2-3 bullets — the single most decision-relevant facts only (total
+active dollar value, headline stage mix, count of concrete engagement opportunities below).
+No paragraph.
+WHAT'S HAPPENING: one bullet per distinct fact — stage counts, dollar figures, named
+facilities, financing vehicles. Use as many bullets as there are real facts. Do not
+compress into a paragraph and do not cap at 3.
+WHERE TO ENGAGE: one bullet per actionable item, each ending in a concrete
+instruction, ordered by concreteness (named facility + named scope first). Use as many
+bullets as there are real actionable items. Do not cap at 3.
+Every bullet is one line, specific, no filler — but not a teaser either, since
+there is no paragraph after it to supply the missing detail. No paragraphs anywhere
+in this brief; bullets carry the full content.
 
-Format: 3 bullets (8 words max each) + one paragraph per section. No markdown, plain text.`
+Format: plain text, section headers in caps followed by a colon, bullets prefixed
+with •. No markdown, no word-count padding, no filler bullets to hit a count.`
 
       fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
         method: 'POST',
@@ -2572,8 +2581,8 @@ Format: 3 bullets (8 words max each) + one paragraph per section. No markdown, p
   )
 
   const renderBriefing = (text) => {
-    const labels = ["WHAT'S HAPPENING:", 'WHERE TO ENGAGE:']
-    const labelColors = { "WHAT'S HAPPENING:": 'var(--ink-fade)', 'WHERE TO ENGAGE:': 'var(--primary)' }
+    const labels = ['EXECUTIVE SUMMARY:', "WHAT'S HAPPENING:", 'WHERE TO ENGAGE:']
+    const labelColors = { 'EXECUTIVE SUMMARY:': 'var(--ink)', "WHAT'S HAPPENING:": 'var(--ink-fade)', 'WHERE TO ENGAGE:': 'var(--primary)' }
     return text.split('\n')
       .map(l => l.replace(/^#+\s*/,'').replace(/\*\*/g,'').trim())
       .filter(Boolean)
