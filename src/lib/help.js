@@ -15,22 +15,19 @@ This guide applies to all roles: **owners** and **admins** can edit configuratio
 
 The OIP runs a weekly scrape across the procurement and capital-planning sources you've subscribed to (city councils, school districts, state agencies). Every document it captures is a **signal**. Signals are then scored against your sentinel — the keyword vocabulary you've defined — and the matches are what you see in the app.
 
-Three pieces of configuration drive what gets matched and how it ranks:
+Two pieces of configuration drive what gets matched and how it ranks:
 
 **Profile** describes your firm — what you do, what services you offer, what programs you care about. It's the human-readable answer to *who are we?*. The profile doesn't directly drive the regex matching, but it shapes the keyword vocabulary you build in the Sentinel and gives context for everyone reading the dashboard. Think of it as the **firm description**.
-
-**Business Objectives** describe what you're trying to win — strategic targets, expansion areas, capability adjacencies. This is the answer to *what are we hunting for right now?*. Objectives inform which keywords belong in your sentinel and at what tier. Think of them as the **hunt brief**.
 
 **Sentinel** is the keyword vocabulary that actually does the matching. Each keyword has a tier (1, 2, 3, or 4) and a group (civil_infrastructure, broadband_infra, etc.). When a signal's text contains a keyword, that's a match. When it contains *multiple* tier-1 keywords from different groups, that's a **tier1_strong** match — the highest signal quality.
 
 The flow is conceptual → operational:
 
 > Profile says "we're a civil engineering firm with a growing broadband practice."
-> Objectives say "we want to win middle-mile broadband design work in upstate NY."
 > Sentinel encodes that as keywords: \`middle mile\`, \`BEAD\`, \`fiber\`, \`broadband\`, \`network design\` (all tier 1, group \`broadband_infra\`).
 > Now when a signal contains 2+ of those, it scores as tier1_strong — and you see it on the home page.
 
-You can edit Profile and Objectives without changing what gets matched (descriptive only). Editing the **Sentinel** changes what matches — because that's the regex. After editing the sentinel, click **Re-score** to apply the new vocabulary to existing signals.
+You can edit Profile without changing what gets matched (descriptive only). Editing the **Sentinel** changes what matches — because that's the regex. After editing the sentinel, click **Re-score** to apply the new vocabulary to existing signals.
 
 ## Sentinel tiers
 
@@ -114,16 +111,6 @@ Your firm's description. Read by everyone; edited by admins.
 
 Profile does not directly drive matching — it's descriptive context. But it should reflect your strategic posture, because your Sentinel keywords should follow from it.
 
-## Business Objectives
-
-Strategic targets and expansion areas. Read by everyone; edited by admins.
-
-This page captures *what you're hunting for right now*. It's typically reviewed at the start of each pursuit-planning cycle.
-
-**Sections:** strategic targets, expansion opportunities, evaluation criteria.
-
-Like Profile, Objectives don't directly match — they guide which keywords belong in the Sentinel and at what tier.
-
 ## Sentinel
 
 The keyword vocabulary. **This is what actually drives matching and scoring.**
@@ -198,7 +185,7 @@ Recent scrape and worker runs. Use this to confirm last cycle completed, diagnos
 | View dashboard, signals, profile, sentinel | ✓ | ✓ | ✓ | ✓ |
 | Update signal status | ✓ | ✓ | ✓ | |
 | Move to pursued / update pipeline stages | ✓ | ✓ | ✓ | |
-| Edit profile, objectives, sentinel | ✓ | ✓ | | |
+| Edit profile, sentinel | ✓ | ✓ | | |
 | Trigger re-score | ✓ | ✓ | | |
 | Manage subscriptions / team | ✓ | ✓ | | |
 
@@ -226,7 +213,7 @@ Each user has one role per tenant. If you have access to multiple OIPs, your rol
 
 ## Glossary
 
-- **OIP** — Opportunity Intelligence Platform. One configuration of (firm, vertical, sentinel, profile, objectives).
+- **OIP** — Opportunity Intelligence Platform. One configuration of (firm, vertical, sentinel, profile).
 - **Tenant** — an organization (e.g., HDR Inc.). All your OIPs live under one tenant.
 - **Vertical** — the industry/market focus (SLED = State, Local, Education, Government).
 - **Signal** — a single document captured by the scraper.
@@ -249,7 +236,6 @@ export const HELP_ANCHORS = {
   'weekly':         'weekly-update',
   'market':         'market-review',
   'profile':        'profile',
-  'objectives':     'business-objectives',
   'sentinel':       'sentinel',
   'pursued':        'pursued-pipeline',
   'settings':       'settings',

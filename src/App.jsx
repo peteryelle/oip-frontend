@@ -19,6 +19,7 @@ import { AuthProvider, useAuth } from './lib/auth'
 import { OipProvider, useOip } from './lib/oip'
 import { validatePassword } from './lib/password'
 import { USER_GUIDE, HELP_ANCHORS } from './lib/help'
+import { generateActionBrief, generatePartnerBrief, hasBriefs } from './lib/generateBriefs'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
@@ -60,7 +61,6 @@ export default function App() {
               <Route path="market" element={<MarketReviewPage />} />
               <Route path="market/:entitySlug" element={<MarketEntityPage />} />
               <Route path="profile" element={<ProfilePage />} />
-              <Route path="objectives" element={<ObjectivesPage />} />
               <Route path="sentinel" element={<SentinelPage />} />
               <Route path="demand" element={<DerivedDemandPage />} />
               <Route path="prime/:uei" element={<PrimeAccountPage />} />
@@ -161,7 +161,6 @@ function Layout() {
     path.startsWith('/weekly') ? 'weekly' :
     path.startsWith('/market') ? 'market' :
     path.startsWith('/profile') ? 'profile' :
-    path.startsWith('/objectives') ? 'objectives' :
     path.startsWith('/sentinel') ? 'sentinel' :
     path.startsWith('/demand') ? 'demand' :
     path.startsWith('/pursued') ? 'pursued' :
@@ -186,7 +185,6 @@ function Layout() {
         <Link to="/weekly"     className={`sec-nav-btn ${activeSection === 'weekly' ? 'active' : ''}`}>Weekly Update</Link>
         <Link to="/market"     className={`sec-nav-btn ${activeSection === 'market' ? 'active' : ''}`}>Market Review</Link>
         <Link to="/profile"    className={`sec-nav-btn ${activeSection === 'profile' ? 'active' : ''}`}>Profile</Link>
-        <Link to="/objectives" className={`sec-nav-btn ${activeSection === 'objectives' ? 'active' : ''}`}>Business Objectives</Link>
         <Link to="/sentinel"   className={`sec-nav-btn ${activeSection === 'sentinel' ? 'active' : ''}`}>Sentinel</Link>
         {selectedOip?.verticals?.slug === 'sam' && (
           <Link to="/demand" className={`sec-nav-btn ${activeSection === 'demand' ? 'active' : ''}`}>Derived Demand</Link>
@@ -375,7 +373,6 @@ function viewLabel(section) {
     weekly: 'Weekly Update',
     market: 'Market Review',
     profile: 'Profile',
-    objectives: 'Business Objectives',
     sentinel: 'Sentinel',
     demand: 'Derived Demand',
     pursued: 'Pursued Pipeline',
@@ -1349,7 +1346,8 @@ function MarketReviewPage() {
         .select(`
           oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
           match_reason, text_excerpt, status, relevance_status, notes, scored_at, scores, matched_sentinels,
-          lifecycle_stage,
+          lifecycle_stage, objective, objective_confidence_note, objective_deadline_unknown,
+          program_ref, project_ref, phase_ref, why_now,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
                               meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key)
         `)
@@ -3011,6 +3009,7 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
   const [contactInfo, setContactInfo] = useState(null)
   const [contactLoading, setContactLoading] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(true)
+  const [briefView, setBriefView] = useState(null) // null | 'action' | 'partner'
   const [primaryEntity, setPrimaryEntity] = useState(null)
   const [docLinks, setDocLinks] = useState([])       // signed URLs for uploaded_documents
   const [docLinksLoading, setDocLinksLoading] = useState(false)
@@ -4014,6 +4013,76 @@ ${analysisHtml}
 
         {divider}
 
+        {/* Partner program add-on briefs — only present when objective was
+            classified server-side (classify_objective.py, at score time).
+            Scoped implicitly: objective is null for every OIP outside
+            tessco-sled-boards, so this section simply doesn't render for
+            any other tenant's signals. Pure client-side lookup, no fetch —
+            objective classification already happened, this just formats
+            what's on the row. */}
+        {hasBriefs(os) && (() => {
+          const actionBrief = generateActionBrief(sig, os)
+          const partnerBrief = generatePartnerBrief(sig, os)
+          if (!actionBrief || !partnerBrief) return null
+          return (
+            <div style={{ marginBottom: 16 }}>
+              {lbl('Partner Program')}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <span style={{
+                  padding: '4px 12px', borderRadius: 3, fontSize: 12, fontWeight: 700,
+                  fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: '.08em',
+                  background: 'var(--primary-soft)', color: 'var(--primary-dark)',
+                }}>
+                  {actionBrief.badge}
+                </span>
+                {actionBrief.deadlineUnknown && (
+                  <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
+                    deadline not confirmed — verify before acting
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                {[['action', 'Action brief'], ['partner', 'Partner brief']].map(([key, label]) => (
+                  <button key={key} onClick={() => setBriefView(v => v === key ? null : key)} style={{
+                    padding: '8px 16px',
+                    border: '1px solid ' + (briefView === key ? 'var(--primary)' : 'var(--rule-strong)'),
+                    borderRadius: 3,
+                    background: briefView === key ? 'var(--primary-soft)' : 'var(--paper)',
+                    color: briefView === key ? 'var(--primary-dark)' : 'var(--ink-light)',
+                    cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em',
+                  }}>{label}</button>
+                ))}
+              </div>
+
+              {briefView === 'action' && (
+                <div style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                    color: 'var(--ink-fade)', marginBottom: 8 }}>Partner manager does</div>
+                  <ul style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+                    {actionBrief.pmActions.map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                    color: 'var(--ink-fade)', marginBottom: 6 }}>Why it moves the odds</div>
+                  <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{actionBrief.whyItMovesTheOdds}</p>
+                </div>
+              )}
+
+              {briefView === 'partner' && (
+                <div style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                    color: 'var(--ink-fade)', marginBottom: 6 }}>Hand to partner</div>
+                  <p style={{ fontSize: 13, lineHeight: 1.6, margin: '0 0 12px' }}>{partnerBrief.handToPartner}</p>
+                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                    color: 'var(--ink-fade)', marginBottom: 6 }}>Partner confirms back</div>
+                  <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{partnerBrief.partnerConfirmsBack}</p>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
         {/* Status */}
         <div style={{ marginBottom: 16 }}>
           {lbl('Status')}
@@ -4540,238 +4609,6 @@ function ProfileFieldList({ label, arr, editing, onChange }) {
           </ul>
         )
       )}
-    </Block>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// OBJECTIVES — slice of profile
-// ────────────────────────────────────────────────────────────────────────────
-
-function ObjectivesPage() {
-  const { selectedOip } = useOip()
-  const [profile, setProfile] = useState(null)
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState({})
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState(null)
-  const [borrowed, setBorrowed] = useState(false) // profile resolved from tenant-canonical (no per-OIP row)
-  const { memberships } = useAuth()
-  const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
-  const canEdit = ['owner', 'admin'].includes(myRole) && !borrowed
-
-  const load = async () => {
-    if (!selectedOip) return
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, version, data')
-      .eq('oip_id', selectedOip.id)
-      .eq('is_active', true)
-      .maybeSingle()
-    if (data) {
-      setProfile(data); setBorrowed(false)
-    } else {
-      // Recompete/Derived lanes share the tenant-canonical profile (read-only here).
-      const { data: canon } = await supabase.rpc('get_canonical_profile_row', { p_oip_id: selectedOip.id })
-      if (canon) { setProfile({ id: canon.id, version: null, data: canon.data }); setBorrowed(true) }
-    }
-  }
-
-  useEffect(() => { load() }, [selectedOip])
-
-  const startEdit = () => {
-    setDraft({
-      strategic_targets:       profile.data.strategic_targets       ?? [],
-      expansion_opportunities: profile.data.expansion_opportunities ?? [],
-      evaluation_criteria:     profile.data.evaluation_criteria     ?? [],
-    })
-    setErr(null)
-    setEditing(true)
-  }
-
-  const saveAsNewVersion = async () => {
-    setSaving(true)
-    setErr(null)
-    const newVersion = (profile.version || 0) + 1
-    const newData = {
-      ...profile.data,
-      strategic_targets:       draft.strategic_targets,
-      expansion_opportunities: draft.expansion_opportunities,
-      evaluation_criteria:     draft.evaluation_criteria,
-    }
-    await supabase.from('profiles').update({ is_active: false }).eq('oip_id', selectedOip.id)
-    const { error } = await supabase.from('profiles').insert({
-      oip_id: selectedOip.id,
-      version: newVersion,
-      is_active: true,
-      data: newData,
-    })
-    setSaving(false)
-    if (error) { setErr(error.message); return }
-    await load()
-    setEditing(false)
-  }
-
-  if (!profile) return <SectionLoader />
-  const d = profile.data
-
-  return (
-    <div className="detail-section">
-      <div className="detail-eyebrow">Business Objectives · {borrowed ? 'tenant profile (read-only)' : `v${profile.version}`}</div>
-      <h2 className="detail-title">Strategic targets and expansion areas<HelpIcon topic="objectives" /></h2>
-
-      <ObjectivesField
-        label="Strategic targets"
-        value={editing ? draft.strategic_targets : d.strategic_targets}
-        editing={editing}
-        onChange={v => setDraft({ ...draft, strategic_targets: v })}
-      />
-      <ObjectivesField
-        label="Expansion opportunities"
-        value={editing ? draft.expansion_opportunities : d.expansion_opportunities}
-        editing={editing}
-        onChange={v => setDraft({ ...draft, expansion_opportunities: v })}
-      />
-      <ObjectivesField
-        label="Evaluation criteria"
-        value={editing ? draft.evaluation_criteria : d.evaluation_criteria}
-        editing={editing}
-        onChange={v => setDraft({ ...draft, evaluation_criteria: v })}
-      />
-
-      {err && <div className="auth-error" style={{ marginTop: 12 }}>{err}</div>}
-
-      {canEdit && (
-        <div className="action-row" style={{ marginTop: 24, display: 'flex', gap: 12 }}>
-          {!editing ? (
-            <button onClick={startEdit} className="btn-primary-link"
-              style={{ border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
-              Edit objectives →
-            </button>
-          ) : (
-            <>
-              <button onClick={saveAsNewVersion} disabled={saving}
-                style={{ padding: '10px 18px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer', fontWeight: 600 }}>
-                {saving ? 'Saving…' : 'Save as new version'}
-              </button>
-              <button onClick={() => setEditing(false)}
-                style={{ padding: '10px 18px', background: 'none', color: 'var(--ink-fade)', border: '1px solid var(--rule-strong)', borderRadius: 3, cursor: 'pointer' }}>
-                Cancel
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ObjectivesField — handles three shapes uniformly:
-//   - undefined / null → editable as nothing (placeholder)
-//   - array of strings → one-per-line textarea (read: bullet list)
-//   - object with arbitrary keys (incl. nested arrays) → one textarea per key,
-//     where each value may itself be string/number, array of strings, or object.
-//   - array of objects → renders as cards in read mode, JSON in edit mode
-//     (less common in practice).
-function ObjectivesField({ label, value, editing, onChange }) {
-  // In read mode, just delegate to RichValue
-  if (!editing) {
-    if (value === null || value === undefined ||
-        (Array.isArray(value) && value.length === 0)) {
-      return null
-    }
-    return (
-      <Block label={label}>
-        <RichValue value={value} />
-      </Block>
-    )
-  }
-
-  // In edit mode, branch by shape
-  // Object → one labeled textarea per key
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return (
-      <Block label={label}>
-        <p style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 12, fontStyle: 'italic' }}>
-          Each section is edited separately below. Lists use one item per line.
-        </p>
-        {Object.entries(value).map(([k, v]) => (
-          <div key={k} style={{ marginBottom: 16 }}>
-            <div style={{
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontSize: 11, fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: '.1em',
-              color: 'var(--ink-fade)', marginBottom: 6,
-            }}>{humanizeKey(k)}</div>
-            {Array.isArray(v) && v.every(x => typeof x === 'string') ? (
-              <textarea
-                className="form-textarea"
-                rows={Math.max(3, v.length + 1)}
-                value={v.join('\n')}
-                onChange={e => onChange({
-                  ...value,
-                  [k]: e.target.value.split('\n').map(l => l.trim()).filter(Boolean),
-                })}
-                placeholder="One item per line"
-              />
-            ) : typeof v === 'string' ? (
-              <textarea
-                className="form-textarea"
-                rows={Math.max(2, Math.ceil(v.length / 80))}
-                value={v}
-                onChange={e => onChange({ ...value, [k]: e.target.value })}
-              />
-            ) : (
-              // Mixed shape — fall back to JSON for this key only
-              <textarea
-                className="form-textarea"
-                rows={6}
-                value={JSON.stringify(v, null, 2)}
-                onChange={e => {
-                  try {
-                    const parsed = JSON.parse(e.target.value)
-                    onChange({ ...value, [k]: parsed })
-                  } catch (_) { /* keep as-is until valid */ }
-                }}
-                style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13 }}
-              />
-            )}
-          </div>
-        ))}
-      </Block>
-    )
-  }
-
-  // Array of strings → one textarea, one per line
-  if (Array.isArray(value) && value.every(x => typeof x === 'string')) {
-    return (
-      <Block label={label}>
-        <textarea
-          className="form-textarea"
-          rows={Math.max(4, value.length + 1)}
-          value={value.join('\n')}
-          onChange={e => onChange(e.target.value.split('\n').map(l => l.trim()).filter(Boolean))}
-          placeholder="One item per line"
-        />
-      </Block>
-    )
-  }
-
-  // Array of objects, or empty/null — JSON editor
-  return (
-    <Block label={label}>
-      <p style={{ fontSize: 13, color: 'var(--ink-fade)', marginBottom: 8, fontStyle: 'italic' }}>
-        Structured data — edit as JSON.
-      </p>
-      <textarea
-        className="form-textarea"
-        rows={10}
-        value={JSON.stringify(value ?? [], null, 2)}
-        onChange={e => {
-          try { onChange(JSON.parse(e.target.value)) } catch (_) {}
-        }}
-        style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13 }}
-      />
     </Block>
   )
 }
