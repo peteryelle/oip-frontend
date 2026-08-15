@@ -19,7 +19,7 @@ import { AuthProvider, useAuth } from './lib/auth'
 import { OipProvider, useOip } from './lib/oip'
 import { validatePassword } from './lib/password'
 import { USER_GUIDE, HELP_ANCHORS } from './lib/help'
-import { generateActionBrief, generatePartnerBrief, hasBriefs, computeCatchUp } from './lib/generateBriefs'
+import { groupProjectsForEntity } from './lib/generateBriefs'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
@@ -1689,7 +1689,6 @@ function MarketReviewPage() {
           oipId={selectedOip?.id}
           keywordTierMap={keywordTierMap}
           onClose={() => setOpenEntity(null)}
-          onSignalClick={setOpenSignal}
         />
       )}
     </>
@@ -2368,13 +2367,14 @@ function tierLabel(t) {
 // ENTITY DRAWER — right-side panel for entity intelligence
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, onSignalClick, keywordTierMap = {} }) {
+function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, keywordTierMap = {} }) {
   const [briefing, setBriefing]       = useState(null)
   const [briefingLoading, setBriefingLoading] = useState(true)
   const [contact, setContact]         = useState(null)
   const [contactLoading, setContactLoading] = useState(true)
   const [eiaFacts, setEiaFacts]       = useState(null)
   const [eiaLoading, setEiaLoading]   = useState(true)
+  const [partnerView, setPartnerView] = useState('internal') // 'internal' | 'partner'
 
   // Score — display-only strong/tier1 counts (no longer feed the score itself,
   // just shown in the header text alongside it) plus a real numeric score taken
@@ -2615,6 +2615,83 @@ with •. No markdown, no word-count padding, no filler bullets to hit a count.`
           </div>
         )
       })
+  }
+
+  // Entity-level Partner Program brief — PDF export. One doc per district,
+  // covering every project at its current stage, matching whichever view
+  // (internal/partner) is showing on screen when downloaded.
+  const escapeHtml = (s) => String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  const handleDownloadEntityBrief = (projects, view) => {
+    const districtName = escapeHtml(entityName)
+    const viewLabel = view === 'internal' ? 'Internal — Tessco' : 'Partner hand-off'
+    const generated = new Date().toLocaleString('en-US', { month:'long', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' })
+
+    const projectsHtml = projects.map(p => {
+      const ladderHtml = p.ladderProgress.map(l =>
+        `<span style="font-size:11px;color:${l.current ? '#1a3a5c' : l.seen ? '#16a34a' : '#999'};font-weight:${l.current ? '700' : '400'}">${l.seen && !l.current ? '&#10003; ' : ''}${escapeHtml(l.badge)}</span>`
+      ).join(' &middot; ')
+
+      const body = view === 'internal' ? `
+<div class="lbl">Do now</div>
+<ul>${p.actionBrief.pmActions.map(a => `<li>${escapeHtml(a)}</li>`).join('')}</ul>
+<p class="body" style="font-style:italic;color:#555">${escapeHtml(p.actionBrief.whyItMovesTheOdds)}</p>` : `
+${p.scope ? `<div class="lbl">Scope</div><p class="body">${escapeHtml(p.scope)}</p>` : ''}
+<div class="lbl">What we need from you</div>
+<p class="body">${escapeHtml(p.partnerBrief.handToPartner)}</p>
+<div class="lbl">Let us know</div>
+<p class="body">${escapeHtml(p.partnerBrief.partnerConfirmsBack)}</p>`
+
+      return `
+<div class="project">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <p style="font-weight:700;font-size:16px;margin:0">${escapeHtml(p.name)}</p>
+      ${p.phaseRef ? `<p style="font-size:12px;color:#777;margin:2px 0 0">${escapeHtml(p.phaseRef)}</p>` : ''}
+    </div>
+    <span class="badge">${escapeHtml(p.currentBadge)}</span>
+  </div>
+  <p style="margin:8px 0">${ladderHtml}</p>
+  ${body}
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid #eee">
+    ${p.sourceUrl ? `<a href="${escapeHtml(p.sourceUrl)}" target="_blank" style="font-size:11px">source</a>` : '<span></span>'}
+    ${p.lastRelevantSignal ? `<span style="font-size:11px;color:#999">last relevant signal: ${new Date(p.lastRelevantSignal).toLocaleDateString()}</span>` : ''}
+  </div>
+</div>`
+    }).join('\n')
+
+    const w = window.open('', '_blank', 'width=920,height=750')
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>WinQuest Partner Brief — ${districtName}</title>
+<style>
+  body{font-family:Georgia,serif;margin:0;padding:48px 64px;color:#1a1a1a;max-width:780px;margin:0 auto}
+  .bar{background:#1a3a5c;color:#fff;padding:10px 16px;margin:-48px -64px 32px;font-family:monospace;font-size:12px;display:flex;justify-content:space-between;align-items:center}
+  .bar button{background:#fff;color:#1a3a5c;border:none;padding:6px 14px;border-radius:4px;font-weight:700;cursor:pointer;font-size:12px}
+  .hdr{border-bottom:3px solid #1a3a5c;padding-bottom:16px;margin-bottom:20px}
+  .logo{font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:#1a3a5c;margin-bottom:6px}
+  .title{font-size:22px;font-weight:700;line-height:1.3;margin-bottom:4px}
+  .meta{font-size:12px;color:#555;font-family:monospace;text-transform:uppercase;letter-spacing:.08em}
+  .lbl{font-family:monospace;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#1a3a5c;margin:12px 0 6px}
+  .badge{display:inline-block;background:#dbeafe;color:#1a3a5c;font-family:monospace;font-size:11px;
+    font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:4px 12px;border-radius:3px;white-space:nowrap}
+  ul{margin:0;padding-left:20px;font-size:14px;line-height:1.7}
+  p.body{font-size:14px;line-height:1.8;margin:0}
+  .project{border:1px solid #e0e0e0;border-radius:6px;padding:16px 20px;margin-bottom:16px}
+  .footer{margin-top:24px;padding-top:14px;border-top:1px solid #e0e0e0;font-size:11px;font-family:monospace;color:#aaa;text-transform:uppercase;letter-spacing:.1em;display:flex;justify-content:space-between}
+  a{color:#1a3a5c}
+  @media print{.bar{display:none}}
+</style></head><body>
+<div class="bar"><span>WinQuest Partner Brief — Save as PDF</span><button onclick="window.print()">⬇ Save PDF</button></div>
+<div class="hdr">
+  <div class="logo">WinQuest OIP &middot; Partner Program Brief &middot; ${escapeHtml(viewLabel)}</div>
+  <div class="title">${districtName}</div>
+  <div class="meta">Generated ${generated}</div>
+</div>
+${projectsHtml}
+<div class="footer"><span>WinQuest OIP</span><span>${escapeHtml(viewLabel)}</span></div>
+</body></html>`)
+    w.document.close()
   }
 
   return (
@@ -2861,6 +2938,126 @@ with •. No markdown, no word-count padding, no filler bullets to hit a count.`
 
         {divider}
 
+        {/* Partner Program — entity-level, one brief per project running
+            concurrently in this district. Only appears when at least one
+            signal has a classified objective (currently tessco-sled-boards
+            only; objective is null for every other tenant, so this section
+            simply doesn't render for them). */}
+        {(() => {
+          const projects = groupProjectsForEntity(signals)
+          if (projects.length === 0) return null
+          const lastActivity = projects.reduce((latest, p) =>
+            (!p.lastRelevantSignal) ? latest : (!latest || p.lastRelevantSignal > latest) ? p.lastRelevantSignal : latest, null)
+          const furthest = projects[0]
+
+          return (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                {lbl('Partner program')}
+                <span style={{ fontSize: 11, color: 'var(--ink-fade)' }}>
+                  generated {new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                </span>
+              </div>
+              {lastActivity && (
+                <p style={{ fontSize: 12, color: 'var(--ink-fade)', marginTop: -6, marginBottom: 12 }}>
+                  last activity: {new Date(lastActivity).toLocaleDateString()} · updates automatically as new signals arrive
+                </p>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                {[['internal', 'Internal — Tessco'], ['partner', 'Partner hand-off']].map(([key, label]) => (
+                  <button key={key} onClick={() => setPartnerView(key)} style={{
+                    flex: 1, padding: '8px 12px',
+                    border: '1px solid ' + (partnerView === key ? 'var(--primary)' : 'var(--rule-strong)'),
+                    borderRadius: 3,
+                    background: partnerView === key ? 'var(--primary-soft)' : 'var(--paper)',
+                    color: partnerView === key ? 'var(--primary-dark)' : 'var(--ink-light)',
+                    cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em',
+                  }}>{label}</button>
+                ))}
+                <button onClick={() => handleDownloadEntityBrief(projects, partnerView)} style={{
+                  padding: '8px 14px', background: 'var(--primary)', color: 'white',
+                  border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                }}>
+                  Download PDF ↓
+                </button>
+              </div>
+
+              {projects.length > 1 && (
+                <p style={{ fontSize: 12, color: 'var(--ink-fade)', marginBottom: 12 }}>
+                  furthest stage reached: <span style={{ color: 'var(--ink)', fontWeight: 500 }}>{furthest.currentBadge.toLowerCase()}</span> — {furthest.name}
+                  {` · ${projects.length - 1} other project${projects.length > 2 ? 's' : ''} still in an open window`}
+                </p>
+              )}
+
+              {projects.map(p => (
+                <div key={p.key} style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</div>
+                      {p.phaseRef && <div style={{ fontSize: 12, color: 'var(--ink-fade)' }}>{p.phaseRef}</div>}
+                    </div>
+                    <span style={{
+                      padding: '3px 10px', borderRadius: 3, fontSize: 11, fontWeight: 700,
+                      fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: '.06em',
+                      background: 'var(--primary-soft)', color: 'var(--primary-dark)', whiteSpace: 'nowrap',
+                    }}>
+                      {p.currentBadge}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                    {p.ladderProgress.map((l, i) => (
+                      <span key={i} style={{
+                        fontSize: 11,
+                        color: l.current ? 'var(--ink)' : l.seen ? '#16a34a' : 'var(--ink-fade)',
+                        fontWeight: l.current ? 600 : 400,
+                      }}>
+                        {l.seen && !l.current ? '✓ ' : ''}{l.badge}
+                      </span>
+                    ))}
+                  </div>
+
+                  {partnerView === 'internal' ? (
+                    <>
+                      <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-fade)', marginTop: 10, marginBottom: 4 }}>Do now</p>
+                      <ul style={{ margin: '0 0 8px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+                        {p.actionBrief.pmActions.map((a, i) => <li key={i}>{a}</li>)}
+                      </ul>
+                      <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0, fontStyle: 'italic', color: 'var(--ink-light)' }}>{p.actionBrief.whyItMovesTheOdds}</p>
+                    </>
+                  ) : (
+                    <>
+                      {p.scope && (
+                        <>
+                          <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-fade)', marginTop: 10, marginBottom: 4 }}>Scope</p>
+                          <p style={{ fontSize: 13, lineHeight: 1.6, margin: '0 0 8px' }}>{p.scope}</p>
+                        </>
+                      )}
+                      <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-fade)', marginTop: 10, marginBottom: 4 }}>What we need from you</p>
+                      <p style={{ fontSize: 13, lineHeight: 1.6, margin: '0 0 8px' }}>{p.partnerBrief.handToPartner}</p>
+                      <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--ink-fade)', marginBottom: 4 }}>Let us know</p>
+                      <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{p.partnerBrief.partnerConfirmsBack}</p>
+                    </>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--rule)' }}>
+                    {p.sourceUrl ? (
+                      <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--primary)' }}>source ↗</a>
+                    ) : <span />}
+                    {p.lastRelevantSignal && (
+                      <span style={{ fontSize: 11, color: 'var(--ink-fade)' }}>last relevant signal: {new Date(p.lastRelevantSignal).toLocaleDateString()}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        })()}
+
+        {divider}
+
         {/* Associated Documents — grouped by parent meeting */}
         {(() => {
           // Group signals by parent title (everything before last |)
@@ -2950,28 +3147,6 @@ with •. No markdown, no word-count padding, no filler bullets to hit a count.`
                           {g.keywords.slice(0,3).map(k => (
                             <span key={k} className="kw-pill" style={{ fontSize:10 }}>{k}</span>
                           ))}
-                          {/* Brief entry point — only for signals with a
-                              classified objective (currently tessco-sled-boards
-                              only; objective is null everywhere else, so this
-                              simply never renders for other tenants). This is
-                              the only click path into the per-signal drawer
-                              from here — the external link above and the doc
-                              drill-downs below both leave the app instead. */}
-                          {(() => {
-                            const fullRow = signals.find(s => s.signal_id === g.signal_id)
-                            if (!fullRow || !hasBriefs(fullRow)) return null
-                            const catchUpStages = computeCatchUp(fullRow.objective, signals, fullRow.signal_id)
-                            return (
-                              <button onClick={() => onSignalClick && onSignalClick({ ...fullRow, catchUpStages })} style={{
-                                fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
-                                textTransform: 'uppercase', letterSpacing: '.06em',
-                                color: 'var(--primary-dark)', background: 'var(--primary-soft)',
-                                border: 'none', borderRadius: 3, padding: '3px 10px', cursor: 'pointer',
-                              }}>
-                                Open brief →
-                              </button>
-                            )
-                          })()}
                         </div>
                       </div>
                     </div>
@@ -3283,87 +3458,6 @@ ${analysisHtml}
 </body></html>`)
     w.document.close()
   }
-
-  // Partner Program brief — PDF export. Built entirely from fields the
-  // objective classifier and generateBriefs() actually produce: badge,
-  // project/district, the raw why_now narrative as context, the Action
-  // Brief's do-now steps, and the Partner Brief's handoff content. No
-  // numeric "fit" score and no separate Scope/AE/Funding/Timeline table —
-  // those aren't real computed fields in the shipped system, only
-  // illustrative content from an earlier design mockup. Reuses the same
-  // new-window + window.print() pattern as handleDownloadBrief above.
-  const escapeHtml = (s) => String(s ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-
-  const handleDownloadPartnerBrief = (actionBrief, partnerBrief, catchUpStages) => {
-    const project  = escapeHtml(actionBrief.project)
-    const district = escapeHtml(actionBrief.district || '')
-    const badge    = escapeHtml(actionBrief.badge)
-    const context  = escapeHtml(actionBrief.context || '')
-    const source   = actionBrief.sourceUrl || ''
-    const deadlineNote = actionBrief.deadlineUnknown
-      ? `<div class="warn">Deadline not confirmed — verify before acting on this stage.</div>` : ''
-    const pmActionsHtml = actionBrief.pmActions.map(a => `<li>${escapeHtml(a)}</li>`).join('')
-    const catchUpHtml = (catchUpStages && catchUpStages.length > 0) ? `
-<div class="lbl">Catch-up — earlier stages for this district</div>
-<table><tbody>
-${catchUpStages.map(c => `  <tr><td>${c.seen ? 'Seen' : 'Not found'}</td><td>
-    <strong>${escapeHtml(c.badge)}</strong><br/>
-    <span style="font-size:12px;color:#555">${escapeHtml(c.whatHappens)}</span>
-    ${c.seen && c.evidenceTitle ? `<br/><span style="font-size:11px;color:#999;font-style:italic">${escapeHtml(c.evidenceTitle)}${c.evidenceDate ? ' &middot; ' + new Date(c.evidenceDate).toLocaleDateString() : ''}</span>` : ''}
-  </td></tr>`).join('\n')}
-</tbody></table>
-<p style="font-size:11px;color:#999;font-style:italic;margin-top:6px">"Not found" means no matching signal was captured for that stage — it may have happened before WinQuest was watching, not that it never happened.</p>
-` : ''
-
-    const w = window.open('', '_blank', 'width=920,height=750')
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>WinQuest Partner Brief — ${project}</title>
-<style>
-  body{font-family:Georgia,serif;margin:0;padding:48px 64px;color:#1a1a1a;max-width:780px;margin:0 auto}
-  .bar{background:#1a3a5c;color:#fff;padding:10px 16px;margin:-48px -64px 32px;font-family:monospace;font-size:12px;display:flex;justify-content:space-between;align-items:center}
-  .bar button{background:#fff;color:#1a3a5c;border:none;padding:6px 14px;border-radius:4px;font-weight:700;cursor:pointer;font-size:12px}
-  .hdr{border-bottom:3px solid #1a3a5c;padding-bottom:16px;margin-bottom:20px}
-  .logo{font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:#1a3a5c;margin-bottom:6px}
-  .title{font-size:22px;font-weight:700;line-height:1.3;margin-bottom:8px}
-  .meta{font-size:12px;color:#555;font-family:monospace;text-transform:uppercase;letter-spacing:.08em}
-  .badge{display:inline-block;background:#dbeafe;color:#1a3a5c;font-family:monospace;font-size:11px;
-    font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:4px 12px;border-radius:3px;margin-top:10px}
-  .warn{display:inline-block;margin-left:10px;font-size:11px;color:#7a4e00;font-style:italic}
-  .lbl{font-family:monospace;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#1a3a5c;margin:24px 0 10px}
-  .box{background:#f0f4f8;border-left:4px solid #1a3a5c;padding:14px 18px;font-size:14px;line-height:1.8;border-radius:0 4px 4px 0}
-  ul{margin:0;padding-left:20px;font-size:14px;line-height:1.7}
-  p.body{font-size:14px;line-height:1.8;margin:0}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  td{padding:8px 0;vertical-align:top;border-bottom:1px solid #f0f0f0}
-  td:first-child{width:80px;font-family:monospace;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#777;padding-right:12px}
-  .footer{margin-top:40px;padding-top:14px;border-top:1px solid #e0e0e0;font-size:11px;font-family:monospace;color:#aaa;text-transform:uppercase;letter-spacing:.1em;display:flex;justify-content:space-between}
-  a{color:#1a3a5c}
-  @media print{.bar{display:none}}
-</style></head><body>
-<div class="bar"><span>WinQuest Partner Brief — Save as PDF</span><button onclick="window.print()">⬇ Save PDF</button></div>
-<div class="hdr">
-  <div class="logo">WinQuest OIP &middot; Partner Program Brief</div>
-  <div class="title">${project}</div>
-  <div class="meta">${district}</div>
-  <span class="badge">${badge}</span>${deadlineNote}
-</div>
-${context ? `<div class="lbl">Context</div><div class="box">${context}</div>` : ''}
-<div class="lbl">Do now — partner manager</div>
-<ul>${pmActionsHtml}</ul>
-<div class="lbl">Why it moves the odds</div>
-<p class="body">${escapeHtml(actionBrief.whyItMovesTheOdds)}</p>
-<div class="lbl">Hand to partner</div>
-<p class="body">${escapeHtml(partnerBrief.handToPartner)}</p>
-<div class="lbl">Partner confirms back</div>
-<p class="body">${escapeHtml(partnerBrief.partnerConfirmsBack)}</p>
-${catchUpHtml}
-${source ? `<div class="lbl">Source</div><p class="body"><a href="${escapeHtml(source)}" target="_blank">${escapeHtml(source)}</a></p>` : ''}
-<div class="footer"><span>WinQuest OIP</span><span>Generated ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}</span></div>
-</body></html>`)
-    w.document.close()
-  }
-
 
   const poc = displayMeta.entity_poc || {}
   const addr = displayMeta.entity_address || {}
@@ -4112,111 +4206,6 @@ ${source ? `<div class="lbl">Source</div><p class="body"><a href="${escapeHtml(s
             )}
           </div>
         )}
-
-        {divider}
-
-        {/* Partner program add-on briefs — only present when objective was
-            classified server-side (classify_objective.py, at score time).
-            Scoped implicitly: objective is null for every OIP outside
-            tessco-sled-boards, so this section simply doesn't render for
-            any other tenant's signals. Pure client-side lookup, no fetch —
-            objective classification already happened, this just formats
-            what's on the row. */}
-        {hasBriefs(os) && (() => {
-          const actionBrief = generateActionBrief(sig, os)
-          const partnerBrief = generatePartnerBrief(sig, os)
-          if (!actionBrief || !partnerBrief) return null
-          return (
-            <div style={{ marginBottom: 16 }}>
-              {lbl('Partner Program')}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-                <span style={{
-                  padding: '4px 12px', borderRadius: 3, fontSize: 12, fontWeight: 700,
-                  fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: '.08em',
-                  background: 'var(--primary-soft)', color: 'var(--primary-dark)',
-                }}>
-                  {actionBrief.badge}
-                </span>
-                {actionBrief.deadlineUnknown && (
-                  <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
-                    deadline not confirmed — verify before acting
-                  </span>
-                )}
-                <button onClick={() => handleDownloadPartnerBrief(actionBrief, partnerBrief, os.catchUpStages)} style={{
-                  marginLeft: 'auto', padding: '6px 14px', background: 'var(--primary)', color: 'white',
-                  border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                }}>
-                  Download brief PDF ↓
-                </button>
-              </div>
-
-              {actionBrief.context && (
-                <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--ink-light)', fontStyle: 'italic',
-                  marginBottom: 14 }}>{actionBrief.context}</p>
-              )}
-
-              <div style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px', marginBottom: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                  color: 'var(--ink-fade)', marginBottom: 8 }}>Do now — partner manager</div>
-                <ul style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
-                  {actionBrief.pmActions.map((a, i) => <li key={i}>{a}</li>)}
-                </ul>
-                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                  color: 'var(--ink-fade)', marginBottom: 6 }}>Why it moves the odds</div>
-                <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{actionBrief.whyItMovesTheOdds}</p>
-              </div>
-
-              <div style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                  color: 'var(--ink-fade)', marginBottom: 6 }}>Hand to partner</div>
-                <p style={{ fontSize: 13, lineHeight: 1.6, margin: '0 0 12px' }}>{partnerBrief.handToPartner}</p>
-                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                  color: 'var(--ink-fade)', marginBottom: 6 }}>Partner confirms back</div>
-                <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{partnerBrief.partnerConfirmsBack}</p>
-              </div>
-
-              {/* Catch-up — only shown when the current stage isn't the
-                  earliest possible one. "Not found" means no matching
-                  signal was captured in WinQuest's data, not that the
-                  stage definitely never happened -- see computeCatchUp. */}
-              {os.catchUpStages && os.catchUpStages.length > 0 && (
-                <div style={{ marginTop: 12, background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                    color: 'var(--ink-fade)', marginBottom: 10 }}>Catch-up — earlier stages for this district</div>
-                  {os.catchUpStages.map((c, i) => (
-                    <div key={i} style={{
-                      display: 'flex', gap: 10, alignItems: 'flex-start',
-                      padding: '8px 0',
-                      borderTop: i > 0 ? '1px solid var(--rule)' : 'none',
-                    }}>
-                      <span style={{
-                        flexShrink: 0, marginTop: 1, fontSize: 10, fontWeight: 700,
-                        fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase',
-                        letterSpacing: '.04em', padding: '2px 8px', borderRadius: 3,
-                        background: c.seen ? 'var(--bg-success, #dcfce7)' : 'var(--bg-warning, #fef3c7)',
-                        color: c.seen ? '#16a34a' : '#b45309',
-                      }}>
-                        {c.seen ? 'seen' : 'not found'}
-                      </span>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{c.badge}</div>
-                        <div style={{ fontSize: 12, color: 'var(--ink-light)', lineHeight: 1.5 }}>{c.whatHappens}</div>
-                        {c.seen && c.evidenceTitle && (
-                          <div style={{ fontSize: 11, color: 'var(--ink-fade)', marginTop: 3, fontStyle: 'italic' }}>
-                            {c.evidenceTitle}{c.evidenceDate && ` · ${new Date(c.evidenceDate).toLocaleDateString()}`}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  <p style={{ fontSize: 11, color: 'var(--ink-fade)', marginTop: 10, marginBottom: 0, fontStyle: 'italic' }}>
-                    "Not found" means no matching signal was captured for that stage — it may have happened before WinQuest was watching, not that it never happened.
-                  </p>
-                </div>
-              )}
-            </div>
-          )
-        })()}
 
         {/* Status */}
         <div style={{ marginBottom: 16 }}>

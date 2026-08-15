@@ -80,6 +80,101 @@ export function computeCatchUp(currentObjective, entitySignals, currentSignalId)
   })
 }
 
+/**
+ * Groups an entity's oip_signals rows into per-project summaries, each
+ * showing its own current stage and ladder progress. This is the core
+ * of the entity-level brief -- a district usually has multiple projects
+ * running concurrently at different stages (confirmed against real
+ * Arlington ISD data: Blanton at Influence, South Davis at Educate,
+ * Anderson Elementary at Sub Outreach, simultaneously), so there is no
+ * single "the district's stage" -- there's one per project.
+ *
+ * Signals with no project_ref (district-wide items like a bond election
+ * or demographer report) are grouped under a "District-wide" bucket,
+ * since those genuinely apply at the board level, not to one building.
+ *
+ * Educate-stage evidence is checked across the WHOLE entity, not just
+ * within a project's own signal bucket -- the board is the same board
+ * for every project (see "the board is the ultimate buyer"), so a
+ * district-wide Educate signal counts as Educate having been reached
+ * for every project in that district. Every later stage (Influence
+ * onward) is checked within the project's own bucket only, since spec
+ * language going to one project's architect says nothing about another
+ * project's spec.
+ *
+ * @param {Array} entitySignals - all oip_signals rows for one entity
+ *   (already loaded by EntityDrawer)
+ * @returns {Array} project summaries, sorted furthest-along first
+ */
+export function groupProjectsForEntity(entitySignals) {
+  const relevant = (entitySignals || []).filter(s => hasBriefs(s))
+  const districtHasEducate = relevant.some(s => s.objective === 'educate')
+  const districtEducateEvidence = relevant.find(s => s.objective === 'educate')
+
+  const groups = new Map()
+  for (const s of relevant) {
+    const key = s.project_ref || '__district_wide__'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(s)
+  }
+
+  const projects = []
+  for (const [key, sigs] of groups.entries()) {
+    let currentIdx = -1
+    let currentSignal = null
+    for (const s of sigs) {
+      const idx = LADDER_ORDER.indexOf(s.objective)
+      if (idx > currentIdx) { currentIdx = idx; currentSignal = s }
+    }
+    if (!currentSignal) continue
+    const currentObjective = currentSignal.objective
+
+    const ladderProgress = LADDER_ORDER.slice(0, currentIdx + 1).map(stage => {
+      let evidence
+      if (stage === 'educate') {
+        evidence = sigs.find(s => s.objective === 'educate') || districtEducateEvidence
+      } else {
+        evidence = sigs.find(s => s.objective === stage)
+      }
+      return {
+        objective: stage,
+        badge: BADGE_LABELS[stage] || stage,
+        whatHappens: WHAT_HAPPENS[stage] || '',
+        seen: !!evidence,
+        current: stage === currentObjective,
+        evidenceTitle: evidence?.signals?.title || null,
+        evidenceDate: evidence?.signals?.meeting_date || null,
+      }
+    })
+
+    const lastRelevantSignal = sigs.reduce((latest, s) => {
+      const d = s.signals?.meeting_date
+      if (!d) return latest
+      return (!latest || d > latest) ? d : latest
+    }, null)
+
+    const actionBrief = generateActionBrief(currentSignal.signals, currentSignal)
+    const partnerBrief = generatePartnerBrief(currentSignal.signals, currentSignal)
+
+    projects.push({
+      key,
+      name: key === '__district_wide__' ? 'District-wide' : key,
+      phaseRef: currentSignal.phase_ref || null,
+      currentObjective,
+      currentBadge: BADGE_LABELS[currentObjective] || currentObjective,
+      ladderProgress,
+      lastRelevantSignal,
+      scope: currentSignal.why_now || null,
+      sourceUrl: currentSignal.signals?.doc_url || null,
+      actionBrief,
+      partnerBrief,
+    })
+  }
+
+  projects.sort((a, b) => LADDER_ORDER.indexOf(b.currentObjective) - LADDER_ORDER.indexOf(a.currentObjective))
+  return projects
+}
+
 const NO_BRIEF_OBJECTIVES = new Set(['suppress', 'unclassified', null, undefined])
 
 const ACTION_TEMPLATES = {
