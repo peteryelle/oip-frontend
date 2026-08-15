@@ -6745,6 +6745,24 @@ function scoreBucketPct(buckets, entityCount) {
   return keys.map(k => Math.round((buckets[k] / entityCount) * 100))
 }
 
+// Explicit America/New_York formatting -- correctly handles EST/EDT
+// across the DST boundary, unlike relying on the browser's implicit
+// local timezone (which would be wrong for anyone viewing this from
+// outside ET, and ambiguous even for Peter since the underlying
+// timestamps are stored UTC-normalized in the database).
+function formatDateET(dateStr) {
+  if (!dateStr) return null
+  return new Date(dateStr).toLocaleDateString('en-US', { timeZone: 'America/New_York' })
+}
+function formatTimeET(dateStr) {
+  if (!dateStr) return null
+  return new Date(dateStr).toLocaleTimeString('en-US', { timeZone: 'America/New_York' }) + ' ET'
+}
+function formatDateTimeET(dateStr) {
+  if (!dateStr) return null
+  return new Date(dateStr).toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' ET'
+}
+
 function ScoreDistributionBar({ oip }) {
   if (oip.scoring_model !== 'profile_fit') {
     return <span style={{ fontSize: 12, color: 'var(--text-muted, #999)' }}>different scoring model</span>
@@ -6828,7 +6846,7 @@ function AdminDashboardPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20 }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>Admin dashboard</h1>
         <span style={{ fontSize: 12, color: 'var(--ink-fade, #999)' }}>
-          generated {new Date(data.generated_at).toLocaleString()}
+          generated {formatDateTimeET(data.generated_at)}
         </span>
       </div>
 
@@ -6859,7 +6877,7 @@ function AdminDashboardPage() {
             <p style={{ fontWeight: 600, margin: '0 0 8px', textTransform: 'uppercase', fontSize: 13 }}>{v.vertical_slug}</p>
             <p style={{ fontSize: 13, color: 'var(--ink-fade, #999)', margin: '0 0 4px' }}>cadence: every {v.cadence_days}d</p>
             <p style={{ fontSize: 13, color: 'var(--ink-fade, #999)', margin: 0 }}>
-              last kickoff: {v.last_kickoff_at ? new Date(v.last_kickoff_at).toLocaleString() : 'never run'}
+              last kickoff: {v.last_kickoff_at ? formatDateTimeET(v.last_kickoff_at) : 'never run'}
             </p>
           </div>
         ))}
@@ -6891,14 +6909,14 @@ function AdminDashboardPage() {
                 const sc = statusColors[job.status] || statusColors.skipped
                 return (
                   <tr key={i} style={{ borderBottom: '0.5px solid var(--rule, #eee)' }}>
-                    <td style={{ padding: '6px' }}>{new Date(ts).toLocaleDateString()}</td>
+                    <td style={{ padding: '6px' }}>{formatDateET(ts)}</td>
                     <td style={{ padding: '6px' }}>{job.job_type} &middot; {job.label}</td>
                     <td style={{ padding: '6px' }}>
                       <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3, background: sc.bg, color: sc.text }}>
                         {job.status}
                       </span>
                     </td>
-                    <td style={{ padding: '6px' }}>{new Date(ts).toLocaleTimeString()}</td>
+                    <td style={{ padding: '6px' }}>{formatTimeET(ts)}</td>
                   </tr>
                 )
               })}
@@ -6955,7 +6973,7 @@ function AdminDashboardPage() {
                   <td style={{ padding: '6px' }}>
                     {oip.latest_score_run?.finished_at ? (
                       <>
-                        {new Date(oip.latest_score_run.finished_at).toLocaleDateString()}
+                        {formatDateET(oip.latest_score_run.finished_at)}
                         {oip.latest_score_run.status !== 'success' && (
                           <span style={{ marginLeft: 6, fontSize: 11, color: '#b45309' }}>({oip.latest_score_run.status})</span>
                         )}
