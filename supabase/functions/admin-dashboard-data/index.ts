@@ -28,18 +28,19 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-// Must be present on EVERY response, not just the OPTIONS preflight --
-// this was the actual bug in the first deploy. Supabase's own
-// troubleshooting docs call this out by name ("Missing
-// Access-Control-Allow-Origin header in response"): the browser will
-// block the frontend from reading a response that's missing this
-// header even when the function executed successfully server-side,
-// which produces exactly the symptom seen here -- auth passed (no
-// "Not authorized"), but the generic error branch fired anyway.
+// Must match supabase-js's actual required header set, not just the
+// ones this function reads directly. supabase-js automatically attaches
+// apikey and x-client-info to every functions.invoke() call -- omitting
+// them here (as the first version did) doesn't cause a server error, it
+// causes the BROWSER to silently refuse to send the real request after
+// a successful-looking preflight. Confirmed via Edge Function logs: every
+// invocation was OPTIONS/200, zero POSTs ever arrived, which is exactly
+// this failure mode -- the preflight itself succeeds, but the browser's
+// own CORS check then blocks the real request client-side.
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin":  "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 Deno.serve(async (req: Request) => {
