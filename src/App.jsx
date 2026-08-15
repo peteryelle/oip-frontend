@@ -3371,7 +3371,7 @@ ${source ? `<div class="lbl">Source</div><p class="body"><a href="${escapeHtml(s
 
   return (
     <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 100,
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 150,
       display: 'flex', justifyContent: 'flex-end',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
