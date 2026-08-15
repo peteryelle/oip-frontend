@@ -6910,7 +6910,24 @@ function AdminDashboardPage() {
                 return (
                   <tr key={i} style={{ borderBottom: '0.5px solid var(--rule, #eee)' }}>
                     <td style={{ padding: '6px' }}>{formatDateET(ts)}</td>
-                    <td style={{ padding: '6px' }}>{job.job_type} &middot; {job.label}</td>
+                    <td style={{ padding: '6px' }}>
+                      {job.job_type}
+                      {job.oip_slug && <> &middot; {job.oip_slug}</>}
+                      {!job.oip_slug && job.region_name && (
+                        <>
+                          {' '}&middot; {job.region_name} (
+                          {job.states.map((s, si) => (
+                            <span key={s.code}>
+                              {si > 0 && ', '}
+                              <span style={{ color: s.active ? '#16a34a' : 'var(--ink-fade, #999)', fontWeight: s.active ? 600 : 400 }}>
+                                {s.code}
+                              </span>
+                            </span>
+                          ))})
+                        </>
+                      )}
+                      {!job.oip_slug && !job.region_name && job.vertical_slug && <> &middot; {job.vertical_slug}</>}
+                    </td>
                     <td style={{ padding: '6px' }}>
                       <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3, background: sc.bg, color: sc.text }}>
                         {job.status}
