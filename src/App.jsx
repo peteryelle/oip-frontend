@@ -6865,6 +6865,48 @@ function AdminDashboardPage() {
         ))}
       </div>
 
+      {/* Job queue — last 24 hours, newest first */}
+      {data.recent_jobs && data.recent_jobs.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <p style={{ fontWeight: 600, margin: '0 0 8px', fontSize: 14 }}>Job queue (24h)</p>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '0.5px solid var(--rule-strong, #ddd)' }}>
+                <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>date</th>
+                <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>job</th>
+                <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>status</th>
+                <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>timestamp</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.recent_jobs.map((job, i) => {
+                const ts = job.finished_at || job.started_at || job.scheduled_for
+                const statusColors = {
+                  success: { bg: 'var(--bg-success, #dcfce7)', text: '#16a34a' },
+                  failed_final: { bg: 'var(--bg-danger, #fee2e2)', text: '#dc2626' },
+                  failed: { bg: 'var(--bg-danger, #fee2e2)', text: '#dc2626' },
+                  running: { bg: 'var(--bg-accent, #dbeafe)', text: '#1d4ed8' },
+                  skipped: { bg: 'var(--paper-alt, #f0f0f0)', text: 'var(--ink-fade, #999)' },
+                }
+                const sc = statusColors[job.status] || statusColors.skipped
+                return (
+                  <tr key={i} style={{ borderBottom: '0.5px solid var(--rule, #eee)' }}>
+                    <td style={{ padding: '6px' }}>{new Date(ts).toLocaleDateString()}</td>
+                    <td style={{ padding: '6px' }}>{job.job_type} &middot; {job.label}</td>
+                    <td style={{ padding: '6px' }}>
+                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3, background: sc.bg, color: sc.text }}>
+                        {job.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: '6px' }}>{new Date(ts).toLocaleTimeString()}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontSize: 13, cursor: 'pointer' }}>
         <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
         Show inactive tenants
