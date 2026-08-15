@@ -6762,6 +6762,21 @@ function formatDateTimeET(dateStr) {
   if (!dateStr) return null
   return new Date(dateStr).toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' ET'
 }
+// Elapsed duration between start and (finish, or "now" while still running).
+function formatElapsed(startedAt, finishedAt, now) {
+  if (!startedAt) return '—'
+  const start = new Date(startedAt)
+  const end = finishedAt ? new Date(finishedAt) : now
+  const totalSec = Math.max(0, Math.floor((end - start) / 1000))
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  const parts = []
+  if (h) parts.push(`${h}h`)
+  if (h || m) parts.push(`${m}m`)
+  parts.push(`${s}s`)
+  return parts.join(' ')
+}
 
 function ScoreDistributionBar({ oip }) {
   if (oip.scoring_model !== 'profile_fit') {
@@ -6794,6 +6809,13 @@ function AdminDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [errorType, setErrorType] = useState(null) // 'forbidden' | 'error' | null
   const [showInactive, setShowInactive] = useState(false)
+  const [now, setNow] = useState(() => new Date())
+
+  // Tick every second so the "elapsed" column updates live for running jobs.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -6893,7 +6915,8 @@ function AdminDashboardPage() {
                 <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>date</th>
                 <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>job</th>
                 <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>status</th>
-                <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>timestamp</th>
+                <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>start</th>
+                <th style={{ textAlign: 'left', padding: '6px', color: 'var(--ink-fade, #999)', fontWeight: 500 }}>elapsed</th>
               </tr>
             </thead>
             <tbody>
@@ -6933,7 +6956,16 @@ function AdminDashboardPage() {
                         {job.status}
                       </span>
                     </td>
-                    <td style={{ padding: '6px' }}>{formatTimeET(ts)}</td>
+                    <td style={{ padding: '6px' }}>{job.started_at ? formatTimeET(job.started_at) : '—'}</td>
+                    <td style={{ padding: '6px' }}>
+                      {formatElapsed(job.started_at, job.finished_at, now)}
+                      {job.status === 'running' && (
+                        <span style={{
+                          display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+                          background: '#1d4ed8', marginLeft: 6, verticalAlign: 'middle',
+                        }} />
+                      )}
+                    </td>
                   </tr>
                 )
               })}
