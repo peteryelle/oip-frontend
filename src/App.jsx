@@ -1689,6 +1689,7 @@ function MarketReviewPage() {
           oipId={selectedOip?.id}
           keywordTierMap={keywordTierMap}
           onClose={() => setOpenEntity(null)}
+          onSignalClick={setOpenSignal}
         />
       )}
     </>
@@ -2367,7 +2368,7 @@ function tierLabel(t) {
 // ENTITY DRAWER — right-side panel for entity intelligence
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, keywordTierMap = {} }) {
+function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, onSignalClick, keywordTierMap = {} }) {
   const [briefing, setBriefing]       = useState(null)
   const [briefingLoading, setBriefingLoading] = useState(true)
   const [contact, setContact]         = useState(null)
@@ -2875,6 +2876,7 @@ with •. No markdown, no word-count padding, no filler bullets to hit a count.`
                 parent,
                 tier: s.signal_tier,
                 date: s.signals?.meeting_date,
+                signal_id: s.signal_id,
                 url: (() => {
                   const raw = s.signals?.doc_url
                   if (!raw) return null
@@ -2948,6 +2950,27 @@ with •. No markdown, no word-count padding, no filler bullets to hit a count.`
                           {g.keywords.slice(0,3).map(k => (
                             <span key={k} className="kw-pill" style={{ fontSize:10 }}>{k}</span>
                           ))}
+                          {/* Brief entry point — only for signals with a
+                              classified objective (currently tessco-sled-boards
+                              only; objective is null everywhere else, so this
+                              simply never renders for other tenants). This is
+                              the only click path into the per-signal drawer
+                              from here — the external link above and the doc
+                              drill-downs below both leave the app instead. */}
+                          {(() => {
+                            const fullRow = signals.find(s => s.signal_id === g.signal_id)
+                            if (!fullRow || !hasBriefs(fullRow)) return null
+                            return (
+                              <button onClick={() => onSignalClick && onSignalClick(fullRow)} style={{
+                                fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                                textTransform: 'uppercase', letterSpacing: '.06em',
+                                color: 'var(--primary-dark)', background: 'var(--primary-soft)',
+                                border: 'none', borderRadius: 3, padding: '3px 10px', cursor: 'pointer',
+                              }}>
+                                Open brief →
+                              </button>
+                            )
+                          })()}
                         </div>
                       </div>
                     </div>
