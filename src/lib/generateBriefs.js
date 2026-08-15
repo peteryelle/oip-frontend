@@ -28,6 +28,58 @@ const BADGE_LABELS = {
   sub_outreach: 'Sub outreach',
 }
 
+// Fixed chronological order of the ladder — used to compute catch-up
+// stages (everything earlier than the current signal's objective).
+// Same order as "The WinQuest Brief: How to Use It" lifecycle ladder.
+const LADDER_ORDER = ['educate', 'influence', 'locked', 'formal_ask', 'support', 'sub_outreach']
+
+const WHAT_HAPPENS = {
+  educate: 'No project/spec exists yet. Build the relationship, plant the Alyssa\u2019s Law/ERRCS narrative before scope is defined.',
+  influence: 'Spec being written. Get product written in directly.',
+  locked: 'Spec excludes you but isn\u2019t public. Expose board/partner to solution performance, push for approved-equal addendum.',
+  formal_ask: 'Advertised but window open. Submit written substitution/equal request through RFI process.',
+  support: 'Addenda closed. No more product influence \u2014 support whichever partner is bidding to win with your gear.',
+  sub_outreach: 'Prime selected, seeking subs \u2014 identify who won and route to the right partner.',
+}
+
+/**
+ * Cross-references the current signal's stage against every OTHER
+ * signal already captured for the same entity, to see whether the
+ * earlier stages in the ladder actually have evidence in WinQuest's
+ * data or were simply never seen (missed by scraping, or genuinely
+ * never surfaced as a captured signal). Returns [] for 'educate' (or
+ * any objective outside LADDER_ORDER) since there's nothing earlier.
+ *
+ * "Not seen" is not "did not happen" -- it only means no matching
+ * signal was captured. That distinction matters and should stay
+ * visible wherever this is rendered.
+ *
+ * @param {string} currentObjective - the signal being viewed's objective
+ * @param {Array} entitySignals - all oip_signals rows for this entity
+ *   (already loaded by EntityDrawer -- this does not fetch anything)
+ * @param {string} currentSignalId - excluded from the "seen" search so
+ *   a signal never counts as evidence of itself
+ */
+export function computeCatchUp(currentObjective, entitySignals, currentSignalId) {
+  const idx = LADDER_ORDER.indexOf(currentObjective)
+  if (idx <= 0) return [] // educate, or unrecognized -- nothing earlier
+  const earlierStages = LADDER_ORDER.slice(0, idx)
+
+  return earlierStages.map(stage => {
+    const evidence = (entitySignals || []).find(s =>
+      s.objective === stage && s.signal_id !== currentSignalId
+    )
+    return {
+      objective: stage,
+      badge: BADGE_LABELS[stage] || stage,
+      whatHappens: WHAT_HAPPENS[stage] || '',
+      seen: !!evidence,
+      evidenceTitle: evidence?.signals?.title || null,
+      evidenceDate: evidence?.signals?.meeting_date || null,
+    }
+  })
+}
+
 const NO_BRIEF_OBJECTIVES = new Set(['suppress', 'unclassified', null, undefined])
 
 const ACTION_TEMPLATES = {

@@ -19,7 +19,7 @@ import { AuthProvider, useAuth } from './lib/auth'
 import { OipProvider, useOip } from './lib/oip'
 import { validatePassword } from './lib/password'
 import { USER_GUIDE, HELP_ANCHORS } from './lib/help'
-import { generateActionBrief, generatePartnerBrief, hasBriefs } from './lib/generateBriefs'
+import { generateActionBrief, generatePartnerBrief, hasBriefs, computeCatchUp } from './lib/generateBriefs'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
@@ -2960,8 +2960,9 @@ with •. No markdown, no word-count padding, no filler bullets to hit a count.`
                           {(() => {
                             const fullRow = signals.find(s => s.signal_id === g.signal_id)
                             if (!fullRow || !hasBriefs(fullRow)) return null
+                            const catchUpStages = computeCatchUp(fullRow.objective, signals, fullRow.signal_id)
                             return (
-                              <button onClick={() => onSignalClick && onSignalClick(fullRow)} style={{
+                              <button onClick={() => onSignalClick && onSignalClick({ ...fullRow, catchUpStages })} style={{
                                 fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
                                 textTransform: 'uppercase', letterSpacing: '.06em',
                                 color: 'var(--primary-dark)', background: 'var(--primary-soft)',
@@ -3032,7 +3033,6 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
   const [contactInfo, setContactInfo] = useState(null)
   const [contactLoading, setContactLoading] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(true)
-  const [briefView, setBriefView] = useState(null) // null | 'action' | 'partner'
   const [primaryEntity, setPrimaryEntity] = useState(null)
   const [docLinks, setDocLinks] = useState([])       // signed URLs for uploaded_documents
   const [docLinksLoading, setDocLinksLoading] = useState(false)
@@ -3198,8 +3198,7 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
   )
 
 
-  const handleDownloadBrief = () => {
-    const analysis  = scores.llm_analysis
+  const handleDownloadBrief = () => {    const analysis  = scores.llm_analysis
     const summary   = aiSummary || scores.llm_reason || ''
     const renderSection = (label, section) => {
       if (!section) return ''
@@ -3281,6 +3280,86 @@ ${analysisHtml}
   <tr><td>Keywords</td><td>${keywords}</td></tr>
 </tbody></table>
 <div class="footer"><span>${briefTenant} &middot; ${briefOip}</span><span>Scored ${scored}</span></div>
+</body></html>`)
+    w.document.close()
+  }
+
+  // Partner Program brief — PDF export. Built entirely from fields the
+  // objective classifier and generateBriefs() actually produce: badge,
+  // project/district, the raw why_now narrative as context, the Action
+  // Brief's do-now steps, and the Partner Brief's handoff content. No
+  // numeric "fit" score and no separate Scope/AE/Funding/Timeline table —
+  // those aren't real computed fields in the shipped system, only
+  // illustrative content from an earlier design mockup. Reuses the same
+  // new-window + window.print() pattern as handleDownloadBrief above.
+  const escapeHtml = (s) => String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  const handleDownloadPartnerBrief = (actionBrief, partnerBrief, catchUpStages) => {
+    const project  = escapeHtml(actionBrief.project)
+    const district = escapeHtml(actionBrief.district || '')
+    const badge    = escapeHtml(actionBrief.badge)
+    const context  = escapeHtml(actionBrief.context || '')
+    const source   = actionBrief.sourceUrl || ''
+    const deadlineNote = actionBrief.deadlineUnknown
+      ? `<div class="warn">Deadline not confirmed — verify before acting on this stage.</div>` : ''
+    const pmActionsHtml = actionBrief.pmActions.map(a => `<li>${escapeHtml(a)}</li>`).join('')
+    const catchUpHtml = (catchUpStages && catchUpStages.length > 0) ? `
+<div class="lbl">Catch-up — earlier stages for this district</div>
+<table><tbody>
+${catchUpStages.map(c => `  <tr><td>${c.seen ? 'Seen' : 'Not found'}</td><td>
+    <strong>${escapeHtml(c.badge)}</strong><br/>
+    <span style="font-size:12px;color:#555">${escapeHtml(c.whatHappens)}</span>
+    ${c.seen && c.evidenceTitle ? `<br/><span style="font-size:11px;color:#999;font-style:italic">${escapeHtml(c.evidenceTitle)}${c.evidenceDate ? ' &middot; ' + new Date(c.evidenceDate).toLocaleDateString() : ''}</span>` : ''}
+  </td></tr>`).join('\n')}
+</tbody></table>
+<p style="font-size:11px;color:#999;font-style:italic;margin-top:6px">"Not found" means no matching signal was captured for that stage — it may have happened before WinQuest was watching, not that it never happened.</p>
+` : ''
+
+    const w = window.open('', '_blank', 'width=920,height=750')
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>WinQuest Partner Brief — ${project}</title>
+<style>
+  body{font-family:Georgia,serif;margin:0;padding:48px 64px;color:#1a1a1a;max-width:780px;margin:0 auto}
+  .bar{background:#1a3a5c;color:#fff;padding:10px 16px;margin:-48px -64px 32px;font-family:monospace;font-size:12px;display:flex;justify-content:space-between;align-items:center}
+  .bar button{background:#fff;color:#1a3a5c;border:none;padding:6px 14px;border-radius:4px;font-weight:700;cursor:pointer;font-size:12px}
+  .hdr{border-bottom:3px solid #1a3a5c;padding-bottom:16px;margin-bottom:20px}
+  .logo{font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:#1a3a5c;margin-bottom:6px}
+  .title{font-size:22px;font-weight:700;line-height:1.3;margin-bottom:8px}
+  .meta{font-size:12px;color:#555;font-family:monospace;text-transform:uppercase;letter-spacing:.08em}
+  .badge{display:inline-block;background:#dbeafe;color:#1a3a5c;font-family:monospace;font-size:11px;
+    font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:4px 12px;border-radius:3px;margin-top:10px}
+  .warn{display:inline-block;margin-left:10px;font-size:11px;color:#7a4e00;font-style:italic}
+  .lbl{font-family:monospace;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#1a3a5c;margin:24px 0 10px}
+  .box{background:#f0f4f8;border-left:4px solid #1a3a5c;padding:14px 18px;font-size:14px;line-height:1.8;border-radius:0 4px 4px 0}
+  ul{margin:0;padding-left:20px;font-size:14px;line-height:1.7}
+  p.body{font-size:14px;line-height:1.8;margin:0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td{padding:8px 0;vertical-align:top;border-bottom:1px solid #f0f0f0}
+  td:first-child{width:80px;font-family:monospace;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#777;padding-right:12px}
+  .footer{margin-top:40px;padding-top:14px;border-top:1px solid #e0e0e0;font-size:11px;font-family:monospace;color:#aaa;text-transform:uppercase;letter-spacing:.1em;display:flex;justify-content:space-between}
+  a{color:#1a3a5c}
+  @media print{.bar{display:none}}
+</style></head><body>
+<div class="bar"><span>WinQuest Partner Brief — Save as PDF</span><button onclick="window.print()">⬇ Save PDF</button></div>
+<div class="hdr">
+  <div class="logo">WinQuest OIP &middot; Partner Program Brief</div>
+  <div class="title">${project}</div>
+  <div class="meta">${district}</div>
+  <span class="badge">${badge}</span>${deadlineNote}
+</div>
+${context ? `<div class="lbl">Context</div><div class="box">${context}</div>` : ''}
+<div class="lbl">Do now — partner manager</div>
+<ul>${pmActionsHtml}</ul>
+<div class="lbl">Why it moves the odds</div>
+<p class="body">${escapeHtml(actionBrief.whyItMovesTheOdds)}</p>
+<div class="lbl">Hand to partner</div>
+<p class="body">${escapeHtml(partnerBrief.handToPartner)}</p>
+<div class="lbl">Partner confirms back</div>
+<p class="body">${escapeHtml(partnerBrief.partnerConfirmsBack)}</p>
+${catchUpHtml}
+${source ? `<div class="lbl">Source</div><p class="body"><a href="${escapeHtml(source)}" target="_blank">${escapeHtml(source)}</a></p>` : ''}
+<div class="footer"><span>WinQuest OIP</span><span>Generated ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}</span></div>
 </body></html>`)
     w.document.close()
   }
@@ -4050,7 +4129,7 @@ ${analysisHtml}
           return (
             <div style={{ marginBottom: 16 }}>
               {lbl('Partner Program')}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
                 <span style={{
                   padding: '4px 12px', borderRadius: 3, fontSize: 12, fontWeight: 700,
                   fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: '.08em',
@@ -4063,43 +4142,76 @@ ${analysisHtml}
                     deadline not confirmed — verify before acting
                   </span>
                 )}
+                <button onClick={() => handleDownloadPartnerBrief(actionBrief, partnerBrief, os.catchUpStages)} style={{
+                  marginLeft: 'auto', padding: '6px 14px', background: 'var(--primary)', color: 'white',
+                  border: 'none', borderRadius: 3, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                }}>
+                  Download brief PDF ↓
+                </button>
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                {[['action', 'Action brief'], ['partner', 'Partner brief']].map(([key, label]) => (
-                  <button key={key} onClick={() => setBriefView(v => v === key ? null : key)} style={{
-                    padding: '8px 16px',
-                    border: '1px solid ' + (briefView === key ? 'var(--primary)' : 'var(--rule-strong)'),
-                    borderRadius: 3,
-                    background: briefView === key ? 'var(--primary-soft)' : 'var(--paper)',
-                    color: briefView === key ? 'var(--primary-dark)' : 'var(--ink-light)',
-                    cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace",
-                    fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em',
-                  }}>{label}</button>
-                ))}
-              </div>
-
-              {briefView === 'action' && (
-                <div style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                    color: 'var(--ink-fade)', marginBottom: 8 }}>Partner manager does</div>
-                  <ul style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
-                    {actionBrief.pmActions.map((a, i) => <li key={i}>{a}</li>)}
-                  </ul>
-                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                    color: 'var(--ink-fade)', marginBottom: 6 }}>Why it moves the odds</div>
-                  <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{actionBrief.whyItMovesTheOdds}</p>
-                </div>
+              {actionBrief.context && (
+                <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--ink-light)', fontStyle: 'italic',
+                  marginBottom: 14 }}>{actionBrief.context}</p>
               )}
 
-              {briefView === 'partner' && (
-                <div style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px' }}>
+              <div style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px', marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                  color: 'var(--ink-fade)', marginBottom: 8 }}>Do now — partner manager</div>
+                <ul style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+                  {actionBrief.pmActions.map((a, i) => <li key={i}>{a}</li>)}
+                </ul>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                  color: 'var(--ink-fade)', marginBottom: 6 }}>Why it moves the odds</div>
+                <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{actionBrief.whyItMovesTheOdds}</p>
+              </div>
+
+              <div style={{ background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                  color: 'var(--ink-fade)', marginBottom: 6 }}>Hand to partner</div>
+                <p style={{ fontSize: 13, lineHeight: 1.6, margin: '0 0 12px' }}>{partnerBrief.handToPartner}</p>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                  color: 'var(--ink-fade)', marginBottom: 6 }}>Partner confirms back</div>
+                <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{partnerBrief.partnerConfirmsBack}</p>
+              </div>
+
+              {/* Catch-up — only shown when the current stage isn't the
+                  earliest possible one. "Not found" means no matching
+                  signal was captured in WinQuest's data, not that the
+                  stage definitely never happened -- see computeCatchUp. */}
+              {os.catchUpStages && os.catchUpStages.length > 0 && (
+                <div style={{ marginTop: 12, background: 'var(--paper-alt, #f8f8f6)', borderRadius: 4, padding: '14px 16px' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                    color: 'var(--ink-fade)', marginBottom: 6 }}>Hand to partner</div>
-                  <p style={{ fontSize: 13, lineHeight: 1.6, margin: '0 0 12px' }}>{partnerBrief.handToPartner}</p>
-                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                    color: 'var(--ink-fade)', marginBottom: 6 }}>Partner confirms back</div>
-                  <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>{partnerBrief.partnerConfirmsBack}</p>
+                    color: 'var(--ink-fade)', marginBottom: 10 }}>Catch-up — earlier stages for this district</div>
+                  {os.catchUpStages.map((c, i) => (
+                    <div key={i} style={{
+                      display: 'flex', gap: 10, alignItems: 'flex-start',
+                      padding: '8px 0',
+                      borderTop: i > 0 ? '1px solid var(--rule)' : 'none',
+                    }}>
+                      <span style={{
+                        flexShrink: 0, marginTop: 1, fontSize: 10, fontWeight: 700,
+                        fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase',
+                        letterSpacing: '.04em', padding: '2px 8px', borderRadius: 3,
+                        background: c.seen ? 'var(--bg-success, #dcfce7)' : 'var(--bg-warning, #fef3c7)',
+                        color: c.seen ? '#16a34a' : '#b45309',
+                      }}>
+                        {c.seen ? 'seen' : 'not found'}
+                      </span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{c.badge}</div>
+                        <div style={{ fontSize: 12, color: 'var(--ink-light)', lineHeight: 1.5 }}>{c.whatHappens}</div>
+                        {c.seen && c.evidenceTitle && (
+                          <div style={{ fontSize: 11, color: 'var(--ink-fade)', marginTop: 3, fontStyle: 'italic' }}>
+                            {c.evidenceTitle}{c.evidenceDate && ` · ${new Date(c.evidenceDate).toLocaleDateString()}`}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <p style={{ fontSize: 11, color: 'var(--ink-fade)', marginTop: 10, marginBottom: 0, fontStyle: 'italic' }}>
+                    "Not found" means no matching signal was captured for that stage — it may have happened before WinQuest was watching, not that it never happened.
+                  </p>
                 </div>
               )}
             </div>
