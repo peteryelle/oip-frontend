@@ -28,15 +28,23 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
+// Must be present on EVERY response, not just the OPTIONS preflight --
+// this was the actual bug in the first deploy. Supabase's own
+// troubleshooting docs call this out by name ("Missing
+// Access-Control-Allow-Origin header in response"): the browser will
+// block the frontend from reading a response that's missing this
+// header even when the function executed successfully server-side,
+// which produces exactly the symptom seen here -- auth passed (no
+// "Not authorized"), but the generic error branch fired anyway.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      headers: {
-        "Access-Control-Allow-Origin":  "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Authorization, Content-Type",
-      },
-    });
+    return new Response(null, { headers: CORS_HEADERS });
   }
 
   try {
@@ -44,7 +52,7 @@ Deno.serve(async (req: Request) => {
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: "missing Authorization header" }),
-        { status: 401, headers: { "Content-Type": "application/json" } },
+        { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
@@ -56,7 +64,7 @@ Deno.serve(async (req: Request) => {
     if (userErr || !userData?.user) {
       return new Response(
         JSON.stringify({ error: "invalid or expired session" }),
-        { status: 401, headers: { "Content-Type": "application/json" } },
+        { status: 401, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
     const callerId = userData.user.id;
@@ -74,7 +82,7 @@ Deno.serve(async (req: Request) => {
       console.error("admin-dashboard-data: platform_admins lookup failed:", adminErr);
       return new Response(
         JSON.stringify({ error: "authorization check failed" }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
+        { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
     if (!adminRow) {
@@ -83,7 +91,7 @@ Deno.serve(async (req: Request) => {
       // isn't for them.
       return new Response(
         JSON.stringify({ error: "not authorized" }),
-        { status: 403, headers: { "Content-Type": "application/json" } },
+        { status: 403, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
 
@@ -94,20 +102,20 @@ Deno.serve(async (req: Request) => {
       console.error("admin-dashboard-data: rollup RPC failed:", rpcErr);
       return new Response(
         JSON.stringify({ error: "failed to load dashboard data" }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
+        { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
 
     return new Response(
       JSON.stringify(rollup),
-      { headers: { "Content-Type": "application/json" } },
+      { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
     );
 
   } catch (err) {
     console.error("admin-dashboard-data error:", err);
     return new Response(
       JSON.stringify({ error: String(err) }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
+      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
     );
   }
 });
