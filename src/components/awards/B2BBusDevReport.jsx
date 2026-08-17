@@ -4,7 +4,7 @@
 // can vary, so every section degrades gracefully when a field is missing.
 // Brief order: SUBJECT (who is analyzed) -> How this surfaced -> Why now ->
 // Entailment -> Solution -> Point of contact -> Performance read -> Cross-sell.
-import React, { useState } from "react";
+import React from "react";
 import { downloadAwardBrief } from "../../lib/awardsBrief";
 import { SignalSubawardsPanel } from "../SignalSubawardsPanel";
 import { generateActionBrief, generatePartnerBrief, hasDDBriefs } from "../../lib/generateDDBriefs";
@@ -38,7 +38,6 @@ function healthBand(h) {
 }
 
 export default function B2BBusDevReport({ award, recompeteDays = 180, subscriberName = null }) {
-  const [partnerView, setPartnerView] = useState('internal');
   const bd = award.busdev || {};
   
   // Detect schema: recompete (govcon_dd_v2) vs old award (USASpending)
@@ -309,54 +308,34 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
 
           return (
             <Section title="Partner program">
-              <p className="wq-rep-muted" style={{ marginTop: "-0.3rem", marginBottom: "0.6rem" }}>
+              <p className="wq-rep-muted" style={{ marginTop: "-0.3rem", marginBottom: "0.8rem" }}>
                 Verified {award.verification.verifiedAt ? new Date(award.verification.verifiedAt).toLocaleDateString() : ""}
                 {" · "}{actionBrief.badge}
               </p>
 
-              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                {[["internal", "Internal — Tessco"], ["partner", "Partner hand-off"]].map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setPartnerView(key)}
-                    disabled={key === "partner" && !partnerBrief}
-                    style={{
-                      flex: 1, padding: "6px 10px",
-                      border: "1px solid " + (partnerView === key ? "#2563eb" : "#d1d5db"),
-                      borderRadius: 3,
-                      background: partnerView === key ? "#eff6ff" : "#fff",
-                      color: partnerView === key ? "#1d4ed8" : "#374151",
-                      cursor: (key === "partner" && !partnerBrief) ? "not-allowed" : "pointer",
-                      opacity: (key === "partner" && !partnerBrief) ? 0.5 : 1,
-                      fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em",
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
+              <div style={{ marginBottom: partnerBrief ? "1rem" : 0, paddingBottom: partnerBrief ? "1rem" : 0,
+                            borderBottom: partnerBrief ? "1px solid #e5e7eb" : "none" }}>
+                <p className="wq-rep-h" style={{ fontSize: "0.8rem", marginBottom: "0.4rem" }}>Internal — Tessco</p>
+                <p className="wq-rep-muted" style={{ marginTop: "0.3rem" }}>Do now:</p>
+                <Bullets items={actionBrief.pmActions} />
+                <p className="wq-rep-p" style={{ fontStyle: "italic", color: "#6b7280", marginTop: "0.4rem" }}>
+                  {actionBrief.whyItMovesTheOdds}
+                </p>
+                {actionBrief.installerName && (
+                  <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
+                    Installer identified: <span className="blurable">{actionBrief.installerName}</span>
+                  </p>
+                )}
               </div>
 
-              {partnerView === "internal" ? (
-                <>
-                  <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>Do now:</p>
-                  <Bullets items={actionBrief.pmActions} />
-                  <p className="wq-rep-p" style={{ fontStyle: "italic", color: "#6b7280", marginTop: "0.4rem" }}>
-                    {actionBrief.whyItMovesTheOdds}
-                  </p>
-                  {actionBrief.installerName && (
-                    <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
-                      Installer identified: <span className="blurable">{actionBrief.installerName}</span>
-                    </p>
-                  )}
-                </>
-              ) : partnerBrief ? (
-                <>
-                  <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>What we need from you:</p>
+              {partnerBrief ? (
+                <div>
+                  <p className="wq-rep-h" style={{ fontSize: "0.8rem", marginBottom: "0.4rem" }}>Partner hand-off</p>
+                  <p className="wq-rep-muted" style={{ marginTop: "0.3rem" }}>What we need from you:</p>
                   <p className="wq-rep-p blurable">{partnerBrief.handToPartner}</p>
                   <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>Let us know:</p>
                   <p className="wq-rep-p">{partnerBrief.partnerConfirmsBack}</p>
-                </>
+                </div>
               ) : (
                 <p className="wq-rep-muted">
                   No partner hand-off for this status — {actionBrief.badge.toLowerCase()}.
