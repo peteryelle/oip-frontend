@@ -7,7 +7,7 @@
 import React from "react";
 import { downloadAwardBrief } from "../../lib/awardsBrief";
 import { SignalSubawardsPanel } from "../SignalSubawardsPanel";
-import { generateActionBrief, generatePartnerBrief, hasDDBriefs } from "../../lib/generateDDBriefs";
+import { generateActionBrief, generatePartnerBrief } from "../../lib/generateDDBriefs";
 
 function Section({ title, children }) {
   if (!children) return null;
@@ -141,6 +141,12 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
       ? Math.round((new Date(bd.pop_end_date) - new Date()) / 86400000)
       : null;
 
+    // Hoisted so both the Executive Summary and the Partner Program
+    // section below can use the same computed briefs without calling
+    // these pure functions twice.
+    const actionBrief = !gated ? generateActionBrief(bd, award.verification, scores.b2b_score) : null;
+    const partnerBrief = !gated ? generatePartnerBrief(bd, award.verification) : null;
+
     return (
       <div className="wq-awards wq-report">
         {isStale && (
@@ -176,6 +182,30 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             {bd.naics_code ? <span className="blurable">NAICS {bd.naics_code}</span> : null}
           </div>
         </div>
+
+        {/* EXECUTIVE SUMMARY — leads with the strongest concrete fact
+            available, bulleted, no repeated prose. Verification finding
+            (when present) leads over everything else — a confirmed,
+            named fact from a live search beats a generic entailment
+            inference every time. */}
+        {!gated && (
+          <Section title="Executive summary">
+            <ul className="wq-rep-bullets">
+              <li><strong>{scores.b2b_score}/100</strong> · {award.disposition || "—"}
+                {bandLabel ? ` · ${scores.deliverable_band}` : ""}</li>
+              {actionBrief && (
+                <li>
+                  <strong>{actionBrief.badge}</strong>
+                  {award.verification?.reasoning ? ` — ${award.verification.reasoning}` : ""}
+                </li>
+              )}
+              {daysOut != null && (
+                <li>{daysOut >= 0 ? `${daysOut} days to period end` : `Period ended ${Math.abs(daysOut)} days ago`}</li>
+              )}
+              {bd.work_summary && <li className="blurable">{bd.work_summary}</li>}
+            </ul>
+          </Section>
+        )}
 
         {/* GATED — the entailment gate rejected this. Lead with why and stop.
             No score, no breakdown: a contract that does not need what you sell
@@ -300,62 +330,42 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             having actually run (award.verification set by
             dd_v2_verify_handler.py). Only appears once a real verification
             check exists; silently absent otherwise, same gating discipline
-            as SLED's Partner Program section (see App.jsx / hasBriefs()). */}
-        {!gated && hasDDBriefs({ verification_status: award.verification?.installer_status }) && (() => {
-          const actionBrief = generateActionBrief(bd, award.verification, scores.b2b_score);
-          const partnerBrief = generatePartnerBrief(bd, award.verification);
-          if (!actionBrief) return null;
-
-          return (
-            <Section title="Partner program">
-              <p className="wq-rep-muted" style={{ marginTop: "-0.3rem", marginBottom: "0.8rem" }}>
-                Verified {award.verification.verifiedAt ? new Date(award.verification.verifiedAt).toLocaleDateString() : ""}
-                {" · "}{actionBrief.badge}
-              </p>
-
-              <div style={{ marginBottom: partnerBrief ? "1rem" : 0, paddingBottom: partnerBrief ? "1rem" : 0,
-                            borderBottom: partnerBrief ? "1px solid #e5e7eb" : "none" }}>
-                <p className="wq-rep-h" style={{ fontSize: "0.8rem", marginBottom: "0.4rem" }}>Internal — Tessco</p>
-                <p className="wq-rep-muted" style={{ marginTop: "0.3rem" }}>Do now:</p>
-                <Bullets items={actionBrief.pmActions} />
-                <p className="wq-rep-p" style={{ fontStyle: "italic", color: "#6b7280", marginTop: "0.4rem" }}>
-                  {actionBrief.whyItMovesTheOdds}
+            as SLED's Partner Program section (see App.jsx / hasBriefs()).
+            Reasoning/finding already shown in Executive Summary above —
+            not repeated here, only the actions and hand-off content. */}
+        {!gated && actionBrief && (
+          <Section title="Partner program">
+            <div style={{ marginBottom: partnerBrief ? "0.8rem" : 0, paddingBottom: partnerBrief ? "0.8rem" : 0,
+                          borderBottom: partnerBrief ? "1px solid #e5e7eb" : "none" }}>
+              <p className="wq-rep-h" style={{ fontSize: "0.8rem", marginBottom: "0.3rem" }}>Internal — Tessco</p>
+              <Bullets items={actionBrief.pmActions} />
+              {actionBrief.installerName && (
+                <p className="wq-rep-muted" style={{ marginTop: "0.3rem" }}>
+                  Installer: <span className="blurable">{actionBrief.installerName}</span>
                 </p>
-                {actionBrief.installerName && (
-                  <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
-                    Installer identified: <span className="blurable">{actionBrief.installerName}</span>
-                  </p>
-                )}
+              )}
+            </div>
+
+            {partnerBrief ? (
+              <div>
+                <p className="wq-rep-h" style={{ fontSize: "0.8rem", marginBottom: "0.3rem" }}>Partner hand-off</p>
+                <ul className="wq-rep-bullets">
+                  <li className="blurable">{partnerBrief.handToPartner}</li>
+                  <li>Confirms back: {partnerBrief.partnerConfirmsBack}</li>
+                </ul>
               </div>
+            ) : (
+              <p className="wq-rep-muted">No partner hand-off for this status.</p>
+            )}
 
-              {partnerBrief ? (
-                <div>
-                  <p className="wq-rep-h" style={{ fontSize: "0.8rem", marginBottom: "0.4rem" }}>Partner hand-off</p>
-                  <p className="wq-rep-muted" style={{ marginTop: "0.3rem" }}>What we need from you:</p>
-                  <p className="wq-rep-p blurable">{partnerBrief.handToPartner}</p>
-                  <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>Let us know:</p>
-                  <p className="wq-rep-p">{partnerBrief.partnerConfirmsBack}</p>
-                </div>
-              ) : (
-                <p className="wq-rep-muted">
-                  No partner hand-off for this status — {actionBrief.badge.toLowerCase()}.
-                </p>
-              )}
-
-              {actionBrief.context && (
-                <p className="wq-rep-muted" style={{ marginTop: "0.6rem", fontSize: "0.8rem" }}>
-                  {actionBrief.context}
-                </p>
-              )}
-              {actionBrief.sourceUrl && (
-                <a href={actionBrief.sourceUrl} target="_blank" rel="noopener noreferrer"
-                   style={{ fontSize: 11, color: "#2563eb" }}>
-                  source &#8599;
-                </a>
-              )}
-            </Section>
-          );
-        })()}
+            {actionBrief.sourceUrl && (
+              <a href={actionBrief.sourceUrl} target="_blank" rel="noopener noreferrer"
+                 style={{ fontSize: 11, color: "#2563eb" }}>
+                source &#8599;
+              </a>
+            )}
+          </Section>
+        )}
 
         {/* CURRENT AWARD */}
         <Section title="Current award">
