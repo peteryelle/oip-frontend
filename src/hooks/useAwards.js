@@ -79,6 +79,8 @@ export function useAwards(oipId, opts = {}) {
         signal_id, status, relevance_status,
         b2b_busdev, b2b_score, disposition, motion, displacement_difficulty,
         incumbent_method, prime_uei, why_now, data_confidence_flag,
+        verification_status, verification_modifier, verified_score,
+        installer_name, evidence_url, verification_reasoning, verified_at,
         signals!inner ( id, title, doc_url, source_meta, source_name, signal_kind )
       `)
       .eq("oip_id", oipId)
@@ -228,6 +230,15 @@ function normalize(r) {
       dataConfidenceFlag: CONFIDENCE_LABEL[ent.confidence] || CONFIDENCE_LABEL[busdev.scope_confidence] || "✗ Low",
       busdev: busdev,
       relevanceStatus: r.relevance_status || "active",
+      verification: r.verification_status ? {
+        installer_status: r.verification_status,
+        installer_name: r.installer_name || null,
+        evidence_url: r.evidence_url || null,
+        reasoning: r.verification_reasoning || null,
+        modifier: r.verification_modifier ?? null,
+        verifiedScore: r.verified_score ?? null,
+        verifiedAt: r.verified_at || null,
+      } : null,
     };
   }
   
@@ -260,6 +271,7 @@ function normalize(r) {
     dataConfidenceFlag: r.data_confidence_flag || "✗ Low",
     busdev: r.b2b_busdev || {},
     relevanceStatus: r.relevance_status || "active",
+    verification: null,
   };
 }
 
