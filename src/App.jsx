@@ -1456,7 +1456,7 @@ function MarketReviewPage() {
   // every bid package would share source_name='Customer Upload' and collapse
   // into a single entity card in EntityBoard's default entity_key grouping.
   const isBidReview = selectedOip?.verticals?.slug === 'bid_review'
-  const [samTab, setSamTab] = useState(isDibOip ? 'dib' : isDerivedOip ? 'busdev' : 'opportunities')
+  const [samTab, setSamTab] = useState(isDibOip ? 'dib' : 'opportunities')
   const drawerProps = openSignal ? {
     os: openSignal,
     keywordTierMap,
@@ -1469,7 +1469,7 @@ function MarketReviewPage() {
   const samBusdev        = isSam ? signals.filter(s => s.signals?.signal_kind === 'award') : []
   const samOpportunities = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && (s.signals?.metadata?.signal_type || 'opportunity') === 'opportunity') : signals
   const samDib           = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && s.signals?.metadata?.signal_type === 'award') : []
-  useEffect(() => { setSamTab(isDibOip ? 'dib' : isDerivedOip ? 'busdev' : 'opportunities') }, [selectedOip?.id])
+  useEffect(() => { setSamTab(isDibOip ? 'dib' : 'opportunities') }, [selectedOip?.id])
   const [naicsFilter, setNaicsFilter] = useState('')
   const activeSignals    = isSam ? (samTab === 'dib' ? samDib : samOpportunities) : signals
 
@@ -1568,7 +1568,6 @@ function MarketReviewPage() {
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--rule)' }}>
           {[
             { key: 'opportunities', label: 'B2G' },
-            { key: 'busdev', label: `B2B${samBusdev.length ? ` (${samBusdev.length})` : ''}` },
             { key: 'dib', label: 'DIB' },
           ].map(tab => (
             <button key={tab.key} onClick={() => setSamTab(tab.key)} style={{
