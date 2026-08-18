@@ -11,6 +11,8 @@ import B2BBusDevReport from "./B2BBusDevReport";
 import DemandGrid from "../demand/DemandGrid";
 import "./awards.css";
 
+const SHOW_DEMAND_MATRIX = false; // matrix hidden per Peter — flip to true to restore
+
 export default function B2BBusDevTab({ oipId, isDerived }) {
   const [disposition, setDisposition] = useState("all");
   const [sort, setSort] = useState("recompete");
@@ -94,7 +96,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
 
   return (
     <div className="wq-awards">
-      {isDerived && (
+      {isDerived && SHOW_DEMAND_MATRIX && (
         <div style={{ marginBottom: 20 }}>
           <DemandGrid oipId={oipId} onCellClick={setPocket} selected={pocket} />
         </div>
