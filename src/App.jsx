@@ -7,6 +7,7 @@ import AuditHistory from './components/audit/AuditHistory'
 import PipelineRadar from './components/radar/PipelineRadar'
 import DerivedDemandSetup from './components/demand/DerivedDemandSetup'
 import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
+import ScoreExplainBadge from './components/signals/ScoreExplainBadge'
 import BidPackageUploadForm from './components/bidreview/BidPackageUploadForm'
 import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
 import { useKeywordTierMap } from './hooks/useKeywordTierMap'
@@ -1349,7 +1350,7 @@ function MarketReviewPage() {
           oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
           match_reason, text_excerpt, status, relevance_status, notes, scored_at, scores, matched_sentinels,
           lifecycle_stage, objective, objective_confidence_note, objective_deadline_unknown,
-          program_ref, project_ref, phase_ref, why_now,
+          program_ref, project_ref, phase_ref, why_now, board_enrichment,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
                               meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key)
         `)
@@ -1733,7 +1734,7 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
       : (s.signals?.source_name || 'Unknown')
     const state = s.signals?.state || ''
     if (!entityMap.has(key)) {
-      entityMap.set(key, { key, name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, kwScore: null, row: s })
+      entityMap.set(key, { key, name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, kwScore: null, compositeScore: null, row: s })
     }
     const e = entityMap.get(key)
     e.total++
@@ -1752,13 +1753,29 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
     // the backend scorer is fixed to vary profile_fit per signal.
     const { score: kwScore } = scoreSignalRow(s, keywordTierMap)
     e.kwScore = e.kwScore === null ? kwScore : Math.max(e.kwScore, kwScore)
+    // Deterministic composite score (Stage+Scale+Corroboration), written by
+    // board_enrich_handler.py into oip_signals.board_enrichment.composite_score
+    // — added 2026-08-22 to replace signal_score/profile_fit-based ranking
+    // entirely, once enrichment has actually run for an entity. Absent
+    // (null) for anything not yet enriched, which is the correct/honest
+    // state, not a bug — falls through to kwScore/fit above for display
+    // until enrichment catches up.
+    const cs = s.board_enrichment?.composite_score
+    if (cs && typeof cs.total === 'number') {
+      if (!e.compositeScore || cs.total > e.compositeScore.total) e.compositeScore = cs
+    }
   }
 
-  // Absolute score = keyword-derived score (see note above on why this leads
-  // over profile_fit for now), falling back to profile_fit only if keyword
-  // scoring somehow produced nothing.
+  // Absolute score = deterministic composite score (Stage+Scale+
+  // Corroboration) when this entity has actually been enriched --
+  // replaces the old kwScore/profile_fit priority entirely, since both
+  // were confirmed-broken or bug-workaround mechanisms (see notes above).
+  // Falls back to kwScore, then profile_fit, only for entities that
+  // haven't been through board_enrich_handler.py yet -- so ranking still
+  // works during the transition period rather than everything going
+  // "Unscored" until every entity is enriched.
   const ranked = Array.from(entityMap.values())
-    .map(e => ({ ...e, score: e.kwScore ?? e.fit }))
+    .map(e => ({ ...e, score: e.compositeScore?.total ?? e.kwScore ?? e.fit }))
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
 
   // Score label + color — absolute thresholds on the LLM fit score
@@ -1815,10 +1832,18 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
                   color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
                   <span>{e.state}</span>
                   <span>·</span>
-                  {/* Score badge — absolute profile_fit */}
+                  {/* Score badge — deterministic composite_score (Stage+Scale+
+                      Corroboration) when enriched, click the number to see
+                      the breakdown; falls back to kwScore/profile_fit label
+                      display (non-clickable) for entities not yet enriched. */}
                   <span style={{ padding: '3px 10px', borderRadius: 3, fontSize: 13,
                     fontWeight: 700, background: bg, color }}>
-                    {e.score === null || e.score === undefined ? label : `${label} · ${e.score}`}
+                    {e.score === null || e.score === undefined
+                      ? label
+                      : e.compositeScore
+                        ? <>{label} · <ScoreExplainBadge compositeScore={e.compositeScore}
+                            badgeStyle={{ fontWeight: 700, color }} /></>
+                        : `${label} · ${e.score}`}
                   </span>
                   {/* Signal summary */}
                   <span>·</span>
