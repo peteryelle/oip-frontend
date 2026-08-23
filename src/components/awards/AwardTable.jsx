@@ -6,6 +6,8 @@
 // the wq- classes already defined in awards.css.
 import React, { useMemo, useState } from "react";
 import { awardTags } from "../../hooks/useAwards";
+import ScoreExplainBadge from "../signals/ScoreExplainBadge";
+import { buildDDv2CompositeScore } from "../../lib/scoreDisplay";
 
 const DISPOSITION_CLASS = {
   Yes: "wq-disp-yes",
@@ -193,11 +195,22 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                     <span className="wq-chip wq-score-na" title="Rejected at the entailment gate">
                       —
                     </span>
-                  ) : (
-                    <span className={`wq-chip ${scoreBand(a.score)}`}>
-                      {a.score ?? "—"}
-                    </span>
-                  )}
+                  ) : (() => {
+                    const isCapitalBuild = a.motion === "capital_build";
+                    const compositeScore = buildDDv2CompositeScore(a.busdev?.scores, isCapitalBuild);
+                    return compositeScore ? (
+                      <ScoreExplainBadge
+                        compositeScore={compositeScore}
+                        badgeStyle={{}}
+                        labelA="Size" labelB="Urgency" labelC="Timing"
+                        className={`wq-chip ${scoreBand(a.score)}`}
+                      />
+                    ) : (
+                      <span className={`wq-chip ${scoreBand(a.score)}`}>
+                        {a.score ?? "—"}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="wq-atable-td">
                   {a.disposition ? (

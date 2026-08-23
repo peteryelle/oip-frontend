@@ -9,6 +9,7 @@ import { downloadAwardBrief } from "../../lib/awardsBrief";
 import { SignalSubawardsPanel } from "../SignalSubawardsPanel";
 import { generateActionBrief, generatePartnerBrief } from "../../lib/generateDDBriefs";
 import ScoreExplainBadge from "../signals/ScoreExplainBadge";
+import { buildDDv2CompositeScore } from "../../lib/scoreDisplay";
 
 function Section({ title, children }) {
   if (!children) return null;
@@ -67,29 +68,10 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
   const primeCap = bd.prime_capability || {};
   const recomSubs = Array.isArray(bd.subcontractors) ? bd.subcontractors : [];
 
-  // Shaped for ScoreExplainBadge -- same formula-free discipline as that
-  // component's own docstring requires: this ONLY reformats numbers
-  // dd_v2_brief_handler.py / dd_v2_capital_brief_handler.py already
-  // computed (scores.size/urgency/timing/b2b_score), never recomputes a
-  // weight or threshold. Labels reflect the real per-motion weights
-  // (isCapitalBuild) already established above.
-  const compositeScore = scores.b2b_score != null ? {
-    total: scores.b2b_score,
-    A_stage: scores.size != null ? Math.round(scores.size) : null,
-    A_label: `Size (${isCapitalBuild ? "25" : "40"}%): ${scores.size != null ? Math.round(scores.size) : "—"}/100`,
-    B_scale: scores.urgency != null ? Math.round(scores.urgency) : null,
-    B_label: `Urgency (${isCapitalBuild ? "25" : "30"}%): ${scores.urgency != null ? Math.round(scores.urgency) : "—"}/100`,
-    C_corroboration: scores.timing != null ? Math.round(scores.timing) : null,
-    C_label: `Timing (${isCapitalBuild ? "50" : "30"}%): ${scores.timing != null ? Math.round(scores.timing) : "—"}/100`,
-    C_facts: [
-      scores.deliverable != null
-        ? `Deliverable (35% of size): ${scores.deliverable}/100${scores.deliverable_band ? ` — ${scores.deliverable_band}` : ""}`
-        : null,
-      scores.value != null
-        ? `Contract value (65% of size): ${scores.value}/100${scores.value_note ? ` — ${scores.value_note}` : ""}`
-        : null,
-    ].filter(Boolean),
-  } : null;
+  // Shaped for ScoreExplainBadge via the shared helper -- see
+  // src/lib/scoreDisplay.js for why this is factored out (avoids the same
+  // display drift ScoreExplainBadge.jsx itself was built to prevent).
+  const compositeScore = buildDDv2CompositeScore(scores, isCapitalBuild);
 
   // Recompete state drives whether the incumbent-health banner shows at top.
   const isRecompeteWindow =
@@ -226,7 +208,16 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
 
         <div className="wq-rep-header">
           <div className="wq-rep-score">
-            <span className="wq-rep-score-num">{gated ? "—" : (scores.b2b_score ?? "—")}</span>
+            {gated || !compositeScore ? (
+              <span className="wq-rep-score-num">{gated ? "—" : (scores.b2b_score ?? "—")}</span>
+            ) : (
+              <ScoreExplainBadge
+                compositeScore={compositeScore}
+                badgeStyle={{}}
+                className="wq-rep-score-num"
+                labelA="Size" labelB="Urgency" labelC="Timing"
+              />
+            )}
             <span className="wq-rep-score-lbl">{gated ? "not scored" : "B2B fit"}</span>
           </div>
           <div className="wq-rep-tags">

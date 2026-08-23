@@ -26,7 +26,7 @@
 import React, { useState } from "react";
 
 export default function ScoreExplainBadge({
-  compositeScore, badgeStyle,
+  compositeScore, badgeStyle, className = "",
   labelA = "Stage", labelB = "Scale", labelC = "Corroboration",
 }) {
   const [open, setOpen] = useState(false);
@@ -37,6 +37,7 @@ export default function ScoreExplainBadge({
   return (
     <span style={{ position: "relative", display: "inline-block" }}>
       <span
+        className={className}
         style={{ ...badgeStyle, cursor: "pointer", textDecoration: "underline dotted" }}
         onClick={(ev) => { ev.stopPropagation(); setOpen((o) => !o); }}
         title="Click to see how this score is computed"
