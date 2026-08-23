@@ -42,6 +42,15 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
   
   // Detect schema: recompete (govcon_dd_v2) vs old award (USASpending)
   const isRecompete = bd.incumbent_name != null;
+
+  // Detect MOTION within the recompete/govcon_dd_v2 schema: capital-build
+  // briefs (dd_v2_capital_brief_handler.py) and recompete briefs
+  // (dd_v2_brief_handler.py) share the same incumbent_name-bearing shape,
+  // so isRecompete alone can't tell them apart -- both are "recompete" by
+  // that test. award.motion is the real signal: capital briefs stamp
+  // motion="capital_build" (see dd_v2_capital_brief_handler.py); recompete
+  // briefs never set motion at all, so null/undefined means recompete.
+  const isCapitalBuild = award.motion === "capital_build";
   
   // OLD SCHEMA (USASpending awards)
   const ent = bd.entailment || {};
@@ -386,19 +395,22 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           </div>
         </Section>
 
-        {/* SCORING — S40 U30 T30, with SIZE decomposed */}
+        {/* SCORING — weights depend on motion: recompete is S40/U30/T30,
+            capital-build is S25/U25/T50 (dd_v2_capital_brief_handler.py).
+            SIZE's own internal decomposition (35% deliverable / 65% value)
+            is motion-agnostic -- both handlers reuse it unchanged. */}
         {!gated && (
           <Section title="Scoring breakdown">
             <div className="wq-rep-grid">
-              <span>Size (40%)</span>
+              <span>Size ({isCapitalBuild ? "25" : "40"}%)</span>
               <span>{scores.size != null ? `${Math.round(scores.size)}/100` : "—"}</span>
               <span style={{ paddingLeft: "1rem" }}>· deliverable (35% of size)</span>
               <span>{scores.deliverable != null ? `${scores.deliverable}/100` : "—"}{bandLabel ? ` — ${scores.deliverable_band}` : ""}</span>
               <span style={{ paddingLeft: "1rem" }}>· contract value (65% of size)</span>
               <span>{scores.value != null ? `${scores.value}/100` : "—"}{scores.value_note ? ` — ${scores.value_note}` : ""}</span>
-              <span>Urgency (30%)</span>
+              <span>Urgency ({isCapitalBuild ? "25" : "30"}%)</span>
               <span>{scores.urgency != null ? `${Math.round(scores.urgency)}/100` : "—"}</span>
-              <span>Timing (30%)</span>
+              <span>Timing ({isCapitalBuild ? "50" : "30"}%)</span>
               <span>{scores.timing != null ? `${Math.round(scores.timing)}/100` : "—"}</span>
               <span><strong>B2B score</strong></span>
               <span><strong>{scores.b2b_score != null ? `${scores.b2b_score}/100` : "—"}</strong></span>
@@ -553,9 +565,14 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
 
         <Section title="How this surfaced">
           <p className="wq-rep-muted">
-            Surfaced from federal recompete intelligence (PIID <span className="blurable">{bd.piid}</span>).
+            {isCapitalBuild
+              ? "Surfaced from federal capital-build intelligence (PIID "
+              : "Surfaced from federal recompete intelligence (PIID "}
+            <span className="blurable">{bd.piid}</span>).
             {gated
               ? " Rejected at the entailment gate — the work does not require what you supply."
+              : isCapitalBuild
+              ? " Passed the entailment gate, then scored on size, urgency and construction-elapsed timing."
               : " Passed the entailment gate, then scored on size, urgency and recompete timing."}
           </p>
         </Section>
