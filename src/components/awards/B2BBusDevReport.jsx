@@ -133,6 +133,40 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
     const siteRead = bd.site_read || null;
     const siteProfile = siteRead?._profile || null;
 
+    // CAPITAL BUILD INTELLIGENCE (dd_v2_capital_enrich_handler.py) —
+    // Tessco-only today. Written under bd.capital_intel; entirely absent
+    // (null) for recompete briefs and for capital-build briefs the
+    // enrich job hasn't reached yet -- both render as "not enriched yet"
+    // rather than an error, since this is additive to the base capital
+    // brief, not a required field.
+    const capitalIntel = isCapitalBuild ? (bd.capital_intel || null) : null;
+
+    const fundingStateLabel = {
+      proceeding: "Proceeding — obligations holding or increasing",
+      at_risk: "At risk — deobligation activity detected",
+      uncertain: "Uncertain — award data inconclusive",
+    };
+
+    const ahjFrameworkLabel = {
+      UFC: "Unified Facilities Criteria (on-base DoD)",
+      IFC_510: "IFC 510 / local AHJ (off-base federal)",
+      ISC_OBO: "ISC / OBO design standards (overseas diplomatic)",
+    };
+
+    const installerStateLabel = {
+      open: "Open — no installer engaged yet",
+      rfp_found: "RFP or solicitation found for this scope",
+      complete: "Installed — scope already complete",
+      partner_won: "A known partner already holds this scope",
+      competitor_won: "A competitor already holds this scope",
+    };
+
+    const sitingLabel = {
+      on_base_domestic: "On-installation (domestic)",
+      off_base_domestic: "Off-installation (domestic)",
+      overseas: "Overseas (State Dept / OBO)",
+    };
+
     const deliveryModeLabel = {
       own_platform: "Runs their own platform for this",
       outsourced: "Buys this capability from third parties",
@@ -279,6 +313,110 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
         {!gated && bd.why_now && (
           <Section title="Why now">
             <p className="wq-rep-p blurable">{bd.why_now}</p>
+          </Section>
+        )}
+
+        {/* CAPITAL BUILD INTELLIGENCE — capital-build motion only.
+            dd_v2_capital_enrich_handler.py writes bd.capital_intel; absent
+            entirely until that job has run against this signal, which is
+            expected (not an error) for freshly-scored capital awards. */}
+        {!gated && isCapitalBuild && (
+          <Section title="Capital build intelligence">
+            {!capitalIntel && (
+              <p className="wq-rep-muted">Not yet enriched.</p>
+            )}
+            {capitalIntel && (
+              <div className="wq-rep-grid">
+                {capitalIntel.siting && (
+                  <>
+                    <span>Siting</span>
+                    <span>{sitingLabel[capitalIntel.siting] || capitalIntel.siting}</span>
+                  </>
+                )}
+
+                {capitalIntel.recency_state === "too_early" && (
+                  <>
+                    <span>Status</span>
+                    <span>Too early — no public construction activity yet</span>
+                  </>
+                )}
+
+                {capitalIntel.funding_status && (
+                  <>
+                    <span>Funding</span>
+                    <span>
+                      <span className={`wq-chip ${
+                        capitalIntel.funding_status.state === "proceeding" ? "wq-disp-strong" :
+                        capitalIntel.funding_status.state === "at_risk" ? "wq-clock-hot" : "wq-chip-soft"
+                      }`}>
+                        {fundingStateLabel[capitalIntel.funding_status.state] || capitalIntel.funding_status.state}
+                      </span>
+                      {capitalIntel.funding_status.basis && (
+                        <span className="blurable" style={{ display: "block", marginTop: "0.25rem" }}>
+                          {capitalIntel.funding_status.basis}
+                        </span>
+                      )}
+                    </span>
+                  </>
+                )}
+
+                {capitalIntel.ahj_requirement && (
+                  <>
+                    <span>Code requirement</span>
+                    <span>
+                      <span className="blurable">
+                        {ahjFrameworkLabel[capitalIntel.ahj_requirement.framework] || capitalIntel.ahj_requirement.framework}
+                        {" — "}
+                        {capitalIntel.ahj_requirement.applies ? "applies" : "does not clearly apply"}
+                      </span>
+                      {capitalIntel.ahj_requirement.rationale && (
+                        <span className="blurable" style={{ display: "block", marginTop: "0.25rem" }}>
+                          {capitalIntel.ahj_requirement.rationale}
+                        </span>
+                      )}
+                      {capitalIntel.ahj_requirement.confidence && (
+                        <span className="wq-rep-confidence" style={{ display: "block", marginTop: "0.25rem" }}>
+                          Confidence: <span className={`badge-${capitalIntel.ahj_requirement.confidence}`}>
+                            {capitalIntel.ahj_requirement.confidence.toUpperCase()}
+                          </span>
+                        </span>
+                      )}
+                    </span>
+                  </>
+                )}
+
+                {(capitalIntel.installer_status || capitalIntel.design_review_status) && (
+                  <>
+                    <span>{capitalIntel.installer_status ? "Installer status" : "Design review status"}</span>
+                    <span>
+                      <span className="wq-chip wq-chip-soft">
+                        {capitalIntel.installer_status
+                          ? (installerStateLabel[capitalIntel.installer_status.state] || capitalIntel.installer_status.state)
+                          : capitalIntel.design_review_status.state}
+                      </span>
+                      {capitalIntel.installer_status?.named_sub && (
+                        <span className="blurable" style={{ display: "block", marginTop: "0.25rem" }}>
+                          Named: {capitalIntel.installer_status.named_sub}
+                        </span>
+                      )}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+
+            {capitalIntel && Array.isArray(capitalIntel.construction_news) && capitalIntel.construction_news.length > 0 && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <p className="wq-rep-muted">Construction activity:</p>
+                <ul className="wq-rep-bullets">
+                  {capitalIntel.construction_news.map((item, i) => (
+                    <li key={i} className="blurable">
+                      {item.date ? `${item.date} — ` : ""}{item.headline}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </Section>
         )}
 
