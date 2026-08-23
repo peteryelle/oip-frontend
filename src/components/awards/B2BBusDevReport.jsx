@@ -309,6 +309,53 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           </Section>
         )}
 
+        {/* INSTALLER VERIFICATION — dd_v2_verify_handler.py's output. Runs
+            after BOTH busdev_dd_v2_brief and busdev_dd_v2_capital_brief
+            (per that handler's own docstring), so this is motion-agnostic:
+            gated only on award.verification existing, not on isCapitalBuild.
+            Reads award.verification directly -- useAwards.js already shapes
+            this from real oip_signals columns (verification_status,
+            installer_name, evidence_url, verification_reasoning,
+            verification_modifier, verified_score); this was previously
+            computed and shaped by the hook but never rendered anywhere. */}
+        {!gated && award.verification && (
+          <Section title="Installer verification">
+            <div className="wq-rep-grid">
+              <span>Status</span>
+              <span>
+                <span className="wq-chip wq-chip-soft">
+                  {installerStateLabel[award.verification.installer_status] || award.verification.installer_status}
+                </span>
+              </span>
+              {award.verification.installer_name && (
+                <>
+                  <span>Named</span>
+                  <span className="blurable">{award.verification.installer_name}</span>
+                </>
+              )}
+              {award.verification.verifiedScore != null && (
+                <>
+                  <span>Verified score</span>
+                  <span>
+                    {award.verification.verifiedScore}/100
+                    {award.verification.modifier != null && award.verification.modifier !== 0
+                      ? ` (${award.verification.modifier > 0 ? "+" : ""}${award.verification.modifier} from base)`
+                      : ""}
+                  </span>
+                </>
+              )}
+            </div>
+            {award.verification.reasoning && (
+              <p className="wq-rep-p blurable" style={{ marginTop: "0.5rem" }}>{award.verification.reasoning}</p>
+            )}
+            {award.verification.evidence_url && (
+              <p className="wq-rep-muted" style={{ marginTop: "0.35rem" }}>
+                <a href={award.verification.evidence_url} target="_blank" rel="noreferrer">Evidence source</a>
+              </p>
+            )}
+          </Section>
+        )}
+
         {/* WHY NOW */}
         {!gated && bd.why_now && (
           <Section title="Why now">
@@ -379,24 +426,6 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
                           Confidence: <span className={`badge-${capitalIntel.ahj_requirement.confidence}`}>
                             {capitalIntel.ahj_requirement.confidence.toUpperCase()}
                           </span>
-                        </span>
-                      )}
-                    </span>
-                  </>
-                )}
-
-                {(capitalIntel.installer_status || capitalIntel.design_review_status) && (
-                  <>
-                    <span>{capitalIntel.installer_status ? "Installer status" : "Design review status"}</span>
-                    <span>
-                      <span className="wq-chip wq-chip-soft">
-                        {capitalIntel.installer_status
-                          ? (installerStateLabel[capitalIntel.installer_status.state] || capitalIntel.installer_status.state)
-                          : capitalIntel.design_review_status.state}
-                      </span>
-                      {capitalIntel.installer_status?.named_sub && (
-                        <span className="blurable" style={{ display: "block", marginTop: "0.25rem" }}>
-                          Named: {capitalIntel.installer_status.named_sub}
                         </span>
                       )}
                     </span>
