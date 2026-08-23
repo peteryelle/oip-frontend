@@ -13,9 +13,22 @@
 // 2026-08-22 (two independent, disagreeing scoring mechanisms); keeping
 // this component formula-free avoids repeating that mistake on the display
 // side.
+//
+// GENERALIZED for DD v2 SAM reuse (Size/Urgency/Timing composite, both
+// recompete and capital-build motions) via labelA/labelB/labelC props.
+// Defaults are the ORIGINAL hardcoded Stage/Scale/Corroboration strings --
+// existing Tessco SLED-boards callers that don't pass these props render
+// byte-for-byte identically to before. Callers passing their own labels
+// (e.g. "Size"/"Urgency"/"Timing") get correct text instead of this
+// component silently mislabeling a different formula as Stage/Scale/
+// Corroboration -- the same class of bug already found and fixed once
+// this session in B2BBusDevReport.jsx's motion-blind scoring labels.
 import React, { useState } from "react";
 
-export default function ScoreExplainBadge({ compositeScore, badgeStyle }) {
+export default function ScoreExplainBadge({
+  compositeScore, badgeStyle,
+  labelA = "Stage", labelB = "Scale", labelC = "Corroboration",
+}) {
   const [open, setOpen] = useState(false);
   if (!compositeScore) return null;
 
@@ -48,7 +61,7 @@ export default function ScoreExplainBadge({ compositeScore, badgeStyle }) {
           <div style={{ display: "flex", gap: 14, marginBottom: 6, flexWrap: "wrap" }}>
             <span>{A_label}</span>
             <span>{B_label}</span>
-            <span>{C_label || `Corroboration: ${C_corroboration}`}</span>
+            <span>{C_label || `${labelC}: ${C_corroboration}`}</span>
           </div>
           {C_facts && C_facts.length > 0 && (
             <ul style={{ margin: "2px 0 0 0", paddingLeft: 16, color: "var(--ink-fade)" }}>
@@ -59,7 +72,7 @@ export default function ScoreExplainBadge({ compositeScore, badgeStyle }) {
             marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--rule)",
             fontSize: 11, color: "var(--ink-fade)",
           }}>
-            {A_stage} (Stage) + {B_scale} (Scale) + {C_corroboration} (Corroboration) = {total}
+            {A_stage} ({labelA}) + {B_scale} ({labelB}) + {C_corroboration} ({labelC}) = {total}
           </div>
           <button
             onClick={(ev) => { ev.stopPropagation(); setOpen(false); }}
