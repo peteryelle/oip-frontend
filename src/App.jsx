@@ -1702,6 +1702,66 @@ function MarketReviewPage() {
 // ENTITY BOARD — ranked entity cards for Market Review
 // ─────────────────────────────────────────────────────────────────────────────
 
+// STAGE+SCALE (A+B) — JS port of the deterministic formula in
+// workers/sled/board_enrich_handler.py's STAGE_POINTS/extract_dollar/
+// scale_points. Added 2026-08-23 so the frontend can show A+B for
+// NOT-YET-ENRICHED entities without waiting for a backend enrichment run
+// (A+B needs no LLM call, no web search -- pure arithmetic over
+// lifecycle_stage/title/match_reason, all already fetched).
+//
+// MAINTENANCE WARNING: this is a SECOND independent implementation of
+// the same formula, in a different language. Any change to STAGE_POINTS,
+// the dollar regex, or the scale tiers in board_enrich_handler.py MUST
+// be mirrored here or the two will silently disagree -- exactly the
+// dual-implementation-drift risk that produced the profile_fit vs
+// scoreSignalRow bug found earlier this session. Kept deliberately
+// simple (no LLM, no async) specifically to make that drift risk low
+// and this port easy to keep in sync by inspection.
+const STAGE_POINTS_JS = {
+  authorization: 40, design: 40,
+  pre_bond: 30, planning: 30,
+  procurement: 25, execution: 25,
+  assessment: 20,
+  oversight: 15,
+}
+const ENRICH_GATE_THRESHOLD_JS = 50 // strict >, not >=
+
+function extractDollarJS(text) {
+  if (!text) return null
+  const pattern = /\$[\d,]+(?:\.\d+)?\s*(?:[-\u2013]\s*\$?[\d,]+(?:\.\d+)?)?\s*([MKB]illion|[MKB])?/gi
+  const multiplier = { M: 1_000_000, K: 1_000, B: 1_000_000_000 }
+  let match, values = []
+  while ((match = pattern.exec(text)) !== null) {
+    const suffix = (match[1] || '').toUpperCase()[0]
+    const nums = match[0].match(/[\d,]+(?:\.\d+)?/g)
+    if (!nums) continue
+    const amount = parseFloat(nums[nums.length - 1].replace(/,/g, ''))
+    if (isNaN(amount)) continue
+    values.push(amount * (multiplier[suffix] || 1))
+  }
+  return values.length ? Math.max(...values) : null
+}
+
+function scalePointsJS(text) {
+  const amount = extractDollarJS(text)
+  if (amount === null) {
+    if (/\bmajor\b|\breplacement\b.*\bcampus\b|\bnew\b.*\bschool\b/i.test(text || '')) return 14
+    return 6
+  }
+  if (amount >= 50_000_000) return 30
+  if (amount >= 10_000_000) return 22
+  if (amount >= 1_000_000) return 14
+  return 6
+}
+
+function stageScaleScoreJS(lifecycleStage, title, matchReason) {
+  const a = STAGE_POINTS_JS[lifecycleStage] || 0
+  const text = `${title || ''} ${matchReason || ''}`
+  const b = scalePointsJS(text)
+  return { a, b, total: a + b }
+}
+
+
 function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false, keywordTierMap = {} }) {
   const [search, setSearch] = useState('')
 
@@ -1734,7 +1794,7 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
       : (s.signals?.source_name || 'Unknown')
     const state = s.signals?.state || ''
     if (!entityMap.has(key)) {
-      entityMap.set(key, { key, name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, kwScore: null, compositeScore: null, row: s })
+      entityMap.set(key, { key, name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, kwScore: null, compositeScore: null, stageScale: null, row: s })
     }
     const e = entityMap.get(key)
     e.total++
@@ -1764,6 +1824,13 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
     if (cs && typeof cs.total === 'number') {
       if (!e.compositeScore || cs.total > e.compositeScore.total) e.compositeScore = cs
     }
+    // A+B (Stage+Scale) — computed client-side for ALL entities, enriched
+    // or not, so not-yet-enriched entities can show a real number instead
+    // of a flat "Not yet enriched" label with no context. Entity-level
+    // "any signal reaching it qualifies" semantics, matching
+    // board_enrich_handler.py's entity gate exactly (2026-08-23).
+    const ss = stageScaleScoreJS(s.lifecycle_stage, s.signals?.title, s.match_reason)
+    if (!e.stageScale || ss.total > e.stageScale.total) e.stageScale = ss
   }
 
   // Absolute score = deterministic composite score (Stage+Scale+
@@ -1775,7 +1842,7 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
   // works during the transition period rather than everything going
   // "Unscored" until every entity is enriched.
   const ranked = Array.from(entityMap.values())
-    .map(e => ({ ...e, score: e.compositeScore?.total ?? e.kwScore ?? e.fit }))
+    .map(e => ({ ...e, score: e.compositeScore?.total ?? e.stageScale?.total ?? e.kwScore ?? e.fit }))
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
 
   // Score label + color — absolute thresholds on the LLM fit score
@@ -1790,6 +1857,106 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
   const filtered = ranked.filter(e =>
     !search || e.name.toLowerCase().includes(search.toLowerCase())
   )
+
+  // SPLIT enriched vs not-yet-enriched (2026-08-23) -- these were
+  // previously interleaved in one ranked list, sorted by two INCOMPATIBLE
+  // numbers side by side: the real deterministic composite_score
+  // (Stage+Scale+Corroboration) for enriched entities, and the old
+  // kwScore/profile_fit heuristic for everything else, both rendered with
+  // the SAME colorful STRONG/PRIORITY badge styling. That made an
+  // un-enriched entity with a genuinely weak real score (e.g. A+B=31,
+  // nowhere near the 50 enrichment gate) display as "STRONG · 66" right
+  // next to a real "90" -- implying false equivalence and, confirmed via
+  // direct user feedback, reading as the product being broken rather
+  // than as two different measurements. Split into two sections instead:
+  // real scores first (clickable, explained), un-enriched entities below
+  // in a visually muted section that makes no numeric claim at all.
+  const filteredEnriched = filtered.filter(e => e.compositeScore)
+  const filteredUnenriched = filtered.filter(e => !e.compositeScore)
+
+  const renderCard = (e, muted) => {
+    const { label, color, bg } = scoreLabel(e.score)
+    return (
+      <div key={e.key} style={{
+        background: 'var(--paper)',
+        border: '2px solid var(--rule)',
+        borderRadius: 4,
+        padding: '20px 24px',
+        marginBottom: 10,
+        cursor: 'pointer',
+        opacity: muted ? 0.75 : 1,
+      }}
+        onClick={() => isDerived
+          ? (onSignalClick && onSignalClick(e.row))
+          : (onEntityClick && onEntityClick(e.key, e.name))}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Meta row */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6,
+              fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
+              color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
+              <span>{e.state}</span>
+              <span>·</span>
+              {muted ? (
+                /* Not-yet-enriched: shows the REAL A+B (Stage+Scale) number
+                   -- computed client-side, no LLM/search needed -- instead
+                   of a flat unexplained label. Still no STRONG/PRIORITY
+                   color scheme (that would imply parity with the full
+                   composite_score badge, which also includes
+                   Corroboration). Explicitly states whether it clears the
+                   50-point enrichment gate, per direct request 2026-08-23:
+                   "show A+B score, so if less than 50, no enrich." */
+                <span style={{ padding: '3px 10px', borderRadius: 3, fontSize: 13,
+                  fontWeight: 700, background: '#f3f4f6', color: '#6b7280' }}
+                  title={e.stageScale
+                    ? `Stage ${e.stageScale.a} + Scale ${e.stageScale.b} = ${e.stageScale.total}`
+                    : undefined}>
+                  {e.stageScale
+                    ? `A+B: ${e.stageScale.total}${e.stageScale.total > ENRICH_GATE_THRESHOLD_JS
+                        ? ' (qualifies next run)' : ' (below 50 — no enrich)'}`
+                    : 'Not yet enriched'}
+                </span>
+              ) : (
+                /* Real composite_score — clickable, explained. */
+                <span style={{ padding: '3px 10px', borderRadius: 3, fontSize: 13,
+                  fontWeight: 700, background: bg, color }}>
+                  <ScoreExplainBadge compositeScore={e.compositeScore}
+                    badgeStyle={{ fontWeight: 700, color }} />
+                </span>
+              )}
+              {/* Signal summary */}
+              <span>·</span>
+              <span>
+                {e.strong > 0 && `${e.strong} Strong`}
+                {e.strong > 0 && (e.tier1 > 0 || e.tier2 > 0) && ' · '}
+                {e.tier1 > 0 && `${e.tier1} Tier 1`}
+                {e.tier1 > 0 && e.tier2 > 0 && ' · '}
+                {e.tier2 > 0 && `${e.tier2} Tier 2`}
+              </span>
+            </div>
+            {/* Entity name */}
+            <div style={{ fontFamily: "'Spectral', serif", fontSize: 22, fontWeight: 600,
+              color: 'var(--ink)', lineHeight: 1.3, marginBottom: 6 }}>
+              {e.name}
+            </div>
+            {/* Teaser */}
+            {e.topReason && (
+              <div style={{ fontSize: 15, color: 'var(--ink-light)', lineHeight: 1.6,
+                fontStyle: 'italic', maxWidth: 680 }}>
+                {e.topReason}
+              </div>
+            )}
+          </div>
+          {/* CTA */}
+          <div style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
+            color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap', paddingTop: 4 }}>
+            View Briefing →
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -1809,74 +1976,20 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
         {filtered.length} {isDerived ? 'opportunities' : 'entities'} · {signals.length} signals
       </div>
 
-      {filtered.map((e, i) => {
-        const { label, color, bg } = scoreLabel(e.score)
-        return (
-          <div key={e.key} style={{
-            background: 'var(--paper)',
-            border: '2px solid var(--rule)',
-            borderRadius: 4,
-            padding: '20px 24px',
-            marginBottom: 10,
-            cursor: 'pointer',
-          }}
-            onClick={() => isDerived
-              ? (onSignalClick && onSignalClick(e.row))
-              : (onEntityClick && onEntityClick(e.key, e.name))}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {/* Meta row */}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6,
-                  fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
-                  color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
-                  <span>{e.state}</span>
-                  <span>·</span>
-                  {/* Score badge — deterministic composite_score (Stage+Scale+
-                      Corroboration) when enriched, click the number to see
-                      the breakdown; falls back to kwScore/profile_fit label
-                      display (non-clickable) for entities not yet enriched. */}
-                  <span style={{ padding: '3px 10px', borderRadius: 3, fontSize: 13,
-                    fontWeight: 700, background: bg, color }}>
-                    {e.score === null || e.score === undefined
-                      ? label
-                      : e.compositeScore
-                        ? <>{label} · <ScoreExplainBadge compositeScore={e.compositeScore}
-                            badgeStyle={{ fontWeight: 700, color }} /></>
-                        : `${label} · ${e.score}`}
-                  </span>
-                  {/* Signal summary */}
-                  <span>·</span>
-                  <span>
-                    {e.strong > 0 && `${e.strong} Strong`}
-                    {e.strong > 0 && (e.tier1 > 0 || e.tier2 > 0) && ' · '}
-                    {e.tier1 > 0 && `${e.tier1} Tier 1`}
-                    {e.tier1 > 0 && e.tier2 > 0 && ' · '}
-                    {e.tier2 > 0 && `${e.tier2} Tier 2`}
-                  </span>
-                </div>
-                {/* Entity name */}
-                <div style={{ fontFamily: "'Spectral', serif", fontSize: 22, fontWeight: 600,
-                  color: 'var(--ink)', lineHeight: 1.3, marginBottom: 6 }}>
-                  {e.name}
-                </div>
-                {/* Teaser */}
-                {e.topReason && (
-                  <div style={{ fontSize: 15, color: 'var(--ink-light)', lineHeight: 1.6,
-                    fontStyle: 'italic', maxWidth: 680 }}>
-                    {e.topReason}
-                  </div>
-                )}
-              </div>
-              {/* CTA */}
-              <div style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
-                color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap', paddingTop: 4 }}>
-                View Briefing →
-              </div>
+      {filteredEnriched.map(e => renderCard(e, false))}
+
+      {filteredUnenriched.length > 0 && (
+        <>
+          {filteredEnriched.length > 0 && (
+            <div style={{ margin: '20px 0 10px', paddingTop: 16, borderTop: '1px solid var(--rule)',
+              fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+              textTransform: 'uppercase', letterSpacing: '.1em' }}>
+              Not yet enriched ({filteredUnenriched.length})
             </div>
-          </div>
-        )
-      })}
+          )}
+          {filteredUnenriched.map(e => renderCard(e, true))}
+        </>
+      )}
     </div>
   )
 }
