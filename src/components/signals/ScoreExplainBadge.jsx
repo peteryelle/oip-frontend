@@ -19,7 +19,7 @@ export default function ScoreExplainBadge({ compositeScore, badgeStyle }) {
   const [open, setOpen] = useState(false);
   if (!compositeScore) return null;
 
-  const { total, A_stage, A_label, B_scale, B_label, C_corroboration, C_facts } = compositeScore;
+  const { total, A_stage, A_label, B_scale, B_label, C_corroboration, C_label, C_facts } = compositeScore;
 
   return (
     <span style={{ position: "relative", display: "inline-block" }}>
@@ -36,32 +36,34 @@ export default function ScoreExplainBadge({ compositeScore, badgeStyle }) {
           style={{
             position: "absolute", top: "100%", left: 0, marginTop: 6, zIndex: 50,
             background: "var(--paper)", border: "2px solid var(--rule)", borderRadius: 4,
-            padding: "12px 14px", width: 320, fontSize: 13, lineHeight: 1.5,
+            padding: "10px 16px", width: 460, fontSize: 13, lineHeight: 1.4,
             fontFamily: "'IBM Plex Mono', monospace", boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>
             Score: {total} / 100
           </div>
-          <div style={{ marginBottom: 4 }}>{A_label}</div>
-          <div style={{ marginBottom: 4 }}>{B_label}</div>
-          <div style={{ marginBottom: 4 }}>
-            Corroboration: {C_corroboration > 0 ? `+${C_corroboration}` : "+0"}
+          {/* Three components in one row, not three stacked lines --
+              widening the popup buys back the vertical space this saves. */}
+          <div style={{ display: "flex", gap: 14, marginBottom: 6, flexWrap: "wrap" }}>
+            <span>{A_label}</span>
+            <span>{B_label}</span>
+            <span>{C_label || `Corroboration: ${C_corroboration}`}</span>
           </div>
           {C_facts && C_facts.length > 0 && (
-            <ul style={{ margin: "4px 0 0 0", paddingLeft: 18, color: "var(--ink-fade)" }}>
+            <ul style={{ margin: "2px 0 0 0", paddingLeft: 16, color: "var(--ink-fade)" }}>
               {C_facts.map((f, i) => <li key={i}>{f}</li>)}
             </ul>
           )}
           <div style={{
-            marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--rule)",
+            marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--rule)",
             fontSize: 11, color: "var(--ink-fade)",
           }}>
             {A_stage} (Stage) + {B_scale} (Scale) + {C_corroboration} (Corroboration) = {total}
           </div>
           <button
             onClick={(ev) => { ev.stopPropagation(); setOpen(false); }}
-            style={{ marginTop: 8, fontSize: 11, padding: "2px 8px" }}
+            style={{ marginTop: 6, fontSize: 11, padding: "2px 8px" }}
           >
             Close
           </button>
