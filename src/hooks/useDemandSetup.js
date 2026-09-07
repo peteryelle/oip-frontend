@@ -67,8 +67,20 @@ export function useDemandSetup(oipId) {
     [oipId]
   );
 
-  // Accept derived scope: copy the suggestion into the live pull_config, unlock,
-  // stamp source/date, then enqueue a populate sweep so the grid reshapes.
+  // Accept derived scope: copy the suggestion into the live pull_config,
+  // unlock, stamp source/date.
+  //
+  // Used to also enqueue a dd_sweep 'populate' job here ("so the grid
+  // reshapes") -- removed 2026-09. dd_sweep is parked backend-side (see
+  // workers/sam/derived_demand.py's run()): its only output table,
+  // derived_demand_cells, is confirmed unread by the live pipeline (see
+  // this file's sibling, useDemand.js, which documents that the Demand
+  // Grid now builds live from oip_signals.b2b_busdev instead). The enqueue
+  // was a pure no-op cost (a real GovCon/USASpending sweep, now short-
+  // circuited to an immediate skip) with no effect on what the grid shows.
+  // dd_v2_collect/dd_v2_brief -- the jobs that DO produce what the grid
+  // reads -- have no trigger relationship to promote() at all; they're
+  // queued separately per B2BBusDevTab.jsx's own guidance.
   const promote = useCallback(
     async (verticalId) => {
       const sug = pullConfig.busdev_suggestion;
@@ -86,14 +98,8 @@ export function useDemandSetup(oipId) {
         .update({ pull_config: newPC })
         .eq("id", sentinelId);
       if (upErr) return upErr;
-      const { error: jobErr } = await supabase.from("worker_jobs").insert({
-        job_type: "dd_sweep",
-        oip_id: oipId,
-        vertical_id: verticalId,
-        payload: { mode: "populate", oip_id: oipId },
-      });
       await load();
-      return jobErr || null;
+      return null;
     },
     [pullConfig, sentinelId, oipId, load]
   );
