@@ -2002,8 +2002,20 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SamOpportunityTable({ signals, onRowClick }) {
-  const [sortKey, setSortKey] = useState('scores.llm_relevance')
+  // Default view: future-due opportunities first (respond-now candidates),
+  // past-due/no-date ones after (still useful as sub-sourcing leads per
+  // 2026-09-09 design discussion, but shouldn't outrank live opportunities
+  // just because their pre-discount score happens to be higher). Descending
+  // score within each group. Clicking a column header still does a plain
+  // single-key sort, overriding this grouped default.
+  const [sortKey, setSortKey] = useState('default')
   const [sortDir, setSortDir] = useState('desc')
+
+  const isPastDueRow = (s) => {
+    const d = s.signals?.metadata?.response_deadline
+    if (!d) return true // no date on record — same bucket as expired, not "future"
+    return new Date(d) < new Date()
+  }
 
   const getVal = (s, key) => {
     // Deadline-recency-adjusted score (see workers/sam/score_handler.py
@@ -2028,6 +2040,12 @@ function SamOpportunityTable({ signals, onRowClick }) {
   }
 
   const sorted = [...signals].sort((a, b) => {
+    if (sortKey === 'default') {
+      const aBucket = isPastDueRow(a) ? 1 : 0
+      const bBucket = isPastDueRow(b) ? 1 : 0
+      if (aBucket !== bBucket) return aBucket - bBucket   // future (0) before past-due (1)
+      return getVal(b, 'scores.llm_relevance') - getVal(a, 'scores.llm_relevance') // desc within group
+    }
     const av = getVal(a, sortKey)
     const bv = getVal(b, sortKey)
     if (av < bv) return sortDir === 'asc' ? -1 : 1
