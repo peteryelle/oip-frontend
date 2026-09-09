@@ -2006,7 +2006,10 @@ function SamOpportunityTable({ signals, onRowClick }) {
   const [sortDir, setSortDir] = useState('desc')
 
   const getVal = (s, key) => {
-    if (key === 'scores.llm_relevance') return s.scores?.llm_relevance ?? s.scores?.technical_fit ?? -1
+    // Deadline-recency-adjusted score (see workers/sam/score_handler.py
+    // _deadline_recency_multiplier). Falls back to raw LLM/ICP score for
+    // rows out of scope for the discount or scored before this field existed.
+    if (key === 'scores.llm_relevance') return s.signal_value_adjusted ?? (s.scores?.llm_relevance ?? s.scores?.technical_fit ?? -1)
     if (key === 'scores.technical_fit') return s.scores?.technical_fit ?? -1
     if (key === 'scores.bid_risk') {
       const order = { Low: 0, Medium: 1, High: 2, 'No Bid': 3 }
@@ -2068,6 +2071,9 @@ function SamOpportunityTable({ signals, onRowClick }) {
             const scores = s.scores || {}
             const dept   = (meta.department_full || meta.department_name || '').split('.')[0]
             const isUpdated = meta.status_changed
+            const isPastDue = !!meta.response_deadline && new Date(meta.response_deadline) < new Date()
+            const displayScore = s.signal_value_adjusted ?? (scores.llm_relevance ?? scores.technical_fit)
+            const isDiscounted = s.deadline_recency_multiplier != null && s.deadline_recency_multiplier < 1
 
             return (
               <tr key={s.signal_id}
@@ -2101,14 +2107,23 @@ function SamOpportunityTable({ signals, onRowClick }) {
                   <NoticeTypePill type={meta.notice_type} />
                 </td>
                 <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace",
-                  fontSize: 12, whiteSpace: 'nowrap', color: scores.days_to_deadline < 30 ? '#c62828' : 'var(--ink)' }}>
+                  fontSize: 12, whiteSpace: 'nowrap',
+                  color: isPastDue ? '#c62828' : (scores.days_to_deadline < 30 ? '#c62828' : 'var(--ink)'),
+                  fontWeight: isPastDue ? 600 : 400 }}>
                   {meta.response_deadline
-                    ? new Date(meta.response_deadline).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
-                    : '—'}
+                    ? (isPastDue ? 'Past due ' : '') + new Date(meta.response_deadline).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
+                    : (s.deadline_recency_note || '—')}
                 </td>
 
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
-                  <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                    <ScoreBadge score={displayScore} />
+                    {isDiscounted && (
+                      <span style={{ fontSize: 9, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                        was {scores.llm_relevance ?? scores.technical_fit}
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td style={{ padding: '12px 8px' }}>
                   <RiskBadge risk={scores.bid_risk} />
