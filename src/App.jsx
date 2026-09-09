@@ -1347,7 +1347,9 @@ function MarketReviewPage() {
       let q = supabase
         .from('oip_signals')
         .select(`
-          oip_id, signal_id, signal_tier, signal_value, matched_keywords, matched_groups,
+          oip_id, signal_id, signal_tier, signal_value, signal_value_adjusted,
+          deadline_recency_multiplier, deadline_recency_note,
+          matched_keywords, matched_groups,
           match_reason, text_excerpt, status, relevance_status, notes, scored_at, scores, matched_sentinels,
           lifecycle_stage, objective, objective_confidence_note, objective_deadline_unknown,
           program_ref, project_ref, phase_ref, why_now, board_enrichment,
@@ -2429,6 +2431,15 @@ function SignalCard({ os, onClick }) {
   const isNercCard   = sig.source === 'nerc_ea'
   const isGrantsCard = sig.source === 'grants.gov' || sig.source === 'grants'
   const tierClass = os.signal_tier === 'tier1_strong' ? 'tier-strong' : os.signal_tier === 'tier1' ? 'tier-1' : 'tier-2'
+  // Deadline-recency discount (SAM Presolicitation/Solicitation only, see
+  // workers/sam/score_handler.py _deadline_recency_multiplier). Past its
+  // response deadline doesn't mean worthless — it's still useful for
+  // identifying a likely awardee to sub under — but it must not read as a
+  // fresh "respond now" opportunity. signal_value_adjusted falls back to
+  // signal_value for anything out of scope for the discount (awards, etc.)
+  // or scored before this field existed.
+  const isPastDue = isSam && !!meta.response_deadline && new Date(meta.response_deadline) < new Date()
+  const displayScore = os.signal_value_adjusted ?? (scores.llm_relevance ?? scores.technical_fit)
 
   return (
     <div className="signal-card" onClick={onClick} style={{ cursor: 'pointer' }}>
@@ -2441,7 +2452,14 @@ function SignalCard({ os, onClick }) {
               <>
                 <span>{meta.notice_type || 'SAM.gov'}</span>
                 {meta.department_name && <><span>·</span><span>{meta.department_name}</span></>}
-                {meta.response_deadline && <><span>·</span><span>Due {new Date(meta.response_deadline).toLocaleDateString()}</span></>}
+                {meta.response_deadline && (
+                  <>
+                    <span>·</span>
+                    <span style={isPastDue ? { color: 'var(--danger, #b3261e)', fontWeight: 600 } : undefined}>
+                      {isPastDue ? 'Past due ' : 'Due '}{new Date(meta.response_deadline).toLocaleDateString()}
+                    </span>
+                  </>
+                )}
               </>
             ) : isOe417Card ? (
               <>
@@ -2479,7 +2497,7 @@ function SignalCard({ os, onClick }) {
           </div>
 )}
           <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {isSam && (scores.llm_relevance ?? scores.technical_fit) != null && <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />}
+            {isSam && displayScore != null && <ScoreBadge score={displayScore} />}
             {isSam && scores.bid_risk && <RiskBadge risk={scores.bid_risk} />}
             {isSam && scores.recommendation && (
               <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -3341,6 +3359,13 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
   const isPuc    = sig.source === 'puc'
   const isNycAward = sig.source === 'nyc_contracts' || meta.award_source === 'nyc_contracts'
   const isDocUpload = meta.signal_type === 'document_upload'
+  // Deadline-recency discount — see SignalCard for the same computation and
+  // workers/sam/score_handler.py for where it's set. displayFitScore falls
+  // back to the raw LLM/ICP score for anything the discount doesn't apply to
+  // (awards, non-SAM signals, or rows scored before this field existed).
+  const isPastDue = isSam && !!meta.response_deadline && new Date(meta.response_deadline) < new Date()
+  const displayFitScore = os.signal_value_adjusted ?? (scores.llm_relevance ?? scores.technical_fit)
+  const isDiscounted = os.deadline_recency_multiplier != null && os.deadline_recency_multiplier < 1
   const [aiSummary, setAiSummary] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [enriched, setEnriched] = useState(null)  // on-demand entity data
@@ -4008,7 +4033,11 @@ ${analysisHtml}
                 <DetailRow label="Department" value={deptDisplay} blur />
                 <DetailRow label="NAICS"      value={meta.naics_code} />
                 <DetailRow label="Set-Aside"  value={meta.set_aside_desc || meta.set_aside_code || 'None'} />
-                <DetailRow label="Due Date"   value={meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString() : null} />
+                <DetailRow label="Due Date"   value={meta.response_deadline
+                  ? <span style={isPastDue ? { color: 'var(--danger, #b3261e)', fontWeight: 600 } : undefined}>
+                      {new Date(meta.response_deadline).toLocaleDateString()}{isPastDue ? ' — Past due' : ''}
+                    </span>
+                  : (os.deadline_recency_note || null)} />
                 <DetailRow label="Modified"   value={meta.modified_date ? new Date(meta.modified_date).toLocaleDateString() : null} />
                 <DetailRow label="Contract #" value={meta.solicitation_number} blur />
               </tbody>
@@ -4025,9 +4054,14 @@ ${analysisHtml}
                   <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
                     color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Fit Score</td>
                   <td style={{ padding: '7px 0 7px 16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <ScoreBadge score={displayFitScore} />
                       <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>/ 100</span>
+                      {isDiscounted && (
+                        <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                          (discounted from {scores.llm_relevance ?? scores.technical_fit} — {os.deadline_recency_note || 'past due date'})
+                        </span>
+                      )}
                     </div>
                   </td>
                 </tr>
