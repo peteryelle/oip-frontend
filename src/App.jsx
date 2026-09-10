@@ -2002,34 +2002,27 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SamOpportunityTable({ signals, onRowClick }) {
-  // Default view: future-due opportunities first (respond-now candidates),
-  // past-due/no-date ones after (still useful as sub-sourcing leads per
-  // 2026-09-09 design discussion, but shouldn't outrank live opportunities
-  // just because their pre-discount score happens to be higher). Descending
-  // score within each group. Clicking a column header still does a plain
-  // single-key sort, overriding this grouped default.
-  const [sortKey, setSortKey] = useState('default')
+  // Default view: due date descending (furthest-out first, past-due/no-date
+  // sinks to the bottom). Per 2026-09-10 decision, the due-date discount to
+  // the Fit Score itself has been backed out — Fit Score is the raw LLM/ICP
+  // relevance number again. Sorting handles the "don't lead with stale
+  // opportunities" concern instead of discounting the score. Clicking a
+  // column header does a plain single-key sort as before.
+  const [sortKey, setSortKey] = useState('deadline')
   const [sortDir, setSortDir] = useState('desc')
 
-  const isPastDueRow = (s) => {
-    const d = s.signals?.metadata?.response_deadline
-    if (!d) return true // no date on record — same bucket as expired, not "future"
-    return new Date(d) < new Date()
-  }
-
   const getVal = (s, key) => {
-    // Deadline-recency-adjusted score (see workers/sam/score_handler.py
-    // _deadline_recency_multiplier). Falls back to raw LLM/ICP score for
-    // rows out of scope for the discount or scored before this field existed.
-    if (key === 'scores.llm_relevance') return s.signal_value_adjusted ?? (s.scores?.llm_relevance ?? s.scores?.technical_fit ?? -1)
+    if (key === 'scores.llm_relevance') return s.scores?.llm_relevance ?? s.scores?.technical_fit ?? -1
     if (key === 'scores.technical_fit') return s.scores?.technical_fit ?? -1
     if (key === 'scores.bid_risk') {
       const order = { Low: 0, Medium: 1, High: 2, 'No Bid': 3 }
       return order[s.scores?.bid_risk] ?? 1
     }
     if (key === 'deadline') {
+      // No date on record sinks to the bottom under the default descending
+      // sort (-Infinity), same treatment as a fully expired opportunity.
       const d = s.signals?.metadata?.response_deadline
-      return d ? new Date(d).getTime() : Infinity
+      return d ? new Date(d).getTime() : -Infinity
     }
     if (key === 'modified') {
       const d = s.signals?.metadata?.modified_date
@@ -2040,12 +2033,6 @@ function SamOpportunityTable({ signals, onRowClick }) {
   }
 
   const sorted = [...signals].sort((a, b) => {
-    if (sortKey === 'default') {
-      const aBucket = isPastDueRow(a) ? 1 : 0
-      const bBucket = isPastDueRow(b) ? 1 : 0
-      if (aBucket !== bBucket) return aBucket - bBucket   // future (0) before past-due (1)
-      return getVal(b, 'scores.llm_relevance') - getVal(a, 'scores.llm_relevance') // desc within group
-    }
     const av = getVal(a, sortKey)
     const bv = getVal(b, sortKey)
     if (av < bv) return sortDir === 'asc' ? -1 : 1
@@ -2090,8 +2077,6 @@ function SamOpportunityTable({ signals, onRowClick }) {
             const dept   = (meta.department_full || meta.department_name || '').split('.')[0]
             const isUpdated = meta.status_changed
             const isPastDue = !!meta.response_deadline && new Date(meta.response_deadline) < new Date()
-            const displayScore = s.signal_value_adjusted ?? (scores.llm_relevance ?? scores.technical_fit)
-            const isDiscounted = s.deadline_recency_multiplier != null && s.deadline_recency_multiplier < 1
 
             return (
               <tr key={s.signal_id}
@@ -2134,14 +2119,7 @@ function SamOpportunityTable({ signals, onRowClick }) {
                 </td>
 
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                    <ScoreBadge score={displayScore} />
-                    {isDiscounted && (
-                      <span style={{ fontSize: 9, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
-                        was {scores.llm_relevance ?? scores.technical_fit}
-                      </span>
-                    )}
-                  </div>
+                  <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />
                 </td>
                 <td style={{ padding: '12px 8px' }}>
                   <RiskBadge risk={scores.bid_risk} />
@@ -2464,15 +2442,10 @@ function SignalCard({ os, onClick }) {
   const isNercCard   = sig.source === 'nerc_ea'
   const isGrantsCard = sig.source === 'grants.gov' || sig.source === 'grants'
   const tierClass = os.signal_tier === 'tier1_strong' ? 'tier-strong' : os.signal_tier === 'tier1' ? 'tier-1' : 'tier-2'
-  // Deadline-recency discount (SAM Presolicitation/Solicitation only, see
-  // workers/sam/score_handler.py _deadline_recency_multiplier). Past its
-  // response deadline doesn't mean worthless — it's still useful for
-  // identifying a likely awardee to sub under — but it must not read as a
-  // fresh "respond now" opportunity. signal_value_adjusted falls back to
-  // signal_value for anything out of scope for the discount (awards, etc.)
-  // or scored before this field existed.
+  // Past-due flag on the due date (Fit Score discount was backed out
+  // 2026-09-10 — sorting handles staleness instead; see MarketReviewPage's
+  // default sort by due date descending).
   const isPastDue = isSam && !!meta.response_deadline && new Date(meta.response_deadline) < new Date()
-  const displayScore = os.signal_value_adjusted ?? (scores.llm_relevance ?? scores.technical_fit)
 
   return (
     <div className="signal-card" onClick={onClick} style={{ cursor: 'pointer' }}>
@@ -2530,7 +2503,7 @@ function SignalCard({ os, onClick }) {
           </div>
 )}
           <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {isSam && displayScore != null && <ScoreBadge score={displayScore} />}
+            {isSam && (scores.llm_relevance ?? scores.technical_fit) != null && <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />}
             {isSam && scores.bid_risk && <RiskBadge risk={scores.bid_risk} />}
             {isSam && scores.recommendation && (
               <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -3392,13 +3365,9 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
   const isPuc    = sig.source === 'puc'
   const isNycAward = sig.source === 'nyc_contracts' || meta.award_source === 'nyc_contracts'
   const isDocUpload = meta.signal_type === 'document_upload'
-  // Deadline-recency discount — see SignalCard for the same computation and
-  // workers/sam/score_handler.py for where it's set. displayFitScore falls
-  // back to the raw LLM/ICP score for anything the discount doesn't apply to
-  // (awards, non-SAM signals, or rows scored before this field existed).
+  // Past-due flag on the due date (Fit Score discount backed out 2026-09-10 —
+  // sorting by due date handles staleness instead; see MarketReviewPage).
   const isPastDue = isSam && !!meta.response_deadline && new Date(meta.response_deadline) < new Date()
-  const displayFitScore = os.signal_value_adjusted ?? (scores.llm_relevance ?? scores.technical_fit)
-  const isDiscounted = os.deadline_recency_multiplier != null && os.deadline_recency_multiplier < 1
   const [aiSummary, setAiSummary] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [enriched, setEnriched] = useState(null)  // on-demand entity data
@@ -4087,14 +4056,9 @@ ${analysisHtml}
                   <td style={{ padding: '7px 0', width: 120, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
                     color: 'var(--ink-fade)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Fit Score</td>
                   <td style={{ padding: '7px 0 7px 16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <ScoreBadge score={displayFitScore} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ScoreBadge score={scores.llm_relevance ?? scores.technical_fit} />
                       <span style={{ fontSize: 12, color: 'var(--ink-fade)' }}>/ 100</span>
-                      {isDiscounted && (
-                        <span style={{ fontSize: 11, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
-                          (discounted from {scores.llm_relevance ?? scores.technical_fit} — {os.deadline_recency_note || 'past due date'})
-                        </span>
-                      )}
                     </div>
                   </td>
                 </tr>
