@@ -127,10 +127,11 @@ function CoBlock({ name, contracts, isKnown }) {
 }
 
 export default function CoLandscapePage() {
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const agency = params.get('agency') || ''
-  const naicsCsv = params.get('naics') || ''
   const knownCo = params.get('co') || null
+  const [naicsInput, setNaicsInput] = useState(params.get('naics') || '')
+  const naicsCsv = params.get('naics') || ''
   const naicsKey = normalizeNaicsKey(naicsCsv)
 
   const { selectedOip } = useOip()
@@ -139,6 +140,12 @@ export default function CoLandscapePage() {
   const [phase, setPhase] = useState('loading') // loading | ready | queuing | polling | error | empty
   const [errMsg, setErrMsg] = useState(null)
   const pollRef = useRef(null)
+
+  const applyNaics = () => {
+    const next = new URLSearchParams(params)
+    next.set('naics', naicsInput.trim())
+    setParams(next, { replace: true })
+  }
 
   const fetchCache = useCallback(async () => {
     if (!agency || !naicsKey) return null
@@ -249,7 +256,17 @@ export default function CoLandscapePage() {
           <div className="wq-col-meta">
             <span className="blurable">{agency}</span>
             <span>·</span>
-            <span>NAICS {naicsCsv}</span>
+            <span>NAICS</span>
+            <input
+              className="wq-col-naics-input"
+              value={naicsInput}
+              onChange={(e) => setNaicsInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyNaics() }}
+              placeholder="e.g. 541810,541830"
+            />
+            <button className="wq-btn wq-btn-quiet" onClick={applyNaics}>
+              Search
+            </button>
           </div>
         </div>
         {phase === 'ready' && (
@@ -263,7 +280,7 @@ export default function CoLandscapePage() {
       {phase === 'queuing' && <p className="wq-col-note">Queuing a data pull…</p>}
       {phase === 'polling' && (
         <p className="wq-col-note">
-          Pulling procurement data from GovCon — this runs server-side and usually
+          Pulling procurement data — this runs server-side and usually
           takes a few seconds…
         </p>
       )}
@@ -272,7 +289,11 @@ export default function CoLandscapePage() {
       )}
       {phase === 'empty' && (
         <p className="wq-col-note">
-          The job finished but found no contracting officers in this agency+NAICS space.
+          No contracting officers found for <strong>{agency}</strong> under NAICS{' '}
+          <strong>{naicsCsv}</strong> specifically. Related work often sits under an
+          adjacent NAICS code (this account's own contracts have split across
+          541810 and 541830, for example) — try adding codes above and searching
+          again.
         </p>
       )}
 
@@ -318,7 +339,8 @@ export default function CoLandscapePage() {
         .wq-col { padding: 1rem 0; }
         .wq-col-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
         .wq-col-title { font-size: 1.3rem; font-weight: 600; margin: 0 0 0.25rem; }
-        .wq-col-meta { display: flex; gap: 0.5rem; font-size: 0.85rem; color: #6b7280; flex-wrap: wrap; }
+        .wq-col-meta { display: flex; gap: 0.5rem; font-size: 0.85rem; color: #6b7280; flex-wrap: wrap; align-items: center; }
+        .wq-col-naics-input { font-family: inherit; font-size: 0.85rem; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.2rem 0.5rem; width: 9rem; }
         .wq-col-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem 1.15rem; margin-bottom: 1rem; }
         .wq-col-h { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.4rem; }
         .wq-col-note { font-size: 0.82rem; color: #6b7280; margin: 0.4rem 0 0.8rem; }
