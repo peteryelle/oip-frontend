@@ -592,7 +592,10 @@ function LoginPage() {
 
   useEffect(() => {
     if (user && !loading) {
-      const dest = location.state?.from?.pathname || '/'
+      const from = location.state?.from
+      const dest = from
+        ? `${from.pathname}${from.search || ''}${from.hash || ''}`
+        : '/'
       navigate(dest, { replace: true })
     }
   }, [user, loading, navigate, location])
