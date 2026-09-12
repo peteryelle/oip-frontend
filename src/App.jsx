@@ -15,6 +15,7 @@ import { DemoGateProvider } from './hooks/useDemoGate'
 import DemoIndicator from './components/demo/DemoIndicator'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
 import PrimeAccountPage from './pages/PrimeAccountPage'
+import CoLandscapePage from './pages/CoLandscapePage'
 import AdminDashboardPage from './pages/AdminDashboardPage'
 import { supabase } from './lib/supabase'
 import { AuthProvider, useAuth } from './lib/auth'
@@ -66,6 +67,7 @@ export default function App() {
               <Route path="sentinel" element={<SentinelPage />} />
               <Route path="demand" element={<DerivedDemandPage />} />
               <Route path="prime/:uei" element={<PrimeAccountPage />} />
+              <Route path="co-landscape" element={<CoLandscapePage />} />
               <Route path="pursued" element={<PursuedPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="settings/team" element={<TeamPage />} />

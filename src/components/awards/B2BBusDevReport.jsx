@@ -653,6 +653,18 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
                 </a>
               </p>
             )}
+            {(bd.agency_poc?.name && (bd.sub_agency || bd.agency) && bd.naics_code) && (
+              <p style={{ marginTop: "0.4rem" }}>
+                <a
+                  href={`/co-landscape?agency=${encodeURIComponent(bd.sub_agency || bd.agency)}&naics=${encodeURIComponent(bd.naics_code)}&co=${encodeURIComponent(bd.agency_poc.name)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: "0.85rem", color: "#2563eb", textDecoration: "none" }}
+                >
+                  View CO landscape — colleagues, contracts, vendors &#8599;
+                </a>
+              </p>
+            )}
           </Section>
         )}
 
