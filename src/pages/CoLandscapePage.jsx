@@ -76,6 +76,8 @@ function Card({ title, note, children }) {
 
 function ContractRow({ c }) {
   const hasAward = c.award_amount != null
+  const popDate = c.pop_end_date
+  const parentPopDate = c.parent_pop_end_date
   return (
     <tr>
       <td>
@@ -84,17 +86,56 @@ function ContractRow({ c }) {
           {c.solicitation_number} · {c.notice_type}
           {Array.isArray(c.naics) && c.naics.length > 0 ? ` · NAICS ${c.naics.join(', ')}` : ''}
         </div>
+        {(popDate || parentPopDate) && (
+          <div className="wq-col-dim">
+            {popDate && <>PoP ends {popDate}</>}
+            {parentPopDate && parentPopDate !== popDate && (
+              <> · parent vehicle ends {parentPopDate}</>
+            )}
+          </div>
+        )}
       </td>
       <td className="blurable">{hasAward ? c.awardee_name : '—'}</td>
       <td className="wq-col-num">{hasAward ? money(c.award_amount) : '—'}</td>
       <td className="wq-col-num">
-        {c.notice_type === 'Award Notice' && (
-          <span className="wq-col-flag" title="Not pulled here — needs a separate /contracts/{piid} call">
-            check term/deobligation
+        {c.trigger_soon && (
+          <span className="wq-col-trigger" title="Period of performance (or its parent vehicle's) ends within the configured recompete window">
+            trigger soon
           </span>
         )}
       </td>
     </tr>
+  )
+}
+
+function VendorList({ vendors }) {
+  return (
+    <Card
+      title="Vendors awarded in this agency + NAICS space"
+      note={`${vendors.length} vendor(s)`}
+    >
+      <table className="wq-col-table">
+        <thead>
+          <tr>
+            <th>Vendor</th>
+            <th className="wq-col-num">Total value</th>
+            <th className="wq-col-num">Awards</th>
+          </tr>
+        </thead>
+        <tbody>
+          {vendors.map((v, i) => (
+            <tr key={v.uei || v.name || i}>
+              <td className="blurable">
+                {v.name}
+                {v.uei && <div className="wq-col-dim">{v.uei}</div>}
+              </td>
+              <td className="wq-col-num">{money(v.total_value)}</td>
+              <td className="wq-col-num">{v.awards.length}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   )
 }
 
@@ -401,6 +442,10 @@ export default function CoLandscapePage() {
             />
           ))}
 
+          {cacheRow.vendors && cacheRow.vendors.length > 0 && (
+            <VendorList vendors={cacheRow.vendors} />
+          )}
+
           <Card title="Caveats">
             <ul className="wq-col-list">
               <li>
@@ -414,9 +459,11 @@ export default function CoLandscapePage() {
                 It's usually already shown on the brief you came from.
               </li>
               <li>
-                Deobligation and period-of-performance detail are not pulled here.
-                Rows flagged "check term/deobligation" are Award Notices worth a
-                separate, targeted follow-up before a call.
+                Deobligation history is still not pulled here. Rows flagged
+                "trigger soon" have a period of performance (or parent
+                vehicle) ending within the configured recompete window —
+                worth a closer look before a call, not a guarantee of an
+                upcoming competition.
               </li>
             </ul>
           </Card>
@@ -442,6 +489,7 @@ export default function CoLandscapePage() {
         .wq-col-num { text-align: right; white-space: nowrap; }
         .wq-col-dim { color: #9ca3af; font-size: 0.75rem; margin-top: 0.15rem; }
         .wq-col-flag { background: #fef3c7; color: #92400e; font-size: 0.68rem; padding: 0.15rem 0.4rem; border-radius: 4px; white-space: nowrap; }
+        .wq-col-trigger { background: #fee2e2; color: #991b1b; font-size: 0.68rem; padding: 0.15rem 0.4rem; border-radius: 4px; white-space: nowrap; font-weight: 600; }
         .wq-col-list { margin: 0.3rem 0 0; padding-left: 1.1rem; font-size: 0.82rem; color: #4b5563; }
         .wq-col-list li { margin-bottom: 0.4rem; }
         .wq-btn-quiet { background: transparent; border: 1px solid #e5e7eb; color: #374151; }
