@@ -128,6 +128,7 @@ function CoBlock({ name, contracts, isKnown }) {
 
 export default function CoLandscapePage() {
   const [params, setParams] = useSearchParams()
+  const [agencyInput, setAgencyInput] = useState(params.get('agency') || '')
   const agency = params.get('agency') || ''
   const knownCo = params.get('co') || null
   const [naicsInput, setNaicsInput] = useState(params.get('naics') || '')
@@ -135,15 +136,64 @@ export default function CoLandscapePage() {
   const naicsKey = normalizeNaicsKey(naicsCsv)
 
   const { selectedOip } = useOip()
+  const [sentinelSuggestion, setSentinelSuggestion] = useState(null)
+
+  useEffect(() => {
+    if (!selectedOip?.tenant_id || !selectedOip?.vertical_id) return
+    let cancelled = false
+    ;(async () => {
+      // Derived OIPs never carry their own sentinel (per project convention) --
+      // find the sibling OIP under the same tenant+vertical that actually owns
+      // one, rather than guessing off the "-derived" slug suffix.
+      const { data: siblings } = await supabase
+        .from('oips')
+        .select('id')
+        .eq('tenant_id', selectedOip.tenant_id)
+        .eq('vertical_id', selectedOip.vertical_id)
+      const siblingIds = (siblings || []).map((o) => o.id)
+      if (siblingIds.length === 0) return
+      const { data: sentinelRows } = await supabase
+        .from('sentinels')
+        .select('pull_config')
+        .in('oip_id', siblingIds)
+        .not('pull_config->naics_codes', 'is', null)
+        .limit(1)
+      if (cancelled) return
+      const codes = sentinelRows?.[0]?.pull_config?.naics_codes
+      if (Array.isArray(codes) && codes.length > 0) {
+        setSentinelSuggestion(codes)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [selectedOip?.tenant_id, selectedOip?.vertical_id])
 
   const [cacheRow, setCacheRow] = useState(null)
   const [phase, setPhase] = useState('loading') // loading | ready | queuing | polling | error | empty
   const [errMsg, setErrMsg] = useState(null)
   const pollRef = useRef(null)
 
-  const applyNaics = () => {
+  const [naicsErr, setNaicsErr] = useState(null)
+
+  const applySearch = () => {
+    const codes = naicsInput.split(',').map((c) => c.trim()).filter(Boolean)
+    const bad = codes.filter((c) => !/^\d{6}$/.test(c))
+    if (bad.length > 0) {
+      setNaicsErr(
+        `NAICS codes must be exactly 6 digits — "${bad.join('", "')}" ` +
+        `isn't. GovCon's handling of shorter/prefix codes isn't confirmed, ` +
+        `so a partial code is refused here rather than risk a silent, ` +
+        `misleading zero-result search.`
+      )
+      return
+    }
+    if (!agencyInput.trim()) {
+      setNaicsErr('Agency cannot be blank.')
+      return
+    }
+    setNaicsErr(null)
     const next = new URLSearchParams(params)
-    next.set('naics', naicsInput.trim())
+    next.set('agency', agencyInput.trim())
+    next.set('naics', codes.join(','))
     setParams(next, { replace: true })
   }
 
@@ -254,17 +304,24 @@ export default function CoLandscapePage() {
         <div>
           <h2 className="wq-col-title">CO landscape</h2>
           <div className="wq-col-meta">
-            <span className="blurable">{agency}</span>
+            <span>Agency</span>
+            <input
+              className="wq-col-agency-input"
+              value={agencyInput}
+              onChange={(e) => setAgencyInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applySearch() }}
+              placeholder="e.g. Secret Service"
+            />
             <span>·</span>
             <span>NAICS</span>
             <input
               className="wq-col-naics-input"
               value={naicsInput}
               onChange={(e) => setNaicsInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') applyNaics() }}
+              onKeyDown={(e) => { if (e.key === 'Enter') applySearch() }}
               placeholder="e.g. 541810,541830"
             />
-            <button className="wq-btn wq-btn-quiet" onClick={applyNaics}>
+            <button className="wq-btn wq-btn-quiet" onClick={applySearch}>
               Search
             </button>
           </div>
@@ -275,6 +332,25 @@ export default function CoLandscapePage() {
           </button>
         )}
       </div>
+      {naicsErr && <p className="wq-col-note wq-col-warn">{naicsErr}</p>}
+      {sentinelSuggestion && normalizeNaicsKey(sentinelSuggestion.join(',')) !== naicsKey && (
+        <p className="wq-col-note wq-col-suggest">
+          This account's sentinel is configured for NAICS{' '}
+          <strong>{sentinelSuggestion.join(', ')}</strong> — broader than what's
+          currently searched.{' '}
+          <button
+            className="wq-btn wq-btn-quiet"
+            onClick={() => {
+              setNaicsInput(sentinelSuggestion.join(','))
+              const next = new URLSearchParams(params)
+              next.set('naics', sentinelSuggestion.join(','))
+              setParams(next, { replace: true })
+            }}
+          >
+            Use sentinel scope
+          </button>
+        </p>
+      )}
 
       {phase === 'loading' && <p className="wq-col-note">Checking for cached data…</p>}
       {phase === 'queuing' && <p className="wq-col-note">Queuing a data pull…</p>}
@@ -290,10 +366,12 @@ export default function CoLandscapePage() {
       {phase === 'empty' && (
         <p className="wq-col-note">
           No contracting officers found for <strong>{agency}</strong> under NAICS{' '}
-          <strong>{naicsCsv}</strong> specifically. Related work often sits under an
-          adjacent NAICS code (this account's own contracts have split across
-          541810 and 541830, for example) — try adding codes above and searching
-          again.
+          <strong>{naicsCsv}</strong>. Two common causes: the NAICS scope is too
+          narrow (related work can sit under an adjacent code — this account's own
+          contracts have split across 541810 and 541830), or the agency name doesn't
+          match how it's filed (try a shorter, plainer form like "Secret Service"
+          rather than "U.S. Secret Service" — punctuation and abbreviations can
+          cause an exact-substring miss). Adjust either field above and search again.
         </p>
       )}
 
@@ -341,10 +419,12 @@ export default function CoLandscapePage() {
         .wq-col-title { font-size: 1.3rem; font-weight: 600; margin: 0 0 0.25rem; }
         .wq-col-meta { display: flex; gap: 0.5rem; font-size: 0.85rem; color: #6b7280; flex-wrap: wrap; align-items: center; }
         .wq-col-naics-input { font-family: inherit; font-size: 0.85rem; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.2rem 0.5rem; width: 9rem; }
+        .wq-col-agency-input { font-family: inherit; font-size: 0.85rem; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.2rem 0.5rem; width: 11rem; }
         .wq-col-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem 1.15rem; margin-bottom: 1rem; }
         .wq-col-h { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.4rem; }
         .wq-col-note { font-size: 0.82rem; color: #6b7280; margin: 0.4rem 0 0.8rem; }
         .wq-col-warn { color: #b91c1c; }
+        .wq-col-suggest { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 0.6rem 0.8rem; color: #1e40af; }
         .wq-col-table { width: 100%; font-size: 0.85rem; border-collapse: collapse; margin-top: 0.4rem; }
         .wq-col-table th { text-align: left; font-size: 0.72rem; color: #9ca3af; font-weight: 500; padding: 0.2rem 0.4rem 0.4rem 0; border-bottom: 1px solid #f3f4f6; }
         .wq-col-table td { padding: 0.5rem 0.4rem 0.5rem 0; vertical-align: top; border-bottom: 1px solid #f9fafb; }
