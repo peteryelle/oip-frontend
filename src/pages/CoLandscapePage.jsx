@@ -98,7 +98,7 @@ function ContractRow({ c }) {
   )
 }
 
-function CoBlock({ name, contracts, isKnown }) {
+function CoBlock({ name, email, phone, contracts, isKnown }) {
   const sorted = [...contracts].sort(
     (a, b) => (b.award_amount || 0) - (a.award_amount || 0)
   )
@@ -107,6 +107,14 @@ function CoBlock({ name, contracts, isKnown }) {
       title={`${name}${isKnown ? '  (already known from this brief)' : ''}`}
       note={`${contracts.length} distinct procurement${contracts.length === 1 ? '' : 's'} in this space`}
     >
+      {(email || phone) && (
+        <p className="wq-col-contact blurable">
+          {email && <span>{email}</span>}
+          {email && phone && <span> · </span>}
+          {phone && <span>{phone}</span>}
+          {!phone && <span className="wq-col-dim"> (no phone on file)</span>}
+        </p>
+      )}
       <table className="wq-col-table">
         <thead>
           <tr>
@@ -295,7 +303,7 @@ export default function CoLandscapePage() {
   const orderedCoNames = [...coNames].sort((a, b) => {
     if (a === knownCo) return -1
     if (b === knownCo) return 1
-    return (landscape[b]?.length || 0) - (landscape[a]?.length || 0)
+    return (landscape[b]?.contracts?.length || 0) - (landscape[a]?.contracts?.length || 0)
   })
 
   return (
@@ -386,7 +394,9 @@ export default function CoLandscapePage() {
             <CoBlock
               key={name}
               name={name}
-              contracts={landscape[name]}
+              email={landscape[name]?.email}
+              phone={landscape[name]?.phone}
+              contracts={landscape[name]?.contracts || []}
               isKnown={name === knownCo}
             />
           ))}
@@ -422,6 +432,7 @@ export default function CoLandscapePage() {
         .wq-col-agency-input { font-family: inherit; font-size: 0.85rem; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.2rem 0.5rem; width: 11rem; }
         .wq-col-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem 1.15rem; margin-bottom: 1rem; }
         .wq-col-h { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.4rem; }
+        .wq-col-contact { font-size: 0.82rem; color: #374151; margin: 0 0 0.6rem; }
         .wq-col-note { font-size: 0.82rem; color: #6b7280; margin: 0.4rem 0 0.8rem; }
         .wq-col-warn { color: #b91c1c; }
         .wq-col-suggest { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 0.6rem 0.8rem; color: #1e40af; }
