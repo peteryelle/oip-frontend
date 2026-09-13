@@ -86,11 +86,17 @@ function ContractRow({ c }) {
           {c.solicitation_number} · {c.notice_type}
           {Array.isArray(c.naics) && c.naics.length > 0 ? ` · NAICS ${c.naics.join(', ')}` : ''}
         </div>
-        {(popDate || parentPopDate) && (
+        {c.notice_type === 'Award Notice' && (
           <div className="wq-col-dim">
-            {popDate && <>PoP ends {popDate}</>}
-            {parentPopDate && parentPopDate !== popDate && (
-              <> · parent vehicle ends {parentPopDate}</>
+            {popDate ? (
+              <>
+                PoP ends {popDate}
+                {parentPopDate && parentPopDate !== popDate && (
+                  <> · parent vehicle ends {parentPopDate}</>
+                )}
+              </>
+            ) : (
+              <>PoP: not found (no period-of-performance date on this award's FPDS record)</>
             )}
           </div>
         )}
