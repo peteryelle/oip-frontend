@@ -5874,8 +5874,12 @@ function KeywordPill({ k, stats, editing, onChangeTier, onRemove }) {
 // PURSUED PIPELINE
 // ────────────────────────────────────────────────────────────────────────────
 
-function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onSaveNotes }) {
-  const [notes, setNotes] = useState(it.notes || '')
+function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) {
+  const [workedBy, setWorkedBy] = useState('')
+  const [actionTaken, setActionTaken] = useState('')
+  const [outcome, setOutcome] = useState('')
+  const [nextStep, setNextStep] = useState('')
+  const [nextActionDate, setNextActionDate] = useState('')
   const [saving, setSaving] = useState(false)
   const snap = it.snapshot || {}
   // SAM-direct snapshots carry state/source_name/doc_url; Derived Demand
@@ -5885,11 +5889,20 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onSaveNotes }) {
   const metaLeft = snap.state || snap.agency || null
   const metaRight = snap.source_name || (snap.naics_code ? `NAICS ${snap.naics_code}` : null)
   const title = snap.title || snap.incumbent_name || 'Untitled'
+  const activities = it.activities || []
 
-  const handleSave = async () => {
+  const handleAdd = async () => {
+    if (!actionTaken.trim() && !outcome.trim() && !nextStep.trim()) return
     setSaving(true)
-    await onSaveNotes(it.id, notes)
+    const ok = await onAddActivity(it.id, { workedBy, actionTaken, outcome, nextStep, nextActionDate: nextActionDate || null })
     setSaving(false)
+    if (ok) {
+      setActionTaken('')
+      setOutcome('')
+      setNextStep('')
+      setNextActionDate('')
+      // workedBy left as-is — usually the same person logging several in a row
+    }
   }
 
   return (
@@ -5927,25 +5940,63 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onSaveNotes }) {
           </a>
         )}
       </div>
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="Notes — call outcomes, next steps, anything worth remembering"
-        rows={2}
-        style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '8px 10px', border: '1px solid var(--rule)', borderRadius: 4, resize: 'vertical', boxSizing: 'border-box' }}
-      />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-        <span style={{ fontSize: 11, color: 'var(--ink-fade)' }}>
-          {it.last_updated_at ? `Last updated ${new Date(it.last_updated_at).toLocaleString()}` : ''}
-        </span>
-        <button
-          onClick={handleSave}
-          disabled={saving || notes === (it.notes || '')}
-          style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--primary)', background: 'var(--primary)', color: '#fff', cursor: 'pointer' }}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+
+      <div style={{ border: '1px solid var(--rule)', borderRadius: 4, padding: 10, marginBottom: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <input
+            type="text" value={workedBy} onChange={(e) => setWorkedBy(e.target.value)}
+            placeholder="Worked by"
+            style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+          />
+          <input
+            type="date" value={nextActionDate} onChange={(e) => setNextActionDate(e.target.value)}
+            style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+          />
+        </div>
+        <input
+          type="text" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)}
+          placeholder="What did you do"
+          style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', marginBottom: 8, border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+        />
+        <textarea
+          value={outcome} onChange={(e) => setOutcome(e.target.value)}
+          placeholder="Result"
+          rows={2}
+          style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', marginBottom: 8, border: '1px solid var(--rule)', borderRadius: 4, resize: 'vertical', boxSizing: 'border-box' }}
+        />
+        <input
+          type="text" value={nextStep} onChange={(e) => setNextStep(e.target.value)}
+          placeholder="Next step"
+          style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', marginBottom: 8, border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+        />
+        <div style={{ textAlign: 'right' }}>
+          <button
+            onClick={handleAdd}
+            disabled={saving}
+            style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--primary)', background: 'var(--primary)', color: '#fff', cursor: 'pointer' }}
+          >
+            {saving ? 'Saving…' : 'Add entry'}
+          </button>
+        </div>
       </div>
+
+      {activities.length > 0 && (
+        <div>
+          {activities.map((a) => (
+            <div key={a.id} style={{ borderTop: '1px solid var(--rule)', padding: '8px 0', fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-fade)', marginBottom: 4, fontFamily: "'IBM Plex Mono', monospace" }}>
+                <span>{a.worked_by || 'Unattributed'}</span>
+                <span>{new Date(a.created_at).toLocaleString()}</span>
+              </div>
+              {a.action_taken && <div><strong>Did:</strong> {a.action_taken}</div>}
+              {a.outcome && <div><strong>Result:</strong> {a.outcome}</div>}
+              {a.next_step && (
+                <div><strong>Next:</strong> {a.next_step}{a.next_action_date ? ` — due ${new Date(a.next_action_date + 'T00:00:00').toLocaleDateString()}` : ''}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -5990,7 +6041,20 @@ function PursuedPage() {
         .in('oip_id', oipIds)
         .order('pursued_at', { ascending: false })
       if (cancelled) return
-      setItems(data || [])
+      const pursuedIds = (data || []).map((d) => d.id)
+      let activitiesById = {}
+      if (pursuedIds.length > 0) {
+        const { data: acts } = await supabase
+          .from('pursued_signal_activities')
+          .select('id, pursued_signal_id, worked_by, action_taken, outcome, next_step, next_action_date, created_at')
+          .in('pursued_signal_id', pursuedIds)
+          .order('created_at', { ascending: false })
+        for (const a of acts || []) {
+          (activitiesById[a.pursued_signal_id] = activitiesById[a.pursued_signal_id] || []).push(a)
+        }
+      }
+      if (cancelled) return
+      setItems((data || []).map((it) => ({ ...it, activities: activitiesById[it.id] || [] })))
       setLoading(false)
     })()
     return () => { cancelled = true }
@@ -6002,17 +6066,29 @@ function PursuedPage() {
     else setItems(prev => prev.map(it => it.id === id ? { ...it, pipeline_stage: stage } : it))
   }
 
-  const saveNotes = async (id, text) => {
-    const { error } = await supabase
-      .from('pursued_signals')
-      .update({ notes: text, last_updated_at: new Date().toISOString(), last_updated_by: user?.id || null })
-      .eq('id', id)
+  const addActivity = async (pursuedSignalId, entry) => {
+    const { data, error } = await supabase
+      .from('pursued_signal_activities')
+      .insert({
+        pursued_signal_id: pursuedSignalId,
+        worked_by: entry.workedBy || null,
+        action_taken: entry.actionTaken || null,
+        outcome: entry.outcome || null,
+        next_step: entry.nextStep || null,
+        next_action_date: entry.nextActionDate || null,
+      })
+      .select('id, pursued_signal_id, worked_by, action_taken, outcome, next_step, next_action_date, created_at')
+      .single()
     if (error) {
       alert('Save failed: ' + error.message)
       return false
     }
-    setItems(prev => prev.map(it => it.id === id
-      ? { ...it, notes: text, last_updated_at: new Date().toISOString() }
+    await supabase
+      .from('pursued_signals')
+      .update({ last_updated_at: new Date().toISOString(), last_updated_by: user?.id || null })
+      .eq('id', pursuedSignalId)
+    setItems(prev => prev.map(it => it.id === pursuedSignalId
+      ? { ...it, activities: [data, ...(it.activities || [])], last_updated_at: new Date().toISOString() }
       : it))
     return true
   }
@@ -6043,7 +6119,7 @@ function PursuedPage() {
               sourceLabel={oipLabels[it.oip_id] || 'SAM Direct'}
               stages={stages}
               onUpdateStage={updateStage}
-              onSaveNotes={saveNotes}
+              onAddActivity={addActivity}
             />
           ))}
         </div>
