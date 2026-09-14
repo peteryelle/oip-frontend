@@ -133,7 +133,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
       oip_id: oipId,
       signal_id: award.signalId,
       snapshot,
-      pipeline_stage: "pursuing",
+      pipeline_stage: "CO Contact",
       notes: reason || null,
     });
     if (error) {

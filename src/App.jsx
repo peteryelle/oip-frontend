@@ -1449,7 +1449,7 @@ function MarketReviewPage() {
       oip_id: oipSignal.oip_id,
       signal_id: oipSignal.signal_id,
       snapshot,
-      pipeline_stage: 'pursuing',
+      pipeline_stage: 'CO Contact',
     })
     if (error) alert('Pursue failed: ' + error.message)
     else updateStatus(oipSignal.signal_id, 'pursuing')
@@ -6022,10 +6022,10 @@ function PursuedPage() {
     return <EmptyMessage title="No pursued items yet" message="Move a signal into the pursued pipeline from Market Review or Derived Demand to track it here." />
   }
 
-  const stages = ['identified', 'qualifying', 'pursuing', 'won', 'lost']
+  const stages = ['CO Contact', 'Prospect Contact', 'Meeting set', 'Meeting held', 'Hand to Customer']
   const grouped = {}
   stages.forEach(s => grouped[s] = [])
-  items.forEach(it => { grouped[it.pipeline_stage]?.push(it) || (grouped['identified'] = grouped['identified'] || []).push(it) })
+  items.forEach(it => { grouped[it.pipeline_stage]?.push(it) || (grouped['CO Contact'] = grouped['CO Contact'] || []).push(it) })
 
   return (
     <div className="detail-section">
