@@ -81,7 +81,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
 
   // Default order is recompete-soonest (near-term PoP-end floats up); the sort
   // control below switches it, and the table's column headers still re-sort locally.
-  const { awards, loading, error, total, archivedCount, gatedCount } = useAwards(oipId, {
+  const { awards, loading, error, total, archivedCount, gatedCount, refetch } = useAwards(oipId, {
     sort,
     disposition,
     states,
@@ -93,6 +93,55 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
     includeStale: showStale,
     pocket,
   });
+
+  // Status + pursue -- mirrors the existing SAM-direct pattern in App.jsx
+  // (updateStatus/moveToPursued on oip_signals + pursued_signals), but with a
+  // snapshot built from this award's own b2b_busdev fields instead of the
+  // SAM-scrape sig.* fields (doc_url/portal_id/meeting_date don't exist here).
+  const updateStatus = async (signalId, newStatus) => {
+    const { error } = await supabase
+      .from("oip_signals")
+      .update({ status: newStatus })
+      .eq("oip_id", oipId)
+      .eq("signal_id", signalId);
+    if (error) {
+      alert("Status update failed: " + error.message);
+      return false;
+    }
+    setOpenAward((prev) => (prev ? { ...prev, status: newStatus } : prev));
+    refetch();
+    return true;
+  };
+
+  const moveToPursued = async (award, reason) => {
+    const bd = award.busdev || {};
+    const snapshot = {
+      title: award.title,
+      agency: bd.agency || award.agency,
+      sub_agency: bd.sub_agency || award.subAgency,
+      naics_code: bd.naics_code || award.naics,
+      incumbent_name: bd.incumbent_name || award.recipient,
+      incumbent_uei: bd.incumbent_uei || award.uei,
+      current_value: bd.current_value ?? award.amount,
+      b2b_score: award.score,
+      why_now: bd.why_now,
+      agency_poc: bd.agency_poc || null,
+      pop_end_date: award.popEnd,
+      source: "derived",
+    };
+    const { error } = await supabase.from("pursued_signals").insert({
+      oip_id: oipId,
+      signal_id: award.signalId,
+      snapshot,
+      pipeline_stage: "pursuing",
+      notes: reason || null,
+    });
+    if (error) {
+      alert("Pursue failed: " + error.message);
+      return false;
+    }
+    return updateStatus(award.signalId, "pursuing");
+  };
 
   return (
     <div className="wq-awards">
@@ -233,7 +282,14 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
             >
               &times;
             </button>
-            <B2BBusDevReport award={openAward} recompeteDays={windows.recompeteDays} subscriberName={subscriberName} />
+            <B2BBusDevReport
+              award={openAward}
+              recompeteDays={windows.recompeteDays}
+              subscriberName={subscriberName}
+              oipId={oipId}
+              onUpdateStatus={updateStatus}
+              onPursue={moveToPursued}
+            />
           </div>
         </div>
       )}

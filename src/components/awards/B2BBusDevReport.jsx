@@ -4,7 +4,7 @@
 // can vary, so every section degrades gracefully when a field is missing.
 // Brief order: SUBJECT (who is analyzed) -> How this surfaced -> Why now ->
 // Entailment -> Solution -> Point of contact -> Performance read -> Cross-sell.
-import React from "react";
+import React, { useState } from "react";
 import { downloadAwardBrief } from "../../lib/awardsBrief";
 import { SignalSubawardsPanel } from "../SignalSubawardsPanel";
 import { generateActionBrief, generatePartnerBrief } from "../../lib/generateDDBriefs";
@@ -39,7 +39,68 @@ function healthBand(h) {
   return "wq-health-strong";
 }
 
-export default function B2BBusDevReport({ award, recompeteDays = 180, subscriberName = null }) {
+const STATUSES = ["new", "reviewed", "pursuing", "dismissed"];
+
+function PursuitPanel({ award, onUpdateStatus, onPursue }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!onUpdateStatus && !onPursue) return null; // not wired up by the caller — render nothing
+  const status = award.status || "new";
+  const label = award.recipient || award.title || "this opportunity";
+
+  const handleStatusClick = async (s) => {
+    if (busy) return;
+    setBusy(true);
+    await onUpdateStatus?.(award.signalId, s);
+    setBusy(false);
+  };
+
+  const handlePursue = async () => {
+    if (busy) return;
+    if (!window.confirm(`Move "${label}" to your pursued pipeline? It will be excluded from auto-purge.`)) return;
+    setBusy(true);
+    await onPursue?.(award, reason);
+    setBusy(false);
+  };
+
+  return (
+    <div className="wq-rep-pursuit">
+      <h4 className="wq-rep-h">Status</h4>
+      <div className="wq-rep-status-row">
+        {STATUSES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={`wq-status-btn${status === s ? " wq-status-btn-active" : ""}`}
+            onClick={() => handleStatusClick(s)}
+            disabled={busy}
+          >
+            {s.toUpperCase()}
+          </button>
+        ))}
+      </div>
+      {status !== "pursuing" && (
+        <>
+          <textarea
+            className="wq-rep-reason"
+            placeholder="Reason (optional) — why pursue this now?"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={2}
+          />
+          <button type="button" className="wq-pursue-btn" onClick={handlePursue} disabled={busy}>
+            Move to pursued pipeline &rarr;
+          </button>
+          <p className="wq-rep-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            Snapshots this signal so it&rsquo;s preserved if the source is later purged.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function B2BBusDevReport({ award, recompeteDays = 180, subscriberName = null, oipId = null, onUpdateStatus = null, onPursue = null }) {
   const bd = award.busdev || {};
   
   // Detect schema: recompete (govcon_dd_v2) vs old award (USASpending)
@@ -241,6 +302,8 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             {bd.naics_code ? <span className="blurable">NAICS {bd.naics_code}</span> : null}
           </div>
         </div>
+
+        <PursuitPanel award={award} onUpdateStatus={onUpdateStatus} onPursue={onPursue} />
 
         {/* EXECUTIVE SUMMARY — leads with the strongest concrete fact
             available, bulleted, no repeated prose. Verification finding
@@ -830,6 +893,8 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           {award.naics ? <span>NAICS {award.naics}</span> : null}
         </div>
       </div>
+
+      <PursuitPanel award={award} onUpdateStatus={onUpdateStatus} onPursue={onPursue} />
 
       {/* CORE NARRATIVE — award scope -> prime capability -> gap -> how the subscriber fills it */}
       {(awardScope || primeOffering || gap.length > 0 || fillImpact) && (

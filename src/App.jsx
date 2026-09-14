@@ -5874,20 +5874,120 @@ function KeywordPill({ k, stats, editing, onChangeTier, onRemove }) {
 // PURSUED PIPELINE
 // ────────────────────────────────────────────────────────────────────────────
 
+function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onSaveNotes }) {
+  const [notes, setNotes] = useState(it.notes || '')
+  const [saving, setSaving] = useState(false)
+  const snap = it.snapshot || {}
+  // SAM-direct snapshots carry state/source_name/doc_url; Derived Demand
+  // snapshots carry agency/naics_code/agency_poc instead — neither field set
+  // exists on the other source's rows, so each half of this line degrades
+  // gracefully when its fields are absent instead of showing blanks.
+  const metaLeft = snap.state || snap.agency || null
+  const metaRight = snap.source_name || (snap.naics_code ? `NAICS ${snap.naics_code}` : null)
+  const title = snap.title || snap.incumbent_name || 'Untitled'
+
+  const handleSave = async () => {
+    setSaving(true)
+    await onSaveNotes(it.id, notes)
+    setSaving(false)
+  }
+
+  return (
+    <div className="signal-card" style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)', marginBottom: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{
+          padding: '1px 6px', borderRadius: 3, fontWeight: 600,
+          background: sourceLabel === 'Derived Demand' ? '#eef2ff' : '#f3f4f6',
+          color: sourceLabel === 'Derived Demand' ? '#4338ca' : '#4b5563',
+        }}>
+          {sourceLabel}
+        </span>
+        {metaLeft && <span>{metaLeft}</span>}
+        {metaLeft && metaRight && <span>·</span>}
+        {metaRight && <span>{metaRight}</span>}
+        <span>· pursued {new Date(it.pursued_at).toLocaleDateString()}</span>
+      </div>
+      <div style={{ fontFamily: "'Spectral', serif", fontSize: 16, marginBottom: 8 }} className="blurable">{title}</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+        {stages.map(s => (
+          <button key={s} onClick={() => onUpdateStage(it.id, s)}
+            style={{
+              padding: '4px 10px',
+              border: '1px solid ' + (it.pipeline_stage === s ? 'var(--primary)' : 'var(--rule-strong)'),
+              background: it.pipeline_stage === s ? 'var(--primary-soft)' : 'var(--paper)',
+              color: it.pipeline_stage === s ? 'var(--primary-dark)' : 'var(--ink-fade)',
+              borderRadius: 3, cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
+            }}>
+            {s}
+          </button>
+        ))}
+        {snap.doc_url && (
+          <a href={snap.doc_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 'auto', fontSize: 13 }}>
+            Source ↗
+          </a>
+        )}
+      </div>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="Notes — call outcomes, next steps, anything worth remembering"
+        rows={2}
+        style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '8px 10px', border: '1px solid var(--rule)', borderRadius: 4, resize: 'vertical', boxSizing: 'border-box' }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+        <span style={{ fontSize: 11, color: 'var(--ink-fade)' }}>
+          {it.last_updated_at ? `Last updated ${new Date(it.last_updated_at).toLocaleString()}` : ''}
+        </span>
+        <button
+          onClick={handleSave}
+          disabled={saving || notes === (it.notes || '')}
+          style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--primary)', background: 'var(--primary)', color: '#fff', cursor: 'pointer' }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PursuedPage() {
   const { selectedOip } = useOip()
+  const { user } = useAuth()
   const [items, setItems] = useState([])
+  const [oipLabels, setOipLabels] = useState({}) // oip_id -> "SAM Direct" | "Derived Demand"
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!selectedOip) return
+    if (!selectedOip?.tenant_id || !selectedOip?.vertical_id) return
     let cancelled = false
     setLoading(true)
     ;(async () => {
+      // Both SAM Direct and Derived Demand pursuits live under sibling OIPs
+      // (same tenant + vertical, e.g. "seenthis-sam" and "seenthis-sam-derived").
+      // Merge both into one list here, badged by source, rather than making
+      // the user switch the OIP selector to see one or the other.
+      const { data: siblings } = await supabase
+        .from('oips')
+        .select('id, slug')
+        .eq('tenant_id', selectedOip.tenant_id)
+        .eq('vertical_id', selectedOip.vertical_id)
+      const oipIds = (siblings || []).map((o) => o.id)
+      const labels = {}
+      for (const o of siblings || []) {
+        labels[o.id] = o.slug?.endsWith('-derived') ? 'Derived Demand' : 'SAM Direct'
+      }
+      if (cancelled) return
+      setOipLabels(labels)
+
+      if (oipIds.length === 0) {
+        setItems([])
+        setLoading(false)
+        return
+      }
       const { data } = await supabase
         .from('pursued_signals')
-        .select('id, signal_id, snapshot, pipeline_stage, notes, pursued_at')
-        .eq('oip_id', selectedOip.id)
+        .select('id, oip_id, signal_id, snapshot, pipeline_stage, notes, pursued_at, last_updated_at')
+        .in('oip_id', oipIds)
         .order('pursued_at', { ascending: false })
       if (cancelled) return
       setItems(data || [])
@@ -5902,9 +6002,24 @@ function PursuedPage() {
     else setItems(prev => prev.map(it => it.id === id ? { ...it, pipeline_stage: stage } : it))
   }
 
+  const saveNotes = async (id, text) => {
+    const { error } = await supabase
+      .from('pursued_signals')
+      .update({ notes: text, last_updated_at: new Date().toISOString(), last_updated_by: user?.id || null })
+      .eq('id', id)
+    if (error) {
+      alert('Save failed: ' + error.message)
+      return false
+    }
+    setItems(prev => prev.map(it => it.id === id
+      ? { ...it, notes: text, last_updated_at: new Date().toISOString() }
+      : it))
+    return true
+  }
+
   if (loading) return <SectionLoader />
   if (items.length === 0) {
-    return <EmptyMessage title="No pursued items yet" message="Move a signal into the pursued pipeline from Market Review to track it here." />
+    return <EmptyMessage title="No pursued items yet" message="Move a signal into the pursued pipeline from Market Review or Derived Demand to track it here." />
   }
 
   const stages = ['identified', 'qualifying', 'pursuing', 'won', 'lost']
@@ -5922,31 +6037,14 @@ function PursuedPage() {
             {stage} · {grouped[stage].length}
           </div>
           {grouped[stage].map(it => (
-            <div key={it.id} className="signal-card" style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)', marginBottom: 6 }}>
-                {it.snapshot.state} · {it.snapshot.source_name} · pursued {new Date(it.pursued_at).toLocaleDateString()}
-              </div>
-              <div style={{ fontFamily: "'Spectral', serif", fontSize: 16, marginBottom: 8 }}>{it.snapshot.title}</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                {stages.map(s => (
-                  <button key={s} onClick={() => updateStage(it.id, s)}
-                    style={{
-                      padding: '4px 10px',
-                      border: '1px solid ' + (it.pipeline_stage === s ? 'var(--primary)' : 'var(--rule-strong)'),
-                      background: it.pipeline_stage === s ? 'var(--primary-soft)' : 'var(--paper)',
-                      color: it.pipeline_stage === s ? 'var(--primary-dark)' : 'var(--ink-fade)',
-                      borderRadius: 3, cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
-                    }}>
-                    {s}
-                  </button>
-                ))}
-                {it.snapshot.doc_url && (
-                  <a href={it.snapshot.doc_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 'auto', fontSize: 13 }}>
-                    Source ↗
-                  </a>
-                )}
-              </div>
-            </div>
+            <PursuedCard
+              key={it.id}
+              it={it}
+              sourceLabel={oipLabels[it.oip_id] || 'SAM Direct'}
+              stages={stages}
+              onUpdateStage={updateStage}
+              onSaveNotes={saveNotes}
+            />
           ))}
         </div>
       ))}
