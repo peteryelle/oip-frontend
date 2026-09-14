@@ -5880,6 +5880,7 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
   const [outcome, setOutcome] = useState('')
   const [nextStep, setNextStep] = useState('')
   const [nextActionDate, setNextActionDate] = useState('')
+  const [showDateField, setShowDateField] = useState(false)
   const [saving, setSaving] = useState(false)
   const snap = it.snapshot || {}
   // SAM-direct snapshots carry state/source_name/doc_url; Derived Demand
@@ -5901,6 +5902,7 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
       setOutcome('')
       setNextStep('')
       setNextActionDate('')
+      setShowDateField(false)
       // workedBy left as-is — usually the same person logging several in a row
     }
   }
@@ -5948,10 +5950,30 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
             placeholder="Worked by"
             style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
           />
-          <input
-            type="date" value={nextActionDate} onChange={(e) => setNextActionDate(e.target.value)}
-            style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-          />
+          {showDateField || nextActionDate ? (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                type="date" value={nextActionDate} onChange={(e) => setNextActionDate(e.target.value)}
+                style={{ flex: 1, fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+              />
+              <button
+                type="button"
+                onClick={() => { setNextActionDate(''); setShowDateField(false) }}
+                title="Clear date"
+                style={{ padding: '4px 8px', fontSize: 12, border: '1px solid var(--rule)', borderRadius: 4, background: 'var(--paper)', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowDateField(true)}
+              style={{ padding: '6px 8px', fontSize: 12, border: '1px dashed var(--rule)', borderRadius: 4, background: 'var(--paper)', color: 'var(--ink-fade)', cursor: 'pointer', textAlign: 'left' }}
+            >
+              + Set next action date
+            </button>
+          )}
         </div>
         <input
           type="text" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)}
