@@ -50,6 +50,13 @@ function PursuitPanel({ award, onUpdateStatus, onPursue }) {
 
   const handleStatusClick = async (s) => {
     if (busy) return;
+    if (s === "pursuing") {
+      if (!window.confirm(`Move "${label}" to your pursued pipeline? It will be excluded from auto-purge.`)) return;
+      setBusy(true);
+      await onPursue?.(award, reason);
+      setBusy(false);
+      return;
+    }
     setBusy(true);
     await onUpdateStatus?.(award.signalId, s);
     setBusy(false);

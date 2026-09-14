@@ -130,6 +130,8 @@ export function useAwards(oipId, opts = {}) {
     if (!includeArchived) {
       list = list.filter((a) => !a.gated && a.score != null && a.score >= ARCHIVE_BELOW);
     }
+    // Once pursued, it lives in the Pursued Pipeline — don't also show it here.
+    list = list.filter((a) => a.status !== "pursuing");
     // Pocket scope: a clicked demand-grid cell (sub-agency × NAICS).
     if (pocket && pocket.agency && pocket.naics) {
       list = list.filter((a) => a.subAgency === pocket.agency && a.naics === pocket.naics);
