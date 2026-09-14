@@ -696,7 +696,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             otherwise repeat one account profile five times over.
             Rendered for gated rows too — the contract may be dead while the
             account is not. */}
-        {(book.awards != null || book.total != null || bd.incumbent_uei) && (
+        {(book.awards != null || book.total != null || bd.incumbent_uei || ((bd.sub_agency || bd.agency) && bd.naics_code)) && (
           <Section title="The account">
             <div className="wq-rep-grid">
               <span>Federal book</span>
@@ -723,10 +723,10 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
                 </a>
               </p>
             )}
-            {(bd.agency_poc?.name && (bd.sub_agency || bd.agency) && bd.naics_code) && (
+            {((bd.sub_agency || bd.agency) && bd.naics_code) && (
               <p style={{ marginTop: "0.4rem" }}>
                 <a
-                  href={`/co-landscape?agency=${encodeURIComponent((bd.sub_agency || bd.agency).replace(/[.,]/g, ""))}&naics=${encodeURIComponent(bd.naics_code)}&co=${encodeURIComponent(bd.agency_poc.name)}`}
+                  href={`/co-landscape?agency=${encodeURIComponent((bd.sub_agency || bd.agency).replace(/[.,]/g, ""))}&naics=${encodeURIComponent(bd.naics_code)}${bd.agency_poc?.name ? `&co=${encodeURIComponent(bd.agency_poc.name)}` : ""}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ fontSize: "0.85rem", color: "#2563eb", textDecoration: "none" }}

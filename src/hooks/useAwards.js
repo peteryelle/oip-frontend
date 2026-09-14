@@ -47,6 +47,37 @@ export function awardTags(a, recompeteDays = 180, awardDays = 120) {
   };
 }
 
+// Re-fetch ONE award's full record (oip_signals + joined signal) by
+// oip_id + signal_id, and shape it exactly like a row from useAwards' own
+// list -- so the same <B2BBusDevReport award={...}/> drawer that renders
+// from the Market Review table can also render for a Pursued Pipeline item.
+//
+// Deliberately does NOT filter on relevance_status or status: a pursued
+// row is status='pursuing' (excluded from the live useAwards list on
+// purpose -- see the `status !== "pursuing"` filter above) and may also be
+// stale/archived by the time someone reopens it from Pursued. The full
+// b2b_busdev record itself is never deleted on pursue (only the pursued_signals
+// snapshot is a copy) so this read still finds it unless the source signal
+// itself was later purged, in which case data is null and the caller should
+// fall back to the pursued_signals snapshot for a degraded read-only view.
+export async function fetchAwardBySignal(oipId, signalId) {
+  const { data, error } = await supabase
+    .from("oip_signals")
+    .select(`
+      signal_id, status, relevance_status,
+      b2b_busdev, b2b_score, disposition, motion, displacement_difficulty,
+      incumbent_method, prime_uei, why_now, data_confidence_flag,
+      verification_status, verification_modifier, verified_score,
+      installer_name, evidence_url, verification_reasoning, verified_at,
+      signals!inner ( id, title, doc_url, source_meta, source_name, signal_kind )
+    `)
+    .eq("oip_id", oipId)
+    .eq("signal_id", signalId)
+    .maybeSingle();
+  if (error || !data) return { award: null, error };
+  return { award: normalize(data), error: null };
+}
+
 export function useAwards(oipId, opts = {}) {
   const {
     sort = "score",

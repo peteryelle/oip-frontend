@@ -1,6 +1,8 @@
 import { useEffect, useState, Component } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
 import B2BBusDevTab from './components/awards/B2BBusDevTab'
+import B2BBusDevReport from './components/awards/B2BBusDevReport'
+import { fetchAwardBySignal } from './hooks/useAwards'
 import { SignalSubawardsPanel } from './components/SignalSubawardsPanel'
 import ActivityLog from './components/audit/ActivityLog'
 import AuditHistory from './components/audit/AuditHistory'
@@ -5874,7 +5876,7 @@ function KeywordPill({ k, stats, editing, onChangeTier, onRemove }) {
 // PURSUED PIPELINE
 // ────────────────────────────────────────────────────────────────────────────
 
-function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) {
+function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity, onViewBrief, briefLoadingId }) {
   const [workedBy, setWorkedBy] = useState('')
   const [actionTaken, setActionTaken] = useState('')
   const [outcome, setOutcome] = useState('')
@@ -5945,7 +5947,7 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
         )}
       </div>
 
-      <div style={{ marginBottom: 10 }}>
+      <div style={{ marginBottom: 10, display: 'flex', gap: 8 }}>
         <button
           type="button"
           onClick={() => setLogOpen(true)}
@@ -5953,6 +5955,16 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
         >
           + Log activity
         </button>
+        {onViewBrief && (
+          <button
+            type="button"
+            onClick={() => onViewBrief(it, sourceLabel)}
+            disabled={briefLoadingId === it.id}
+            style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--rule-strong)', background: 'var(--paper)', color: 'var(--ink)', cursor: 'pointer' }}
+          >
+            {briefLoadingId === it.id ? 'Loading…' : 'View Brief'}
+          </button>
+        )}
       </div>
 
       {logOpen && (
@@ -6056,12 +6068,81 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
   )
 }
 
+// Canonical oip_signals+signals select for a SAM Direct row -- mirrors the
+// MarketReviewPage list query exactly so SignalDrawer gets the shape it expects.
+const SAM_DIRECT_SIGNAL_SELECT = `
+  oip_id, signal_id, signal_tier, signal_value, signal_value_adjusted,
+  deadline_recency_multiplier, deadline_recency_note,
+  matched_keywords, matched_groups,
+  match_reason, text_excerpt, status, relevance_status, notes, scored_at, scores, matched_sentinels,
+  lifecycle_stage, objective, objective_confidence_note, objective_deadline_unknown,
+  program_ref, project_ref, phase_ref, why_now, board_enrichment,
+  signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
+                      meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key)
+`
+
 function PursuedPage() {
   const { selectedOip } = useOip()
   const { user } = useAuth()
   const [items, setItems] = useState([])
   const [oipLabels, setOipLabels] = useState({}) // oip_id -> "SAM Direct" | "Derived Demand"
   const [loading, setLoading] = useState(true)
+
+  // Brief viewer -- "View Brief" on a Pursued card re-fetches the full,
+  // still-live record (Derived Demand: oip_signals.b2b_busdev via
+  // fetchAwardBySignal; SAM Direct: oip_signals+signals) so the same
+  // drawer content shown from Market Review is available from Pursued too,
+  // rather than the trimmed pursued_signals.snapshot the card itself renders from.
+  const [brief, setBrief] = useState(null) // { kind: 'derived', award, oipId } | { kind: 'sam', os } | { kind: 'unavailable', title }
+  const [briefLoadingId, setBriefLoadingId] = useState(null)
+  const [briefSubscriberName, setBriefSubscriberName] = useState(null)
+  const briefKeywordTierMap = useKeywordTierMap(brief?.kind === 'sam' ? brief.os.oip_id : null)
+
+  const viewBrief = async (it, sourceLabel) => {
+    setBriefLoadingId(it.id)
+    try {
+      if (sourceLabel === 'Derived Demand') {
+        const { award, error } = await fetchAwardBySignal(it.oip_id, it.signal_id)
+        if (error || !award) {
+          setBrief({ kind: 'unavailable', title: (it.snapshot || {}).title || (it.snapshot || {}).incumbent_name || 'this opportunity' })
+        } else {
+          const { data: prof } = await supabase.rpc('get_canonical_profile', { p_oip_id: it.oip_id })
+          const p = Array.isArray(prof) ? prof[0] : prof
+          setBriefSubscriberName(p?.company_name || null)
+          setBrief({ kind: 'derived', award, oipId: it.oip_id })
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('oip_signals')
+          .select(SAM_DIRECT_SIGNAL_SELECT)
+          .eq('oip_id', it.oip_id)
+          .eq('signal_id', it.signal_id)
+          .maybeSingle()
+        if (error || !data) {
+          setBrief({ kind: 'unavailable', title: (it.snapshot || {}).title || 'this opportunity' })
+        } else {
+          setBrief({ kind: 'sam', os: data })
+        }
+      }
+    } finally {
+      setBriefLoadingId(null)
+    }
+  }
+
+  const closeBrief = () => setBrief(null)
+
+  // Re-used for the SAM Direct brief's Status buttons -- same pattern as
+  // MarketReviewPage.updateStatus, scoped to whichever oip_id/signal_id the
+  // open brief carries rather than selectedOip (Pursued spans sibling OIPs).
+  const updateBriefSignalStatus = async (oipId, signalId, newStatus) => {
+    const { error } = await supabase
+      .from('oip_signals')
+      .update({ status: newStatus })
+      .eq('oip_id', oipId)
+      .eq('signal_id', signalId)
+    if (error) { alert('Status update failed: ' + error.message); return }
+    setBrief((prev) => (prev && prev.kind === 'sam' ? { ...prev, os: { ...prev.os, status: newStatus } } : prev))
+  }
 
   useEffect(() => {
     if (!selectedOip?.tenant_id || !selectedOip?.vertical_id) return
@@ -6175,10 +6256,43 @@ function PursuedPage() {
               stages={stages}
               onUpdateStage={updateStage}
               onAddActivity={addActivity}
+              onViewBrief={viewBrief}
+              briefLoadingId={briefLoadingId}
             />
           ))}
         </div>
       ))}
+
+      {brief && (
+        <div className="wq-drawer-overlay" onClick={closeBrief}>
+          <div className="wq-drawer" onClick={(e) => e.stopPropagation()}>
+            <button className="wq-drawer-close" onClick={closeBrief} aria-label="Close">
+              &times;
+            </button>
+            {brief.kind === 'derived' && (
+              <B2BBusDevReport award={brief.award} subscriberName={briefSubscriberName} />
+            )}
+            {brief.kind === 'sam' && (
+              <SignalDrawer
+                os={brief.os}
+                keywordTierMap={briefKeywordTierMap}
+                onClose={closeBrief}
+                onUpdateStatus={(status) => updateBriefSignalStatus(brief.os.oip_id, brief.os.signal_id, status)}
+                onPursue={() => alert('Already in your pursued pipeline.')}
+              />
+            )}
+            {brief.kind === 'unavailable' && (
+              <div style={{ padding: 24 }}>
+                <p>
+                  The original signal for <strong>{brief.title}</strong> is no longer available
+                  (likely purged from the source feed). The saved summary on the Pursued card is
+                  all that remains for this item.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
