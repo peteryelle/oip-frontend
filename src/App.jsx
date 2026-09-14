@@ -5882,6 +5882,7 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
   const [nextActionDate, setNextActionDate] = useState('')
   const [showDateField, setShowDateField] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
   const snap = it.snapshot || {}
   // SAM-direct snapshots carry state/source_name/doc_url; Derived Demand
   // snapshots carry agency/naics_code/agency_poc instead — neither field set
@@ -5903,6 +5904,7 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
       setNextStep('')
       setNextActionDate('')
       setShowDateField(false)
+      setLogOpen(false)
       // workedBy left as-is — usually the same person logging several in a row
     }
   }
@@ -5943,64 +5945,95 @@ function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity }) 
         )}
       </div>
 
-      <div style={{ border: '1px solid var(--rule)', borderRadius: 4, padding: 10, marginBottom: 10 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-          <input
-            type="text" value={workedBy} onChange={(e) => setWorkedBy(e.target.value)}
-            placeholder="Worked by"
-            style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-          />
-          {showDateField || nextActionDate ? (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <div style={{ marginBottom: 10 }}>
+        <button
+          type="button"
+          onClick={() => setLogOpen(true)}
+          style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--primary)', background: 'var(--paper)', color: 'var(--primary)', cursor: 'pointer' }}
+        >
+          + Log activity
+        </button>
+      </div>
+
+      {logOpen && (
+        <div
+          onClick={() => setLogOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(560px, 92vw)', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 6, padding: 20, boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
               <input
-                type="date" value={nextActionDate} onChange={(e) => setNextActionDate(e.target.value)}
-                style={{ flex: 1, fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+                type="text" value={workedBy} onChange={(e) => setWorkedBy(e.target.value)}
+                placeholder="Worked by"
+                style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
               />
+              {showDateField || nextActionDate ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="date" value={nextActionDate} onChange={(e) => setNextActionDate(e.target.value)}
+                    style={{ flex: 1, fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setNextActionDate(''); setShowDateField(false) }}
+                    title="Clear date"
+                    style={{ padding: '4px 8px', fontSize: 12, border: '1px solid var(--rule)', borderRadius: 4, background: 'var(--paper)', cursor: 'pointer' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowDateField(true)}
+                  style={{ padding: '6px 8px', fontSize: 12, border: '1px dashed var(--rule)', borderRadius: 4, background: 'var(--paper)', color: 'var(--ink-fade)', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  + Set next action date
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <input
+                type="text" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)}
+                placeholder="What did you do"
+                style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+              />
+              <input
+                type="text" value={outcome} onChange={(e) => setOutcome(e.target.value)}
+                placeholder="Result"
+                style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <input
+              type="text" value={nextStep} onChange={(e) => setNextStep(e.target.value)}
+              placeholder="Next step"
+              style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', marginBottom: 14, border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
+            />
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
                 type="button"
-                onClick={() => { setNextActionDate(''); setShowDateField(false) }}
-                title="Clear date"
-                style={{ padding: '4px 8px', fontSize: 12, border: '1px solid var(--rule)', borderRadius: 4, background: 'var(--paper)', cursor: 'pointer' }}
+                onClick={() => setLogOpen(false)}
+                style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--rule)', background: 'var(--paper)', color: 'var(--ink-fade)', cursor: 'pointer' }}
               >
-                ✕
+                Cancel
+              </button>
+              <button
+                onClick={handleAdd}
+                disabled={saving}
+                style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--primary)', background: 'var(--primary)', color: '#fff', cursor: 'pointer' }}
+              >
+                {saving ? 'Saving…' : 'Add entry'}
               </button>
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowDateField(true)}
-              style={{ padding: '6px 8px', fontSize: 12, border: '1px dashed var(--rule)', borderRadius: 4, background: 'var(--paper)', color: 'var(--ink-fade)', cursor: 'pointer', textAlign: 'left' }}
-            >
-              + Set next action date
-            </button>
-          )}
+          </div>
         </div>
-        <input
-          type="text" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)}
-          placeholder="What did you do"
-          style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', marginBottom: 8, border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-        />
-        <textarea
-          value={outcome} onChange={(e) => setOutcome(e.target.value)}
-          placeholder="Result"
-          rows={2}
-          style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', marginBottom: 8, border: '1px solid var(--rule)', borderRadius: 4, resize: 'vertical', boxSizing: 'border-box' }}
-        />
-        <input
-          type="text" value={nextStep} onChange={(e) => setNextStep(e.target.value)}
-          placeholder="Next step"
-          style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', marginBottom: 8, border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-        />
-        <div style={{ textAlign: 'right' }}>
-          <button
-            onClick={handleAdd}
-            disabled={saving}
-            style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--primary)', background: 'var(--primary)', color: '#fff', cursor: 'pointer' }}
-          >
-            {saving ? 'Saving…' : 'Add entry'}
-          </button>
-        </div>
-      </div>
+      )}
 
       {activities.length > 0 && (
         <div>
