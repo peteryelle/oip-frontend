@@ -6264,7 +6264,8 @@ function PursuedPage() {
       ))}
 
       {brief && (
-        <div className="wq-drawer-overlay" onClick={closeBrief}>
+        <div className="wq-awards">
+          <div className="wq-drawer-overlay" onClick={closeBrief}>
           <div className="wq-drawer" onClick={(e) => e.stopPropagation()}>
             <button className="wq-drawer-close" onClick={closeBrief} aria-label="Close">
               &times;
@@ -6290,6 +6291,7 @@ function PursuedPage() {
                 </p>
               </div>
             )}
+          </div>
           </div>
         </div>
       )}
