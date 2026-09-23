@@ -1484,8 +1484,41 @@ function MarketReviewPage() {
   const [naicsFilter, setNaicsFilter] = useState('')
   const activeSignals    = isSam ? (samTab === 'dib' ? samDib : samOpportunities) : signals
 
+  // B2G column filters (Due Date / Fit Score / Type header popovers).
+  // Client-side only over already-loaded rows. Persisted per OIP in the
+  // browser. hiddenTypes is an EXCLUDE list so newly-seen notice types
+  // show by default. futureOnly defaults ON (2026-09-23 decision).
+  const colFilterKey = selectedOip?.id ? `wq-b2g-colfilters-${selectedOip.id}` : null
+  const [colFilters, setColFilters] = useState(B2G_COL_FILTER_DEFAULTS)
+  useEffect(() => {
+    if (!colFilterKey) return
+    try {
+      const raw = localStorage.getItem(colFilterKey)
+      setColFilters(raw ? { ...B2G_COL_FILTER_DEFAULTS, ...JSON.parse(raw) } : B2G_COL_FILTER_DEFAULTS)
+    } catch { setColFilters(B2G_COL_FILTER_DEFAULTS) }
+  }, [colFilterKey])
+  const updateColFilters = (patch) => setColFilters(prev => {
+    const next = { ...prev, ...patch }
+    try { if (colFilterKey) localStorage.setItem(colFilterKey, JSON.stringify(next)) } catch {}
+    return next
+  })
+  const resetColFilters = () => {
+    try { if (colFilterKey) localStorage.removeItem(colFilterKey) } catch {}
+    setColFilters(B2G_COL_FILTER_DEFAULTS)
+  }
+  const colFiltersApply = isSam && samTab === 'opportunities'
+  const typeCounts = colFiltersApply
+    ? activeSignals.reduce((acc, s) => {
+        const t = s.signals?.metadata?.notice_type || NO_TYPE_LABEL
+        acc[t] = (acc[t] || 0) + 1
+        return acc
+      }, {})
+    : {}
+  const colFiltersActive = colFiltersApply && !isDefaultColFilters(colFilters)
+
   const filtered = activeSignals.filter(s => {
     if (statusFilter && s.status !== statusFilter) return false
+    if (colFiltersApply && !passesB2gColFilters(s, colFilters)) return false
     if (tierFilter && s.signal_tier !== tierFilter) return false
     // Agency allowlist — Direct SAM opportunities only. Hide signals whose awarding
     // department isn't in the profile's target_agencies. Empty allowlist => show all.
@@ -1673,17 +1706,26 @@ function MarketReviewPage() {
               <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
                 {filtered.length} {samTab === 'dib' ? 'prospects' : 'opportunities'}
                 {filtered.length !== activeSignals.length && ` of ${activeSignals.length}`}
+                {colFiltersApply && colFilters.futureOnly && <span> · future due dates only</span>}
+                {colFiltersActive && (
+                  <button onClick={resetColFilters} style={{ marginLeft: 12, background: 'none', border: 'none',
+                    padding: 0, cursor: 'pointer', color: 'var(--primary)', fontFamily: 'inherit', fontSize: 'inherit',
+                    textDecoration: 'underline' }}>Reset column filters</button>
+                )}
               </div>
               {filtered.length === 0 ? (
                 <EmptyMessage
                   title={samTab === 'dib' && samDib.length === 0 ? 'No DIB prospects yet' : 'No results match your filters'}
                   message={samTab === 'dib' && samDib.length === 0
                     ? 'Enable award notices (ptype=a) in your profile pull config and run a collect.'
-                    : 'Adjust filters above or run a new collect.'} />
+                    : colFiltersActive
+                      ? 'Column filters (Due Date / Fit Score / Type) are hiding every row — use Reset column filters above.'
+                      : 'Adjust filters above or run a new collect.'} />
               ) : samTab === 'dib' ? (
                 <DibProspectTable signals={filtered} onRowClick={setOpenSignal} naicsFilter={naicsFilter} setNaicsFilter={setNaicsFilter} />
               ) : (
-                <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal} />
+                <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal}
+                  colFilters={colFilters} onColFilters={updateColFilters} typeCounts={typeCounts} />
               )}
             </>
             )
@@ -2008,7 +2050,7 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
 // SAM OPPORTUNITY TABLE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SamOpportunityTable({ signals, onRowClick }) {
+function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_DEFAULTS, onColFilters = () => {}, typeCounts = {} }) {
   // Default view: due date descending (furthest-out first, past-due/no-date
   // sinks to the bottom). Per 2026-09-10 decision, the due-date discount to
   // the Fit Score itself has been backed out — Fit Score is the raw LLM/ICP
@@ -2052,13 +2094,14 @@ function SamOpportunityTable({ signals, onRowClick }) {
     else { setSortKey(key); setSortDir('desc') }
   }
 
-  const SortTh = ({ label, k, style = {} }) => (
+  const SortTh = ({ label, k, style = {}, filter = null }) => (
     <th onClick={() => toggleSort(k)} style={{
       ...thSam, cursor: 'pointer', userSelect: 'none',
       color: sortKey === k ? 'var(--primary)' : 'var(--ink-fade)',
       ...style,
     }}>
       {label} {sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+      {filter}
     </th>
   )
 
@@ -2068,9 +2111,24 @@ function SamOpportunityTable({ signals, onRowClick }) {
         <thead>
           <tr style={{ borderBottom: '2px solid var(--rule)' }}>
             <SortTh label="Title" k="title" style={{ minWidth: 280, textAlign: 'left' }} />
-            <th style={thSam}>Type</th>
-            <SortTh label="Due Date" k="deadline" />
-            <SortTh label="Fit Score" k="scores.llm_relevance" />
+            <th style={{ ...thSam, position: 'relative' }}>
+              Type
+              <ColFilterPop active={colFilters.hiddenTypes.length > 0} label="Filter by type">
+                <TypeFilterBody colFilters={colFilters} onColFilters={onColFilters} typeCounts={typeCounts} />
+              </ColFilterPop>
+            </th>
+            <SortTh label="Due Date" k="deadline" style={{ position: 'relative' }}
+              filter={
+                <ColFilterPop active={colFilters.futureOnly || !colFilters.includeNoDate} label="Filter by due date">
+                  <DueFilterBody colFilters={colFilters} onColFilters={onColFilters} />
+                </ColFilterPop>
+              } />
+            <SortTh label="Fit Score" k="scores.llm_relevance" style={{ position: 'relative' }}
+              filter={
+                <ColFilterPop active={colFilters.minFit !== ''} label="Filter by fit score">
+                  <FitFilterBody colFilters={colFilters} onColFilters={onColFilters} />
+                </ColFilterPop>
+              } />
             <SortTh label="Risk" k="scores.bid_risk" />
             <th style={thSam}>Sentinel</th>
             <th style={thSam}>Action</th>
@@ -2147,6 +2205,147 @@ function SamOpportunityTable({ signals, onRowClick }) {
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// ── B2G column filters ──────────────────────────────────────────────────────
+const NO_TYPE_LABEL = '(No type)'
+const B2G_COL_FILTER_DEFAULTS = { futureOnly: true, includeNoDate: true, minFit: '', hiddenTypes: [] }
+
+function isDefaultColFilters(f) {
+  return f.futureOnly === B2G_COL_FILTER_DEFAULTS.futureOnly
+    && f.includeNoDate === B2G_COL_FILTER_DEFAULTS.includeNoDate
+    && f.minFit === ''
+    && f.hiddenTypes.length === 0
+}
+
+function passesB2gColFilters(s, f) {
+  const meta = s.signals?.metadata || {}
+  // Due date
+  const d = meta.response_deadline
+  if (!d) {
+    if (!f.includeNoDate) return false
+  } else if (f.futureOnly) {
+    // "Future" = due today or later (compare against start of today, local time)
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const due = new Date(d)
+    if (!isNaN(due) && due < today) return false
+  }
+  // Fit score (>= min). Unscored rows hidden once a minimum is set.
+  if (f.minFit !== '' && f.minFit != null) {
+    const fit = s.scores?.llm_relevance ?? s.scores?.technical_fit
+    if (fit == null || Number(fit) < Number(f.minFit)) return false
+  }
+  // Type (exclude list)
+  if (f.hiddenTypes.length) {
+    const t = meta.notice_type || NO_TYPE_LABEL
+    if (f.hiddenTypes.includes(t)) return false
+  }
+  return true
+}
+
+// Funnel icon in a header cell; click opens a small popover. Clicks inside
+// never bubble to the <th>, so the column's sort-on-click is unaffected.
+function ColFilterPop({ active, label, children }) {
+  const [open, setOpen] = useState(false)
+  const [ref, setRef] = useState(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => { if (ref && !ref.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey) }
+  }, [open, ref])
+  return (
+    <span ref={setRef} onClick={e => e.stopPropagation()} style={{ display: 'inline-block', marginLeft: 6, verticalAlign: 'middle' }}>
+      <button type="button" aria-label={label} title={label} aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+        style={{ background: active ? 'var(--primary-soft)' : 'transparent', border: 'none', borderRadius: 3,
+          padding: '2px 3px', cursor: 'pointer', lineHeight: 0,
+          color: active ? 'var(--primary)' : 'var(--ink-fade)' }}>
+        <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M1.5 2h13l-5 6.2V13l-3 1.5V8.2z" fill={active ? 'currentColor' : 'none'}
+            stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div role="dialog" aria-label={label} style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50,
+          marginTop: 4, minWidth: 220, background: 'var(--paper)', border: '1px solid var(--rule)',
+          borderRadius: 4, boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: 12,
+          textTransform: 'none', letterSpacing: 'normal', fontWeight: 400, fontSize: 13,
+          color: 'var(--ink)', cursor: 'default', whiteSpace: 'nowrap' }}>
+          {children}
+        </div>
+      )}
+    </span>
+  )
+}
+
+const popRow = { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', cursor: 'pointer' }
+const popLink = { background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--primary)',
+  fontFamily: 'inherit', fontSize: 12, textDecoration: 'underline' }
+
+function DueFilterBody({ colFilters, onColFilters }) {
+  return (
+    <div>
+      <label style={popRow}>
+        <input type="checkbox" checked={colFilters.futureOnly}
+          onChange={e => onColFilters({ futureOnly: e.target.checked })} />
+        Future only (due today or later)
+      </label>
+      <label style={popRow}>
+        <input type="checkbox" checked={colFilters.includeNoDate}
+          onChange={e => onColFilters({ includeNoDate: e.target.checked })} />
+        Include rows with no due date
+      </label>
+    </div>
+  )
+}
+
+function FitFilterBody({ colFilters, onColFilters }) {
+  return (
+    <div>
+      <label style={{ ...popRow, cursor: 'default' }}>
+        Minimum fit ≥
+        <input type="number" min="0" max="100" step="1" autoFocus
+          value={colFilters.minFit}
+          onChange={e => {
+            const v = e.target.value
+            onColFilters({ minFit: v === '' ? '' : Math.max(0, Math.min(100, Number(v))) })
+          }}
+          style={{ width: 64, padding: '4px 6px', fontFamily: "'IBM Plex Mono', monospace" }} />
+      </label>
+      <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+        {[25, 40, 60].map(n => (
+          <button key={n} type="button" style={popLink} onClick={() => onColFilters({ minFit: n })}>≥ {n}</button>
+        ))}
+        <button type="button" style={popLink} onClick={() => onColFilters({ minFit: '' })}>Clear</button>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 11, color: 'var(--ink-fade)' }}>Unscored rows are hidden while a minimum is set.</div>
+    </div>
+  )
+}
+
+function TypeFilterBody({ colFilters, onColFilters, typeCounts }) {
+  const types = Object.keys(typeCounts).sort((a, b) => typeCounts[b] - typeCounts[a] || a.localeCompare(b))
+  const hidden = colFilters.hiddenTypes
+  const toggle = (t) => onColFilters({ hiddenTypes: hidden.includes(t) ? hidden.filter(x => x !== t) : [...hidden, t] })
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 6 }}>
+        <button type="button" style={popLink} onClick={() => onColFilters({ hiddenTypes: [] })}>All</button>
+        <button type="button" style={popLink} onClick={() => onColFilters({ hiddenTypes: types })}>None</button>
+      </div>
+      {types.length === 0 && <div style={{ color: 'var(--ink-fade)' }}>No types in this list</div>}
+      {types.map(t => (
+        <label key={t} style={popRow}>
+          <input type="checkbox" checked={!hidden.includes(t)} onChange={() => toggle(t)} />
+          <span style={{ flex: 1 }}>{t}</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'var(--ink-fade)' }}>{typeCounts[t]}</span>
+        </label>
+      ))}
     </div>
   )
 }
