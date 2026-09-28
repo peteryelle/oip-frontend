@@ -1813,6 +1813,10 @@ function stageScaleScoreJS(lifecycleStage, title, matchReason) {
 }
 
 
+// Signals that are each a discrete solicitation: one card per signal, titled
+// by the signal, clicking straight into the signal drawer (see EntityBoard).
+const PER_SIGNAL_DOC_TYPES = new Set(['bid_listing', 'legal_notice'])
+
 function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false, keywordTierMap = {} }) {
   const [search, setSearch] = useState('')
 
@@ -1835,17 +1839,25 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
   // don't have entity_key set. Before this fix, every NYC agency posted
   // through the citywide City Record portal shared the constant source_name
   // "NYC City Record" and collapsed into one card regardless of entity_key.
+  //
+  // Bid-listing and legal-notice signals get the same one-signal-one-card
+  // treatment on ANY board (not just derived ones): each is a discrete
+  // solicitation, and their source_name is only the portal ("City of Boston
+  // Bid Listings"), so entity grouping would collapse unrelated bids from
+  // different departments into one card. Written by the Boston bids and
+  // Bay State Banner collectors (doc_type 'bid_listing' / 'legal_notice').
   const entityMap = new Map()
   for (const s of signals) {
-    const key = isDerived
+    const perSignal = isDerived || PER_SIGNAL_DOC_TYPES.has(s.signals?.doc_type)
+    const key = perSignal
       ? (s.signal_id || s.signals?.id)
       : (s.signals?.entity_key || s.signals?.source_name || 'Unknown')
-    const name = isDerived
+    const name = perSignal
       ? (s.signals?.title || 'Untitled opportunity')
       : (s.signals?.source_name || 'Unknown')
     const state = s.signals?.state || ''
     if (!entityMap.has(key)) {
-      entityMap.set(key, { key, name, state, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, kwScore: null, compositeScore: null, stageScale: null, row: s })
+      entityMap.set(key, { key, name, state, perSignal, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, kwScore: null, compositeScore: null, stageScale: null, row: s })
     }
     const e = entityMap.get(key)
     e.total++
@@ -1937,7 +1949,7 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
         cursor: 'pointer',
         opacity: muted ? 0.75 : 1,
       }}
-        onClick={() => isDerived
+        onClick={() => e.perSignal
           ? (onSignalClick && onSignalClick(e.row))
           : (onEntityClick && onEntityClick(e.key, e.name))}
       >
