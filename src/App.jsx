@@ -2305,6 +2305,107 @@ function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_
 // SLED oip_signals row into the fields the table needs, reading the SAM-shaped
 // keys first so a scraper that starts writing them is picked up for free.
 
+// Date-only strings ("2026-09-30") parse as UTC midnight, which renders as
+// the previous day in US time zones. Parse those as local dates; anything
+// with a time component is left to the Date constructor.
+function parseLocalDate(d) {
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    const [y, m, day] = d.split('-').map(Number)
+    return new Date(y, m - 1, day)
+  }
+  return new Date(d)
+}
+
+// Long selection-method names from source systems -> short table labels.
+const SLED_TYPE_ALIASES = {
+  'request for proposals': 'RFP',
+  'request for proposal': 'RFP',
+  'competitive sealed proposals': 'RFP',
+  'competitive sealed bid': 'Bid',
+  'competitive sealed bids': 'Bid',
+  'invitation for bids': 'Bid',
+  'request for bids': 'Bid',
+  'request for qualifications': 'RFQ',
+  'request for information': 'RFI',
+  'request for expressions of interest': 'RFEI',
+  'negotiated acquisition': 'Negotiated',
+  'sole source': 'Sole Source',
+}
+
+const SLED_DETAIL_KEYS = [
+  'due_date', 'response_deadline', 'pin', 'selection_method_description',
+  'category_description', 'contact_name', 'contact_phone', 'email',
+  'address_to_request', 'additional_description_1', 'goals',
+]
+function hasSolicitationDetail(meta) {
+  return SLED_DETAIL_KEYS.some(k => {
+    const v = meta?.[k]
+    return v != null && v !== '' && !(typeof v === 'object' && Object.keys(v).length === 0)
+  })
+}
+
+const GOAL_LABELS = [
+  ['mwbe', 'M/WBE'], ['mbe', 'MBE'], ['wbe', 'WBE'], ['sdvob', 'SDVOB'], ['dbe', 'DBE'],
+]
+
+function SolicitationDetails({ meta }) {
+  const due = meta.response_deadline || meta.due_date
+  const dueText = (() => {
+    if (!due) return null
+    const d = parseLocalDate(due)
+    if (isNaN(d)) return String(due)
+    const hasTime = typeof due === 'string' && /T\d{2}:\d{2}/.test(due) && !/T00:00(:00(\.0+)?)?$/.test(due)
+    const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    const time = hasTime ? ' · ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''
+    const past = d < new Date()
+    return { text: date + time, past }
+  })()
+  const solicitation = [meta.pin || meta.solicitation_number, meta.selection_method_description || meta.notice_type]
+    .filter(Boolean).join(' · ')
+  const contact = [meta.contact_name, meta.contact_phone].filter(Boolean).join(' · ')
+  const goals = meta.goals && typeof meta.goals === 'object'
+    ? GOAL_LABELS.filter(([k]) => meta.goals[k] != null).map(([k, label]) => `${label} ${meta.goals[k]}%`).join(' · ')
+    : ''
+  const rows = [
+    dueText && ['Due', <span style={{ color: dueText.past ? '#c62828' : 'var(--ink)', fontWeight: 600 }}>
+      {dueText.past ? 'Past due · ' : ''}{dueText.text}</span>],
+    solicitation && ['Solicitation', solicitation],
+    meta.category_description && ['Category', meta.category_description],
+    (contact || meta.email) && ['Contact', <span>
+      {contact}{contact && meta.email ? ' · ' : ''}
+      {meta.email && <a href={`mailto:${meta.email}`} style={{ color: 'var(--primary)' }}>{meta.email}</a>}
+    </span>],
+    meta.address_to_request && ['Request documents', meta.address_to_request],
+    goals && ['Participation goals', goals],
+  ].filter(Boolean)
+
+  const labelStyle = { fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
+    textTransform: 'uppercase', letterSpacing: '.08em', padding: '6px 16px 6px 0', verticalAlign: 'top', whiteSpace: 'nowrap' }
+  const valueStyle = { fontSize: 14, color: 'var(--ink)', padding: '6px 0', lineHeight: 1.5 }
+
+  return (
+    <div className="blurable">
+      {rows.length > 0 && (
+        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <tbody>
+            {rows.map(([label, value]) => (
+              <tr key={label}>
+                <td style={labelStyle}>{label}</td>
+                <td style={valueStyle}>{value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {meta.additional_description_1 && (
+        <div style={{ marginTop: 12, fontSize: 14, lineHeight: 1.6, color: 'var(--ink-light)', whiteSpace: 'pre-wrap' }}>
+          {meta.additional_description_1}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const SLED_FEED_LABELS = [
   ['nyscr', 'NYSCR'],
   ['nyc-crol', 'City Record'],
@@ -2349,7 +2450,8 @@ function sledRow(s) {
   const feed     = feedHit ? feedHit[1] : feedSlug
 
   const rule = SLED_TYPE_RULES.find(([re]) => re.test(title))
-  const type = meta.notice_type || (rule ? rule[1] : 'Solicitation')
+  const metaType = meta.notice_type ? (SLED_TYPE_ALIASES[String(meta.notice_type).toLowerCase()] || meta.notice_type) : null
+  const type = metaType || (rule ? rule[1] : 'Solicitation')
 
   const deadline = _validDate(meta.response_deadline) || _validDate(meta.due_date) || _validDate(vd.due_date)
   const fit = s.signal_score ?? s.scores?.llm_relevance ?? null
@@ -2446,7 +2548,7 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
     </th>
   )
 
-  const fmtDate = (d) => new Date(d).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
+  const fmtDate = (d) => parseLocalDate(d).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
 
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -4183,15 +4285,27 @@ ${analysisHtml}
                   : isGrants
                     ? <>GRANTS.GOV · {primaryEntity?.entity_name || meta.agency_name || 'Federal Agency'}</>
                     : isPuc
-                      ? <>PUC · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
-                      : <>{sig.source || sig.source_name || sig.state} · {sig.source_name}{sig.meeting_date && ` · ${new Date(sig.meeting_date).toLocaleDateString()}`}</>
+                      ? <>PUC · {sig.source_name}{sig.meeting_date && ` · ${parseLocalDate(sig.meeting_date).toLocaleDateString()}`}</>
+                      : <>{sig.source || sig.source_name || sig.state} · {sig.source_name}{sig.meeting_date && ` · ${parseLocalDate(sig.meeting_date).toLocaleDateString()}`}</>
           }
         </div>
 
         {/* Score badge — numeric, colored by grade bucket. SAM signals carry
             their own ScoreBadge (llm_relevance/technical_fit) elsewhere in this
             drawer, so this one is scoped to keyword-scored SLED signals. */}
-        {!isSam && (
+        {/* LLM-scored SLED signals show the model's fit score — the same
+            number as the Market Review table's Fit Score column. Rows with
+            no signal_score keep the keyword-score breakdown. */}
+        {!isSam && os.signal_score != null && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <ScoreBadge score={os.signal_score} />
+            <span style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
+              fit score
+            </span>
+            <SledTierPill tier={os.signal_tier} />
+          </div>
+        )}
+        {!isSam && os.signal_score == null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <span style={{ padding: '4px 12px', borderRadius: 3, fontSize: 16, fontWeight: 700,
               fontFamily: "'IBM Plex Mono', monospace", background: sigScoreBg, color: sigScoreColor }}>
@@ -4635,6 +4749,19 @@ ${analysisHtml}
               signalTitle={sig.title}
             />
           </PanelErrorBoundary>
+        )}
+
+        {/* Solicitation Details — SLED signals whose engine stored document
+            detail in signals.metadata (NYC City Record today). Hidden when
+            the notice carries none of these fields. */}
+        {!isSam && sig.state && sig.state.length === 2 && hasSolicitationDetail(meta) && (
+          <>
+            {divider}
+            <div style={{ marginBottom: 20 }}>
+              {lbl('Solicitation Details')}
+              <SolicitationDetails meta={meta} />
+            </div>
+          </>
         )}
 
         {/* Contact Section — SLED signals only (have a two-letter state) */}
