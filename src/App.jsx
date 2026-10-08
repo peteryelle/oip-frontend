@@ -1354,14 +1354,15 @@ function MarketReviewPage() {
       let q = supabase
         .from('oip_signals')
         .select(`
-          oip_id, signal_id, signal_tier, signal_value, signal_value_adjusted,
+          oip_id, signal_id, signal_tier, signal_value, signal_value_adjusted, signal_score,
           deadline_recency_multiplier, deadline_recency_note,
           matched_keywords, matched_groups,
           match_reason, text_excerpt, status, relevance_status, notes, scored_at, scores, matched_sentinels,
           lifecycle_stage, objective, objective_confidence_note, objective_deadline_unknown,
           program_ref, project_ref, phase_ref, why_now, board_enrichment,
           signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
-                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key)
+                              meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key,
+                              signal_id_external, vertical_data)
         `)
         .eq('oip_id', selectedOip.id)
         .order('scored_at', { ascending: false })
@@ -1393,7 +1394,7 @@ function MarketReviewPage() {
             const sid = payload.new.signal_id
             supabase
               .from('signals')
-              .select('id, title, source_name, source, state, doc_url, doc_type, meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key')
+              .select('id, title, source_name, source, state, doc_url, doc_type, meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key, signal_id_external, vertical_data')
               .eq('id', sid)
               .maybeSingle()
               .then(({ data: sigData }) => {
@@ -1484,6 +1485,24 @@ function MarketReviewPage() {
   const [naicsFilter, setNaicsFilter] = useState('')
   const activeSignals    = isSam ? (samTab === 'dib' ? samDib : samOpportunities) : signals
 
+  // SLED Market Review tabs — Opportunities (flat SAM-style table, one row per
+  // notice) | Entities (EntityBoard, grouped by entity_key). Opportunities is
+  // the default; the last-used tab is remembered per OIP in the browser.
+  // Not offered for -derived or bid_review OIPs: those already render one
+  // card per signal through EntityBoard's isDerived path.
+  const sledTabsApply = !isSam && !isBidReview && !isDerivedOip
+  const sledTabKey = selectedOip?.id ? `wq-sled-tab-${selectedOip.id}` : null
+  const [sledTab, setSledTab] = useState('opportunities')
+  useEffect(() => {
+    if (!sledTabKey) return
+    try { setSledTab(localStorage.getItem(sledTabKey) || 'opportunities') } catch { setSledTab('opportunities') }
+  }, [sledTabKey])
+  const chooseSledTab = (t) => {
+    setSledTab(t)
+    try { if (sledTabKey) localStorage.setItem(sledTabKey, t) } catch {}
+  }
+  const sledOppsView = sledTabsApply && sledTab === 'opportunities'
+
   // B2G column filters (Due Date / Fit Score / Type header popovers).
   // Client-side only over already-loaded rows. Persisted per OIP in the
   // browser. hiddenTypes is an EXCLUDE list so newly-seen notice types
@@ -1506,10 +1525,10 @@ function MarketReviewPage() {
     try { if (colFilterKey) localStorage.removeItem(colFilterKey) } catch {}
     setColFilters(B2G_COL_FILTER_DEFAULTS)
   }
-  const colFiltersApply = isSam && samTab === 'opportunities'
+  const colFiltersApply = (isSam && samTab === 'opportunities') || sledOppsView
   const typeCounts = colFiltersApply
     ? activeSignals.reduce((acc, s) => {
-        const t = s.signals?.metadata?.notice_type || NO_TYPE_LABEL
+        const t = isSam ? (s.signals?.metadata?.notice_type || NO_TYPE_LABEL) : sledRow(s).type
         acc[t] = (acc[t] || 0) + 1
         return acc
       }, {})
@@ -1518,7 +1537,7 @@ function MarketReviewPage() {
 
   const filtered = activeSignals.filter(s => {
     if (statusFilter && s.status !== statusFilter) return false
-    if (colFiltersApply && !passesB2gColFilters(s, colFilters)) return false
+    if (colFiltersApply && !(isSam ? passesB2gColFilters(s, colFilters) : passesSledColFilters(s, colFilters))) return false
     if (tierFilter && s.signal_tier !== tierFilter) return false
     // Agency allowlist — Direct SAM opportunities only. Hide signals whose awarding
     // department isn't in the profile's target_agencies. Empty allowlist => show all.
@@ -1542,6 +1561,10 @@ function MarketReviewPage() {
     }
     return true
   })
+
+  // SLED opportunities: one row per notice. The same notice can arrive from
+  // more than one feed (e.g. both NYC City Record sources) — collapse those.
+  const sledRows = sledOppsView ? dedupeSledSignals(filtered) : []
 
   // mvSignals (from useMultiVerticalSignals) previously bypassed every filter
   // above — entity, state, group, search, tier all silently no-op'd whenever
@@ -1578,7 +1601,7 @@ function MarketReviewPage() {
           {isSam
             ? (samTab === 'dib' ? 'DIB Prospects' : samTab === 'busdev' ? 'B2B Bus Dev' : 'Opportunities')
             : isBidReview ? 'Bid Packages'
-            : (entityFilter ? entityFilter : 'Entity Board')}
+            : (entityFilter ? entityFilter : (sledOppsView ? 'Opportunities' : 'Entity Board'))}
         </h1>
         {entityFilter && !isSam && !isBidReview && (
           <Link to="/market" style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -1624,6 +1647,33 @@ function MarketReviewPage() {
               fontSize: 13,
               fontWeight: samTab === tab.key ? 700 : 400,
               color: samTab === tab.key ? 'var(--primary)' : 'var(--ink-fade)',
+              fontFamily: "'IBM Plex Mono', monospace",
+              textTransform: 'uppercase',
+              letterSpacing: '.08em',
+            }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* SLED tabs — Opportunities | Entities */}
+      {sledTabsApply && (
+        <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--rule)' }}>
+          {[
+            { key: 'opportunities', label: 'Opportunities' },
+            { key: 'entities', label: 'Entities' },
+          ].map(tab => (
+            <button key={tab.key} onClick={() => chooseSledTab(tab.key)} style={{
+              padding: '10px 20px',
+              background: 'none',
+              border: 'none',
+              borderBottom: sledTab === tab.key ? '2px solid var(--primary)' : '2px solid transparent',
+              marginBottom: -2,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: sledTab === tab.key ? 700 : 400,
+              color: sledTab === tab.key ? 'var(--primary)' : 'var(--ink-fade)',
               fontFamily: "'IBM Plex Mono', monospace",
               textTransform: 'uppercase',
               letterSpacing: '.08em',
@@ -1688,7 +1738,33 @@ function MarketReviewPage() {
               Derived boards group by signal (each RFP = one opportunity card) and
               open the signal drawer directly; non-derived group by entity_key
               (falling back to source_name — see EntityBoard for detail). */}
-          {!isSam && !isMultiVertical && (
+          {/* SLED: Opportunities table — one row per notice, SAM-style. */}
+          {!isSam && !isMultiVertical && sledOppsView && (
+            <>
+              <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
+                {sledRows.length} opportunities
+                {filtered.length !== sledRows.length && ` · ${filtered.length} signals`}
+                {colFilters.futureOnly && <span> · future due dates only</span>}
+                {colFiltersActive && (
+                  <button onClick={resetColFilters} style={{ marginLeft: 12, background: 'none', border: 'none',
+                    padding: 0, cursor: 'pointer', color: 'var(--primary)', fontFamily: 'inherit', fontSize: 'inherit',
+                    textDecoration: 'underline' }}>Reset column filters</button>
+                )}
+              </div>
+              {sledRows.length === 0 ? (
+                <EmptyMessage
+                  title="No results match your filters"
+                  message={colFiltersActive
+                    ? 'Column filters (Due Date / Fit Score / Type) are hiding every row — use Reset column filters above.'
+                    : 'Adjust filters above or run a new collect.'} />
+              ) : (
+                <SledOpportunityTable rows={sledRows} onRowClick={setOpenSignal}
+                  colFilters={colFilters} onColFilters={updateColFilters} typeCounts={typeCounts} />
+              )}
+            </>
+          )}
+
+          {!isSam && !isMultiVertical && !sledOppsView && (
             <EntityBoard
               signals={filtered}
               isDerived={isDerivedOip || isBidReview}
@@ -2212,6 +2288,238 @@ function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_
                   </span>
                 </td>
 
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLED OPPORTUNITY TABLE — SAM-style flat list for SLED Market Review
+// ─────────────────────────────────────────────────────────────────────────────
+// SLED signals don't carry SAM's metadata shape (response_deadline,
+// notice_type, solicitation_number, scores.llm_relevance). sledRow() adapts a
+// SLED oip_signals row into the fields the table needs, reading the SAM-shaped
+// keys first so a scraper that starts writing them is picked up for free.
+
+const SLED_FEED_LABELS = [
+  ['nyscr', 'NYSCR'],
+  ['nyc-crol', 'City Record'],
+]
+
+const SLED_TYPE_RULES = [
+  [/^bid extension\b/i, 'Bid Extension'],
+  [/^correction\b/i, 'Correction'],
+  [/^(request for expressions? of interest|rfei)\b/i, 'RFEI'],
+  [/^(request for qualifications|rfq)\b/i, 'RFQ'],
+  [/^(request for information|rfi)\b/i, 'RFI'],
+  [/^(request for bids|invitation for bids?|ifb)\b/i, 'Bid'],
+  [/^(request for proposals?|rfp)\b/i, 'RFP'],
+  [/pre-?qualification/i, 'Pre-Qualification'],
+  [/\brfp\b|request for proposals?/i, 'RFP'],
+  [/\brfq\b|request for qualifications/i, 'RFQ'],
+  [/\bifb\b|invitation for bids?|request for bids/i, 'Bid'],
+]
+
+function _validDate(d) {
+  if (!d) return null
+  const t = new Date(d)
+  return isNaN(t) ? null : d
+}
+
+function sledRow(s) {
+  const sig  = s.signals || {}
+  const meta = sig.metadata || {}
+  const vd   = sig.vertical_data || {}
+  const raw    = sig.title || ''
+  const agency = sig.source_name || ''
+  // Titles are stored as "<Agency> — <title>"; drop the agency prefix since it
+  // has its own line under the title.
+  const prefix = agency ? `${agency} — ` : ''
+  const title  = prefix && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
+
+  // signal_id_external looks like "SLED-<feed-slug>-<notice id>".
+  const ext      = sig.signal_id_external || ''
+  const noticeId = meta.solicitation_number || (ext.match(/-([A-Za-z0-9]+)$/) || [])[1] || ''
+  const feedSlug = ext.replace(/^SLED-/, '').replace(/-[A-Za-z0-9]+$/, '')
+  const feedHit  = SLED_FEED_LABELS.find(([k]) => feedSlug.startsWith(k))
+  const feed     = feedHit ? feedHit[1] : feedSlug
+
+  const rule = SLED_TYPE_RULES.find(([re]) => re.test(title))
+  const type = meta.notice_type || (rule ? rule[1] : 'Solicitation')
+
+  const deadline = _validDate(meta.response_deadline) || _validDate(meta.due_date) || _validDate(vd.due_date)
+  const fit = s.signal_score ?? s.scores?.llm_relevance ?? null
+
+  return {
+    title, agency, noticeId, feed, type, deadline, fit,
+    posted: sig.meeting_date || null,
+    key: `${agency.toLowerCase()}|${noticeId || title.toLowerCase()}`,
+  }
+}
+
+// One row per notice: when several signals share agency + notice id (the same
+// notice captured by more than one feed), keep the highest-scored copy.
+function dedupeSledSignals(list) {
+  const byKey = new Map()
+  for (const s of list) {
+    const row = sledRow(s)
+    const cur = byKey.get(row.key)
+    if (!cur) { byKey.set(row.key, { s, row, copies: 1 }); continue }
+    cur.copies += 1
+    if ((row.fit ?? -1) > (cur.row.fit ?? -1)) { cur.s = s; cur.row = row }
+  }
+  return [...byKey.values()]
+}
+
+function passesSledColFilters(s, f) {
+  const row = sledRow(s)
+  if (!row.deadline) {
+    if (!f.includeNoDate) return false
+  } else if (f.futureOnly) {
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    if (new Date(row.deadline) < today) return false
+  }
+  if (f.minFit !== '' && f.minFit != null) {
+    if (row.fit == null || Number(row.fit) < Number(f.minFit)) return false
+  }
+  if (f.hiddenTypes.length && f.hiddenTypes.includes(row.type)) return false
+  return true
+}
+
+function SledTierPill({ tier }) {
+  const map = {
+    tier1_strong: { bg: '#e8f5e9', color: '#2e7d32', border: '#a5d6a7', label: 'TIER 1 ★' },
+    tier1:        { bg: '#e3f2fd', color: '#1565c0', border: '#90caf9', label: 'TIER 1' },
+    tier2:        { bg: '#fff8e1', color: '#b45309', border: '#ffe082', label: 'TIER 2' },
+  }
+  const t = map[tier]
+  if (!t) return <span style={{ color: 'var(--ink-faint)', fontSize: 11 }}>—</span>
+  return (
+    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 3,
+      background: t.bg, color: t.color, border: `1px solid ${t.border}`,
+      fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '.05em', whiteSpace: 'nowrap' }}>
+      {t.label}
+    </span>
+  )
+}
+
+function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DEFAULTS, onColFilters = () => {}, typeCounts = {} }) {
+  // Default: highest fit first. Most SLED feeds don't supply a due date yet,
+  // so a due-date default sort would leave every row tied.
+  const [sortKey, setSortKey] = useState('fit')
+  const [sortDir, setSortDir] = useState('desc')
+
+  const getVal = ({ row }, key) => {
+    if (key === 'fit')      return row.fit ?? -1
+    if (key === 'deadline') return row.deadline ? new Date(row.deadline).getTime() : -Infinity
+    if (key === 'posted')   return row.posted ? new Date(row.posted).getTime() : -Infinity
+    if (key === 'title')    return row.title.toLowerCase()
+    if (key === 'type')     return row.type.toLowerCase()
+    return 0
+  }
+
+  const sorted = [...rows].sort((a, b) => {
+    const av = getVal(a, sortKey)
+    const bv = getVal(b, sortKey)
+    if (av < bv) return sortDir === 'asc' ? -1 : 1
+    if (av > bv) return sortDir === 'asc' ? 1 : -1
+    return (b.row.fit ?? -1) - (a.row.fit ?? -1)
+  })
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('desc') }
+  }
+
+  const SortTh = ({ label, k, style = {}, filter = null }) => (
+    <th onClick={() => toggleSort(k)} style={{
+      ...thSam, cursor: 'pointer', userSelect: 'none',
+      color: sortKey === k ? 'var(--primary)' : 'var(--ink-fade)',
+      ...style,
+    }}>
+      {label} {sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+      {filter}
+    </th>
+  )
+
+  const fmtDate = (d) => new Date(d).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+        <thead>
+          <tr style={{ borderBottom: '2px solid var(--rule)' }}>
+            <SortTh label="Title" k="title" style={{ minWidth: 280, textAlign: 'left' }} />
+            <th style={{ ...thSam, position: 'relative' }}>
+              Type
+              <ColFilterPop active={colFilters.hiddenTypes.length > 0} label="Filter by type">
+                <TypeFilterBody colFilters={colFilters} onColFilters={onColFilters} typeCounts={typeCounts} />
+              </ColFilterPop>
+            </th>
+            <SortTh label="Posted" k="posted" />
+            <SortTh label="Due Date" k="deadline" style={{ position: 'relative' }}
+              filter={
+                <ColFilterPop active={colFilters.futureOnly || !colFilters.includeNoDate} label="Filter by due date">
+                  <DueFilterBody colFilters={colFilters} onColFilters={onColFilters} />
+                </ColFilterPop>
+              } />
+            <SortTh label="Fit Score" k="fit" style={{ position: 'relative' }}
+              filter={
+                <ColFilterPop active={colFilters.minFit !== ''} label="Filter by fit score">
+                  <FitFilterBody colFilters={colFilters} onColFilters={onColFilters} />
+                </ColFilterPop>
+              } />
+            <th style={thSam}>Tier</th>
+            <th style={thSam}>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(({ s, row, copies }) => {
+            const isPastDue = !!row.deadline && new Date(row.deadline) < new Date()
+            return (
+              <tr key={s.signal_id}
+                onClick={() => onRowClick(s)}
+                style={{ borderBottom: '1px solid var(--rule)', cursor: 'pointer' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-soft)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <td style={{ padding: '12px 8px' }}>
+                  <div className="blurable" style={{ fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3, marginBottom: 3 }}>
+                    {row.title.length > 80 ? row.title.slice(0, 80) + '…' : row.title}
+                  </div>
+                  <div className="blurable" style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink-fade)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {row.noticeId && <span>{row.noticeId.slice(0, 20)}</span>}
+                    {row.agency && <span>{row.agency.slice(0, 45)}</span>}
+                    {row.feed && <span>· {row.feed}{copies > 1 ? ` +${copies - 1}` : ''}</span>}
+                  </div>
+                </td>
+                <td style={{ padding: '12px 8px', whiteSpace: 'nowrap' }}>
+                  <NoticeTypePill type={row.type} />
+                </td>
+                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, whiteSpace: 'nowrap', color: 'var(--ink-fade)' }}>
+                  {row.posted ? fmtDate(row.posted) : '—'}
+                </td>
+                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, whiteSpace: 'nowrap',
+                  color: isPastDue ? '#c62828' : 'var(--ink)', fontWeight: isPastDue ? 600 : 400 }}>
+                  {row.deadline ? (isPastDue ? 'Past due ' : '') + fmtDate(row.deadline) : (s.deadline_recency_note || '—')}
+                </td>
+                <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                  <ScoreBadge score={row.fit} />
+                </td>
+                <td style={{ padding: '12px 8px' }}>
+                  <SledTierPill tier={s.signal_tier} />
+                </td>
+                <td style={{ padding: '12px 8px' }}>
+                  <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
+                    color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '.05em', fontWeight: 600 }}>
+                    {s.status || 'new'}
+                  </span>
+                </td>
               </tr>
             )
           })}
