@@ -2464,7 +2464,13 @@ function sledRow(s) {
 }
 
 // One row per notice: when several signals share agency + notice id (the same
-// notice captured by more than one feed), keep the highest-scored copy.
+// notice captured by more than one feed), keep the highest-scored copy. On a
+// tie, keep the copy carrying more stored detail (metadata keys), so the row
+// and its drawer show the due date / contact / goals when any copy has them.
+function _metaRichness(s) {
+  const m = s.signals?.metadata
+  return m && typeof m === 'object' ? Object.keys(m).length : 0
+}
 function dedupeSledSignals(list) {
   const byKey = new Map()
   for (const s of list) {
@@ -2472,7 +2478,10 @@ function dedupeSledSignals(list) {
     const cur = byKey.get(row.key)
     if (!cur) { byKey.set(row.key, { s, row, copies: 1 }); continue }
     cur.copies += 1
-    if ((row.fit ?? -1) > (cur.row.fit ?? -1)) { cur.s = s; cur.row = row }
+    const fit = row.fit ?? -1, curFit = cur.row.fit ?? -1
+    if (fit > curFit || (fit === curFit && _metaRichness(s) > _metaRichness(cur.s))) {
+      cur.s = s; cur.row = row
+    }
   }
   return [...byKey.values()]
 }
