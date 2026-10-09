@@ -1757,8 +1757,10 @@ function MarketReviewPage() {
             <>
               <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
                 {sledRows.length} opportunities
-                {sledRows.length !== sledTotal && ` of ${sledTotal}`}
-                {colFilters.futureOnly && <span> · future due dates only</span>}
+                {(() => {
+                  const closed = sledRows.filter(({ row }) => row.deadline && parseLocalDate(row.deadline) < new Date()).length
+                  return <span> · {sledRows.length - closed} open · {closed} recently closed (last {SLED_CLOSED_WINDOW_DAYS} days)</span>
+                })()}
                 {colFiltersActive && (
                   <button onClick={resetColFilters} style={{ marginLeft: 12, background: 'none', border: 'none',
                     padding: 0, cursor: 'pointer', color: 'var(--primary)', fontFamily: 'inherit', fontSize: 'inherit',
@@ -2516,6 +2518,7 @@ const SLED_DETAIL_KEYS = [
   'due_date', 'response_deadline', 'pin', 'selection_method_description',
   'category_description', 'contact_name', 'contact_phone', 'email',
   'address_to_request', 'additional_description_1', 'goals',
+  'cr_number', 'ad_type', 'location', 'issue_date', 'ad_end_date', 'note',
 ]
 function hasSolicitationDetail(meta) {
   return SLED_DETAIL_KEYS.some(k => {
@@ -2540,8 +2543,10 @@ function SolicitationDetails({ meta }) {
     const past = d < new Date()
     return { text: date + time, past }
   })()
-  const solicitation = [meta.pin || meta.solicitation_number, meta.selection_method_description || meta.notice_type]
-    .filter(Boolean).join(' · ')
+  const solicitation = [
+    meta.pin || meta.solicitation_number || (meta.cr_number ? `CR# ${meta.cr_number}` : null),
+    meta.selection_method_description || meta.notice_type || meta.ad_type,
+  ].filter(Boolean).join(' · ')
   const goals = meta.goals && typeof meta.goals === 'object'
     ? GOAL_LABELS.filter(([k]) => meta.goals[k] != null).map(([k, label]) => `${label} ${meta.goals[k]}%`).join(' · ')
     : ''
@@ -2550,6 +2555,9 @@ function SolicitationDetails({ meta }) {
       {dueText.past ? 'Past due · ' : ''}{dueText.text}</span>],
     solicitation && ['Solicitation', solicitation],
     meta.category_description && ['Category', meta.category_description],
+    meta.agency_division && ['Division', meta.agency_division],
+    meta.issue_date && ['Issued', meta.issue_date],
+    meta.location && ['Location', meta.location],
     goals && ['Participation goals', goals],
   ].filter(Boolean)
 
@@ -2570,6 +2578,11 @@ function SolicitationDetails({ meta }) {
             ))}
           </tbody>
         </table>
+      )}
+      {meta.note && (
+        <div style={{ marginTop: 12, fontSize: 14, lineHeight: 1.6, color: 'var(--ink-light)', whiteSpace: 'pre-wrap' }}>
+          {meta.note}
+        </div>
       )}
       {meta.additional_description_1 && (
         <div style={{ marginTop: 12, fontSize: 14, lineHeight: 1.6, color: 'var(--ink-light)', whiteSpace: 'pre-wrap' }}>
@@ -2624,7 +2637,9 @@ function sledRow(s) {
   const feed     = feedHit ? feedHit[1] : feedSlug
 
   const rule = SLED_TYPE_RULES.find(([re]) => re.test(title))
-  const metaType = meta.notice_type ? (SLED_TYPE_ALIASES[String(meta.notice_type).toLowerCase()] || meta.notice_type) : null
+  const metaType = meta.ad_type && /sole|single source|exempt from advertising/i.test(meta.ad_type)
+    ? 'Sole Source'
+    : meta.notice_type ? (SLED_TYPE_ALIASES[String(meta.notice_type).toLowerCase()] || meta.notice_type) : null
   const type = metaType || (rule ? rule[1] : 'Solicitation')
 
   const deadline = _validDate(meta.response_deadline) || _validDate(meta.due_date) || _validDate(vd.due_date)
@@ -2662,12 +2677,11 @@ function dedupeSledSignals(list) {
 
 function passesSledColFilters(s, f) {
   const row = sledRow(s)
-  if (!row.deadline) {
-    if (!f.includeNoDate) return false
-  } else if (f.futureOnly) {
-    const today = new Date(); today.setHours(0, 0, 0, 0)
-    if (new Date(row.deadline) < today) return false
-  }
+  // No "future only" for SLED: a notice that closed inside the
+  // recently-closed window is still an opportunity — its winner may need the
+  // tenant's offering to deliver (derived demand). Notices past the window
+  // are removed upstream by isBeyondClosedWindow().
+  if (!row.deadline && !f.includeNoDate) return false
   if (f.minFit !== '' && f.minFit != null) {
     if (row.fit == null || Number(row.fit) < Number(f.minFit)) return false
   }
@@ -2747,8 +2761,8 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
             </th>
             <SortTh label="Due Date" k="deadline" style={{ position: 'relative' }}
               filter={
-                <ColFilterPop active={colFilters.futureOnly || !colFilters.includeNoDate} label="Filter by due date">
-                  <DueFilterBody colFilters={colFilters} onColFilters={onColFilters} />
+                <ColFilterPop active={!colFilters.includeNoDate} label="Filter by due date">
+                  <DueFilterBody colFilters={colFilters} onColFilters={onColFilters} sled />
                 </ColFilterPop>
               } />
             <SortTh label="Fit Score" k="fit" style={{ position: 'relative' }}
@@ -2789,7 +2803,15 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                 </td>
                 <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, whiteSpace: 'nowrap',
                   color: isPastDue ? '#c62828' : 'var(--ink)', fontWeight: isPastDue ? 600 : 400 }}>
-                  {row.deadline ? (isPastDue ? 'Past due ' : '') + fmtDate(row.deadline) : (s.deadline_recency_note || '—')}
+                  {row.deadline ? (
+                    isPastDue ? (
+                      <span title="Closed — the winning vendor is the target (see Likely Winner in the brief)">
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', marginRight: 6, borderRadius: 3,
+                          background: '#fdecea', color: '#c62828', border: '1px solid #f5c6c2', letterSpacing: '.05em' }}>CLOSED</span>
+                        {fmtDate(row.deadline)}
+                      </span>
+                    ) : fmtDate(row.deadline)
+                  ) : (s.deadline_recency_note || '—')}
                 </td>
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
                   <ScoreBadge score={row.fit} />
@@ -2893,14 +2915,16 @@ const popRow = { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0'
 const popLink = { background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--primary)',
   fontFamily: 'inherit', fontSize: 12, textDecoration: 'underline' }
 
-function DueFilterBody({ colFilters, onColFilters }) {
+function DueFilterBody({ colFilters, onColFilters, sled = false }) {
   return (
     <div>
-      <label style={popRow}>
-        <input type="checkbox" checked={colFilters.futureOnly}
-          onChange={e => onColFilters({ futureOnly: e.target.checked })} />
-        Future only (due today or later)
-      </label>
+      {!sled && (
+        <label style={popRow}>
+          <input type="checkbox" checked={colFilters.futureOnly}
+            onChange={e => onColFilters({ futureOnly: e.target.checked })} />
+          Future only (due today or later)
+        </label>
+      )}
       <label style={popRow}>
         <input type="checkbox" checked={colFilters.includeNoDate}
           onChange={e => onColFilters({ includeNoDate: e.target.checked })} />
