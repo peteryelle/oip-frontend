@@ -43,6 +43,10 @@ const MODEL         = "claude-haiku-4-5-20251001";
 const CROL_URL      = "https://data.cityofnewyork.us/resource/tfbu-zbd2.json";
 const MAX_PDF_BYTES = 12 * 1024 * 1024;
 const NO_WINNER_RETRY_DAYS = 14;
+// Recency guard: a document whose own dates are more than this many days
+// older than the notice is an earlier procurement (agencies reuse titles like
+// "Digital Marketing Services" every few years) or an archive — reject it.
+const MAX_DOC_AGE_DAYS = 365;
 
 // Contact-scraper / people-directory sites: never used as a source.
 const BLOCKED_HOSTS = [
@@ -262,7 +266,7 @@ Deno.serve(async (req: Request) => {
 
     // ── Load notice, tenant profile, sentinel settings ──
     const { data: sig } = await sb.from("signals")
-      .select("title, source_name, doc_url, metadata").eq("id", signal_id).single();
+      .select("title, source_name, doc_url, metadata, meeting_date").eq("id", signal_id).single();
     if (!sig) return json({ error: "signal not found" }, 404);
     const meta  = (sig.metadata ?? {}) as Record<string, unknown>;
     const agency = expandAgency(String(meta.agency_name || sig.source_name || ""));
@@ -284,6 +288,23 @@ Deno.serve(async (req: Request) => {
                      "contact_name", "contact_phone", "email", "address_to_request", "goals"]) {
       if (meta[k] != null && meta[k] !== "") authoritative[k] = meta[k];
     }
+
+    // Reference date for the recency guard: the notice's own dates.
+    const refDate = toDate(meta.response_deadline) ?? toDate(meta.due_date) ?? toDate(meta.issue_date)
+      ?? toDate(meta.start_date) ?? toDate(sig.meeting_date) ?? new Date();
+    const oldestOk = addDays(refDate, -MAX_DOC_AGE_DAYS);
+    // Upload paths often carry a year/month (e.g. /wp-content/uploads/2017/06/).
+    const urlTooOld = (u: string) => {
+      const m = u.match(/\/((?:19|20)\d{2})\/(0[1-9]|1[0-2])\//);
+      if (!m) return false;
+      // Uploaded at the end of that month at the latest.
+      return new Date(Date.UTC(+m[1], +m[2], 0)) < oldestOk;
+    };
+    // Latest date the extracted material itself mentions.
+    const latestDocDate = (f: Record<string, unknown> | null): Date | null => {
+      const ds = ((f?.timeline as { date?: string }[]) ?? []).map(t => toDate(t.date)).filter((d): d is Date => !!d);
+      return ds.length ? new Date(Math.max(...ds.map(d => d.getTime()))) : null;
+    };
 
     const { data: oip } = await sb.from("oips").select("name, slug").eq("id", oip_id).single();
     const { data: profile } = await sb.rpc("get_canonical_profile", { p_oip_id: oip_id });
@@ -310,6 +331,12 @@ Deno.serve(async (req: Request) => {
       queries.push(q);
       searchHits = (await tavily(q, { raw: true, max: 8 }))
         .filter(h => mentionsAgency(`${h.title} ${h.url} ${h.content} ${h.raw ?? ""}`, aTokens, acronym));
+      for (const h of searchHits) {
+        if (isPdfUrl(h.url) && urlTooOld(h.url)) {
+          sources.push({ title: `Rejected: ${h.title || h.url}`, url: h.url, used_for: "rejected — outdated (upload date in URL)" });
+        }
+      }
+      searchHits = searchHits.filter(h => !(isPdfUrl(h.url) && urlTooOld(h.url)));
       const pdf = searchHits.find(h => isPdfUrl(h.url));
       if (pdf) { docUrl = pdf.url; docTitle = pdf.title; }
     }
@@ -329,6 +356,13 @@ Deno.serve(async (req: Request) => {
             sources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — ${String(sp.reason ?? "not this procurement").slice(0, 120)}` });
             facts = null;
           }
+          const latest = latestDocDate(facts);
+          if (facts && latest && latest < oldestOk) {
+            console.log("document rejected (outdated):", docUrl, latest.toISOString());
+            sources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl,
+              used_for: `rejected — outdated (latest date in document ${latest.toISOString().slice(0, 10)})` });
+            facts = null;
+          }
           if (facts) {
             document = { url: docUrl, title: docTitle, source: hostOf(docUrl) };
             sources.push({ title: docTitle || "Solicitation document", url: docUrl, used_for: "document" });
@@ -341,7 +375,8 @@ Deno.serve(async (req: Request) => {
         `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.raw || h.content}`).join("\n\n").slice(0, 18000);
       facts = await extractFromText(material, notice, tenant);
       const sp = (facts?.same_procurement ?? {}) as Record<string, unknown>;
-      if (facts && sp.match !== true) facts = null;
+      const latestT = latestDocDate(facts);
+      if (facts && (sp.match !== true || (latestT && latestT < oldestOk))) facts = null;
       else for (const h of searchHits) sources.push({ title: h.title, url: h.url, used_for: "listing" });
     }
     facts = facts ?? {};
