@@ -2498,6 +2498,239 @@ function LikelyWinner({ signalId, oipId }) {
   )
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPPORTUNITY INTELLIGENCE — reads opportunity_intel via enrich-opportunity
+// ─────────────────────────────────────────────────────────────────────────────
+const ENRICH_URL = 'https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/enrich-opportunity'
+
+async function callEnrich(body) {
+  const r = await fetch(ENRICH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+    body: JSON.stringify(body),
+  })
+  const d = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`)
+  return d
+}
+
+const STAGE_LABELS = {
+  open: 'Open', intent_closed: 'Intent to propose closed', questions_closed: 'Questions closed',
+  proposals_in: 'Proposals in', finalists: 'Finalists', awarded: 'Awarded',
+  contract_live: 'Contract live', closed: 'Closed',
+}
+const CONTACT_ROLE_LABELS = {
+  designated: 'Designated', administrative: 'Administrative', subject_matter: 'Subject matter',
+  consultant: 'Consultant', listed: 'Listed',
+}
+
+function OpportunityIntel({ signalId, oipId }) {
+  const [st, setSt] = useState({ loading: true, data: null, error: null, running: false })
+  const mono = { fontFamily: "'IBM Plex Mono', monospace" }
+  const sub = { fontSize: 11, ...mono, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink-fade)', fontWeight: 700, margin: '14px 0 6px' }
+  const confColor = { high: '#2e7d32', medium: '#1565c0', low: '#b45309' }
+
+  useEffect(() => {
+    let cancelled = false
+    setSt({ loading: true, data: null, error: null, running: false })
+    callEnrich({ signal_id: signalId, oip_id: oipId, cache_only: true })
+      .then(d => { if (!cancelled) setSt({ loading: false, data: d.status === 'none' ? null : d, error: null, running: false }) })
+      .catch(e => { if (!cancelled) setSt({ loading: false, data: null, error: e.message, running: false }) })
+    return () => { cancelled = true }
+  }, [signalId, oipId])
+
+  const runNow = () => {
+    setSt(x => ({ ...x, running: true, error: null }))
+    callEnrich({ signal_id: signalId, oip_id: oipId, force: true })
+      .then(d => setSt({ loading: false, data: d, error: null, running: false }))
+      .catch(e => setSt(x => ({ ...x, running: false, error: e.message })))
+  }
+
+  if (st.loading) return <div style={{ fontSize: 13, color: 'var(--ink-fade)', fontStyle: 'italic', ...mono }}>Loading…</div>
+
+  const d = st.data
+  if (!d) {
+    return (
+      <div style={{ fontSize: 13, color: 'var(--ink-fade)', lineHeight: 1.6 }}>
+        {st.running
+          ? <span style={{ fontStyle: 'italic', ...mono }}>Researching this opportunity (document, contacts, timeline)… up to a minute.</span>
+          : <>Not researched yet — runs automatically after the next scoring pass.{' '}
+              <button onClick={runNow} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--primary)',
+                cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}>Run now</button>
+              <span style={{ fontSize: 11, ...mono }}> (~5¢)</span></>}
+        {st.error && <div style={{ color: '#c62828', marginTop: 6, ...mono, fontSize: 12 }}>Failed: {st.error}</div>}
+      </div>
+    )
+  }
+
+  const f = d.facts || {}
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const timeline = [...(f.timeline || [])].filter(t => t.date).sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  const contacts = f.contacts || []
+  const w = d.winner
+
+  return (
+    <div className="blurable" style={{ fontSize: 14, color: 'var(--ink)', lineHeight: 1.55 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {d.stage && (
+          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 3, background: 'var(--primary-soft)',
+            color: 'var(--primary)', ...mono, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+            {STAGE_LABELS[d.stage] || d.stage}
+          </span>
+        )}
+        {d.document?.url && (
+          <a href={d.document.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--primary)' }}>
+            📄 Solicitation document ({d.document.source}) →
+          </a>
+        )}
+      </div>
+
+      {d.angle && (
+        <div style={{ marginTop: 10, padding: '10px 14px', background: 'var(--primary-soft)', borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0' }}>
+          {d.angle}
+        </div>
+      )}
+
+      {(d.compliance || []).length > 0 && (
+        <div style={{ marginTop: 10, padding: '10px 14px', background: '#fff8e1', borderLeft: '3px solid #f59e0b', borderRadius: '0 4px 4px 0', fontSize: 13 }}>
+          <div style={{ fontWeight: 700, fontSize: 11, ...mono, textTransform: 'uppercase', letterSpacing: '.08em', color: '#b45309', marginBottom: 4 }}>Compliance</div>
+          {d.compliance.map((c, i) => <div key={i}>• {c}</div>)}
+        </div>
+      )}
+
+      {(d.next_steps || []).length > 0 && (
+        <>
+          <div style={sub}>Suggested next steps</div>
+          {d.next_steps.map((n, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, padding: '4px 0' }}>
+              <span style={{ ...mono, fontSize: 12, color: 'var(--primary)', minWidth: 96, flexShrink: 0 }}>{n.when}</span>
+              <span><strong>{n.action}</strong>{n.why && <span style={{ color: 'var(--ink-light)' }}> — {n.why}</span>}</span>
+            </div>
+          ))}
+        </>
+      )}
+
+      {timeline.length > 0 && (
+        <>
+          <div style={sub}>Timeline</div>
+          {timeline.map((t, i) => {
+            const past = parseLocalDate(String(t.date).slice(0, 10)) < today
+            return (
+              <div key={i} style={{ display: 'flex', gap: 10, padding: '2px 0', color: past ? 'var(--ink-fade)' : 'var(--ink)' }}>
+                <span style={{ ...mono, fontSize: 12, minWidth: 96, flexShrink: 0 }}>{parseLocalDate(String(t.date).slice(0, 10)).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <span>{t.event}{t.time ? ` · ${t.time}` : ''}</span>
+              </div>
+            )
+          })}
+        </>
+      )}
+
+      {contacts.length > 0 && (
+        <>
+          <div style={sub}>Contacts (from the solicitation)</div>
+          {contacts.map((c, i) => (
+            <div key={i} style={{ padding: '4px 0' }}>
+              <strong>{c.name || c.organization}</strong>
+              {c.title && <span style={{ color: 'var(--ink-light)' }}> · {c.title}</span>}
+              {c.organization && c.name && <span style={{ color: 'var(--ink-light)' }}> · {c.organization}</span>}
+              {c.role && <span style={{ marginLeft: 6, fontSize: 10, ...mono, color: 'var(--ink-fade)', textTransform: 'uppercase' }}>{CONTACT_ROLE_LABELS[c.role] || c.role}</span>}
+              <div style={{ fontSize: 13 }}>
+                {c.email && <a href={`mailto:${c.email}`} style={{ color: 'var(--primary)', marginRight: 12 }}>✉ {c.email}</a>}
+                {c.phone && <span style={{ color: 'var(--ink-light)' }}>☎ {c.phone}</span>}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {(d.decision_makers || []).length > 0 && (
+        <>
+          <div style={sub}>Decision-makers (found online)</div>
+          {d.decision_makers.map((p, i) => (
+            <div key={i} style={{ padding: '3px 0' }}>
+              <strong>{p.name}</strong>{p.title && <span style={{ color: 'var(--ink-light)' }}> · {p.title}</span>}
+              {p.note && <span style={{ color: '#b45309' }}> · {p.note}</span>}
+              {p.source_url && <a href={p.source_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 8, fontSize: 12, color: 'var(--primary)' }}>source →</a>}
+            </div>
+          ))}
+        </>
+      )}
+
+      {(f.gates || []).length > 0 && (
+        <>
+          <div style={sub}>Requirements to participate</div>
+          {f.gates.map((g, i) => <div key={i}>• {g}</div>)}
+        </>
+      )}
+
+      {(f.tenant_signals || []).length > 0 && (
+        <>
+          <div style={sub}>In the solicitation's own words</div>
+          {f.tenant_signals.map((q, i) => (
+            <div key={i} style={{ padding: '3px 0' }}>
+              <span style={{ fontStyle: 'italic' }}>“{q.quote}”</span>
+              {q.why && <span style={{ color: 'var(--ink-light)' }}> — {q.why}</span>}
+            </div>
+          ))}
+        </>
+      )}
+
+      {(f.criteria || []).length > 0 && (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12, ...mono, color: 'var(--ink-fade)' }}>
+            Evaluation criteria ({f.criteria.length}){f.award_method ? ` · ${f.award_method.slice(0, 60)}` : ''}
+          </summary>
+          {f.criteria.map((c, i) => <div key={i} style={{ fontSize: 13 }}>• {c}</div>)}
+        </details>
+      )}
+
+      {w && (
+        <>
+          <div style={sub}>Winner</div>
+          {w.award ? (
+            <div style={{ fontSize: 13 }}>
+              {Object.entries(w.award).map(([k, v]) => <div key={k}><span style={{ color: 'var(--ink-fade)', ...mono, fontSize: 11 }}>{k.replace(/_/g, ' ')}: </span>{String(v)}</div>)}
+            </div>
+          ) : (w.candidates || []).length ? (
+            w.candidates.map((c, i) => (
+              <div key={i} style={{ padding: '3px 0' }}>
+                <strong>{c.vendor}</strong>
+                <span style={{ marginLeft: 6, fontSize: 10, ...mono, color: confColor[c.confidence] || 'var(--ink-fade)', textTransform: 'uppercase' }}>{c.confidence}</span>
+                {c.evidence && <span style={{ color: 'var(--ink-light)' }}> — “{c.evidence}”</span>}
+                {c.source_url && <a href={c.source_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 8, fontSize: 12, color: 'var(--primary)' }}>source →</a>}
+              </div>
+            ))
+          ) : (
+            <div style={{ fontSize: 13, color: 'var(--ink-fade)' }}>No winner found yet{w.note ? ` — ${w.note}` : ''}</div>
+          )}
+        </>
+      )}
+
+      {(d.sources || []).length > 0 && (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12, ...mono, color: 'var(--ink-fade)' }}>Sources ({d.sources.length})</summary>
+          {d.sources.map((x, i) => (
+            <div key={i} style={{ fontSize: 12 }}>
+              <a href={x.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>{x.title || x.url}</a>
+              <span style={{ color: 'var(--ink-fade)', ...mono }}> · {x.used_for}</span>
+            </div>
+          ))}
+        </details>
+      )}
+
+      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ink-fade)', ...mono }}>
+        Researched {new Date(d.enriched_at).toLocaleDateString()}
+        {d.next_refresh_at && ` · next update ${new Date(d.next_refresh_at).toLocaleDateString()}`}
+        {' · '}
+        <button onClick={runNow} disabled={st.running} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--primary)',
+          cursor: 'pointer', textDecoration: 'underline', fontSize: 11, ...mono }}>{st.running ? 'Refreshing…' : 'Refresh'}</button>
+        {st.error && <span style={{ color: '#c62828' }}> · {st.error}</span>}
+      </div>
+    </div>
+  )
+}
+
 // Long selection-method names from source systems -> short table labels.
 const SLED_TYPE_ALIASES = {
   'request for proposals': 'RFP',
@@ -3851,15 +4084,13 @@ ${projectsHtml}
                           {m.address_to_request && <div>⌂ {m.address_to_request}</div>}
                         </div>
                       )}
-                      {isRecentlyClosed(sg) && (
-                        <div style={{ marginTop:12 }}>
-                          <div style={{ fontSize:11, fontFamily:"'IBM Plex Mono', monospace", textTransform:'uppercase',
-                            letterSpacing:'.08em', color:'var(--ink-fade)', fontWeight:700, marginBottom:6 }}>
-                            Likely winner
-                          </div>
-                          <LikelyWinner signalId={sg.signal_id} oipId={sg.oip_id || oipId} />
+                      <div style={{ marginTop:12 }}>
+                        <div style={{ fontSize:11, fontFamily:"'IBM Plex Mono', monospace", textTransform:'uppercase',
+                          letterSpacing:'.08em', color:'var(--ink-fade)', fontWeight:700, marginBottom:6 }}>
+                          Opportunity intelligence
                         </div>
-                      )}
+                        <OpportunityIntel signalId={sg.signal_id} oipId={sg.oip_id || oipId} />
+                      </div>
                     </div>
                   )
                 })}
@@ -5071,16 +5302,16 @@ ${analysisHtml}
           </>
         )}
 
-        {/* Likely Winner — recently closed SLED notices (due date passed, still
-            inside the recently-closed window). The winning vendor is the
-            teaming target. Lookup is on-demand; opening the drawer only reads
-            the cache. */}
-        {!isSam && sig.state && sig.state.length === 2 && isRecentlyClosed(os) && (
+        {/* Opportunity Intelligence — enrichment record for this opportunity
+            (solicitation document, contacts, timeline, decision-makers,
+            winner, tenant angle, next steps). Produced in the background
+            after scoring; opening the drawer only reads it. */}
+        {!isSam && sig.state && sig.state.length === 2 && (
           <>
             {divider}
             <div style={{ marginBottom: 20 }}>
-              {lbl('Likely Winner')}
-              <LikelyWinner signalId={os.signal_id} oipId={os.oip_id} />
+              {lbl('Opportunity Intelligence')}
+              <OpportunityIntel signalId={os.signal_id} oipId={os.oip_id} />
             </div>
           </>
         )}
