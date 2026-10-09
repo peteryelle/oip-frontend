@@ -3757,6 +3757,79 @@ ${projectsHtml}
 
         {divider}
 
+        {/* Solicitations — each of this entity's notices that carries stored
+            solicitation detail (NYC City Record today): due date, PIN, method,
+            category, the solicitation's own contact, description, goals, and
+            Likely Winner when the notice has recently closed. One entry per
+            notice (feed duplicates collapsed). */}
+        {(() => {
+          const solRows = dedupeSledSignals(signals)
+            .filter(({ s: sg }) => hasSolicitationDetail(sg.signals?.metadata || {}))
+            .sort((a, b) => {
+              const da = a.s.signals?.metadata?.response_deadline || ''
+              const db = b.s.signals?.metadata?.response_deadline || ''
+              return db.localeCompare(da)
+            })
+          if (!solRows.length) return null
+          return (
+            <>
+              <div style={{ marginBottom:20 }}>
+                {lbl(`Solicitations · ${solRows.length}`)}
+                {solRows.map(({ s: sg, row }, i) => {
+                  const m = sg.signals?.metadata || {}
+                  const contactBits = [m.contact_name, m.contact_phone].filter(Boolean)
+                  return (
+                    <div key={sg.signal_id} style={{
+                      padding:'14px 0',
+                      borderBottom: i < solRows.length - 1 ? '1px solid var(--rule)' : 'none',
+                    }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8, flexWrap:'wrap' }}>
+                        <SledTierPill tier={sg.signal_tier} />
+                        {sg.signal_score != null && <ScoreBadge score={sg.signal_score} />}
+                        {sg.signals?.doc_url ? (
+                          <a href={sg.signals.doc_url} target="_blank" rel="noopener noreferrer"
+                            style={{ fontSize:15, fontWeight:600, color:'var(--primary)', textDecoration:'none' }}>
+                            {row.title} →
+                          </a>
+                        ) : (
+                          <span style={{ fontSize:15, fontWeight:600, color:'var(--ink)' }}>{row.title}</span>
+                        )}
+                      </div>
+                      <SolicitationDetails meta={m} />
+                      {(contactBits.length > 0 || m.email || m.address_to_request) && (
+                        <div className="blurable" style={{
+                          marginTop:10, padding:'10px 14px', background:'var(--primary-soft)',
+                          borderLeft:'3px solid var(--primary)', borderRadius:'0 4px 4px 0',
+                          fontSize:13, lineHeight:1.7, color:'var(--ink)',
+                        }}>
+                          <div style={{ fontSize:10, fontFamily:"'IBM Plex Mono', monospace", textTransform:'uppercase',
+                            letterSpacing:'.1em', color:'var(--primary)', fontWeight:700 }}>
+                            Solicitation contact · {m.agency_name || sg.signals?.source_name}
+                          </div>
+                          {m.contact_name && <div style={{ fontWeight:600 }}>{m.contact_name}</div>}
+                          {m.email && <div>✉ <a href={`mailto:${m.email}`} style={{ color:'var(--primary)' }}>{m.email}</a></div>}
+                          {m.contact_phone && <div>☎ <a href={`tel:${m.contact_phone}`} style={{ color:'var(--ink-light)' }}>{m.contact_phone}</a></div>}
+                          {m.address_to_request && <div>⌂ {m.address_to_request}</div>}
+                        </div>
+                      )}
+                      {isRecentlyClosed(sg) && (
+                        <div style={{ marginTop:12 }}>
+                          <div style={{ fontSize:11, fontFamily:"'IBM Plex Mono', monospace", textTransform:'uppercase',
+                            letterSpacing:'.08em', color:'var(--ink-fade)', fontWeight:700, marginBottom:6 }}>
+                            Likely winner
+                          </div>
+                          <LikelyWinner signalId={sg.signal_id} oipId={sg.oip_id || oipId} />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              {divider}
+            </>
+          )
+        })()}
+
         {/* Contact */}
         <div style={{ marginBottom:20 }}>
           {lbl('Contact')}
