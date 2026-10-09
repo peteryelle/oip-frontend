@@ -1492,15 +1492,12 @@ function MarketReviewPage() {
   // card per signal through EntityBoard's isDerived path.
   const sledTabsApply = !isSam && !isBidReview && !isDerivedOip
   const sledTabKey = selectedOip?.id ? `wq-sled-tab-${selectedOip.id}` : null
+  // Always opens on Opportunities (matches SAM's B2G default); Entities is
+  // one click away. Not persisted — a remembered Entities tab made the page
+  // look like the old Entity Board on return visits.
   const [sledTab, setSledTab] = useState('opportunities')
-  useEffect(() => {
-    if (!sledTabKey) return
-    try { setSledTab(localStorage.getItem(sledTabKey) || 'opportunities') } catch { setSledTab('opportunities') }
-  }, [sledTabKey])
-  const chooseSledTab = (t) => {
-    setSledTab(t)
-    try { if (sledTabKey) localStorage.setItem(sledTabKey, t) } catch {}
-  }
+  useEffect(() => { setSledTab('opportunities') }, [sledTabKey])
+  const chooseSledTab = (t) => setSledTab(t)
   const sledOppsView = sledTabsApply && sledTab === 'opportunities'
 
   // B2G column filters (Due Date / Fit Score / Type header popovers).
@@ -1570,6 +1567,7 @@ function MarketReviewPage() {
   // SLED opportunities: one row per notice. The same notice can arrive from
   // more than one feed (e.g. both NYC City Record sources) — collapse those.
   const sledRows = sledOppsView ? dedupeSledSignals(filtered) : []
+  const sledTotal = sledOppsView ? dedupeSledSignals(activeSignals).length : 0
 
   // mvSignals (from useMultiVerticalSignals) previously bypassed every filter
   // above — entity, state, group, search, tier all silently no-op'd whenever
@@ -1601,7 +1599,7 @@ function MarketReviewPage() {
   return (
     <>
       <div className="hero" style={{ marginBottom: 16 }}>
-        <div className="hero-eyebrow">{isSam ? 'SAM.gov' : isBidReview ? 'Bid/No-Bid' : 'Market Review'}</div>
+        <div className="hero-eyebrow">{isSam ? 'SAM.gov' : isBidReview ? 'Bid/No-Bid' : sledTabsApply ? `SLED${allStates.length ? ' · ' + allStates.join(', ') : ''}` : 'Market Review'}</div>
         <h1 className="hero-title" style={{ fontSize: 30 }}>
           {isSam
             ? (samTab === 'dib' ? 'DIB Prospects' : samTab === 'busdev' ? 'B2B Bus Dev' : 'Opportunities')
@@ -1707,6 +1705,17 @@ function MarketReviewPage() {
             placeholder={samTab === 'dib' ? 'Search company or agency…' : 'Search title or department…'}
             value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 240 }} />
 
+        ) : sledOppsView ? (
+          <>
+            {allStates.length > 1 && (
+              <select value={stateFilter} onChange={e => setStateFilter(e.target.value)}>
+                <option value="">All states</option>
+                {allStates.map(st => <option key={st} value={st}>{st}</option>)}
+              </select>
+            )}
+            <input type="search" placeholder="Search title or agency…"
+              value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 240 }} />
+          </>
         ) : (
           <>
             <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
@@ -1748,7 +1757,7 @@ function MarketReviewPage() {
             <>
               <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink-fade)', fontFamily: "'IBM Plex Mono', monospace" }}>
                 {sledRows.length} opportunities
-                {filtered.length !== sledRows.length && ` · ${filtered.length} signals`}
+                {sledRows.length !== sledTotal && ` of ${sledTotal}`}
                 {colFilters.futureOnly && <span> · future due dates only</span>}
                 {colFiltersActive && (
                   <button onClick={resetColFilters} style={{ marginLeft: 12, background: 'none', border: 'none',
@@ -2736,7 +2745,6 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                 <TypeFilterBody colFilters={colFilters} onColFilters={onColFilters} typeCounts={typeCounts} />
               </ColFilterPop>
             </th>
-            <SortTh label="Posted" k="posted" />
             <SortTh label="Due Date" k="deadline" style={{ position: 'relative' }}
               filter={
                 <ColFilterPop active={colFilters.futureOnly || !colFilters.includeNoDate} label="Filter by due date">
@@ -2750,6 +2758,7 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                 </ColFilterPop>
               } />
             <th style={thSam}>Tier</th>
+            <th style={thSam}>Sentinel</th>
             <th style={thSam}>Status</th>
           </tr>
         </thead>
@@ -2772,13 +2781,11 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                     {row.noticeId && <span>{row.noticeId.slice(0, 20)}</span>}
                     {row.agency && <span>{row.agency.slice(0, 45)}</span>}
                     {row.feed && <span>· {row.feed}{copies > 1 ? ` +${copies - 1}` : ''}</span>}
+                    {row.posted && <span>· posted {fmtDate(row.posted)}</span>}
                   </div>
                 </td>
                 <td style={{ padding: '12px 8px', whiteSpace: 'nowrap' }}>
                   <NoticeTypePill type={row.type} />
-                </td>
-                <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, whiteSpace: 'nowrap', color: 'var(--ink-fade)' }}>
-                  {row.posted ? fmtDate(row.posted) : '—'}
                 </td>
                 <td style={{ padding: '12px 8px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, whiteSpace: 'nowrap',
                   color: isPastDue ? '#c62828' : 'var(--ink)', fontWeight: isPastDue ? 600 : 400 }}>
@@ -2789,6 +2796,9 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                 </td>
                 <td style={{ padding: '12px 8px' }}>
                   <SledTierPill tier={s.signal_tier} />
+                </td>
+                <td style={{ padding: '12px 8px' }}>
+                  <SentinelNames matched={(s.matched_groups || []).slice(0, 2)} />
                 </td>
                 <td style={{ padding: '12px 8px' }}>
                   <span style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace",
