@@ -2338,6 +2338,155 @@ function isBeyondClosedWindow(s) {
   return d < cutoff
 }
 
+// Closed (due date passed) but still inside the recently-closed window.
+function isRecentlyClosed(s) {
+  const meta = s.signals?.metadata || {}
+  const due = meta.response_deadline || meta.due_date
+  if (!due) return false
+  const d = parseLocalDate(due)
+  if (isNaN(d) || d >= new Date()) return false
+  return !isBeyondClosedWindow(s)
+}
+
+const FIND_WINNER_URL = 'https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/find-likely-winner'
+
+async function callFindWinner(body) {
+  const r = await fetch(FIND_WINNER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify(body),
+  })
+  const d = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`)
+  return d
+}
+
+// A cached "no winner found" is re-searched automatically once it is this old:
+// NYC award notices often post 1-3 months after the due date.
+const WINNER_RESEARCH_AFTER_DAYS = 14
+// Guards against double-firing the paid search for the same notice in one
+// page session (React StrictMode double effects, quick close/reopen).
+const _winnerAutoRuns = new Set()
+
+function LikelyWinner({ signalId, oipId }) {
+  const [state, setState] = useState({ loading: true, data: null, error: null, searching: false })
+
+  const run = (force = false) => {
+    setState(st => ({ ...st, loading: false, searching: true, error: null }))
+    callFindWinner({ signal_id: signalId, oip_id: oipId, force })
+      .then(d => setState({ loading: false, data: d, error: null, searching: false }))
+      .catch(e => setState(st => ({ ...st, searching: false, error: e.message })))
+  }
+
+  // On open: read the cache. Search automatically (this component only
+  // renders for notices that are past due and inside the recently-closed
+  // window) when there is no cached result, or when the cached result found
+  // no winner and is older than WINNER_RESEARCH_AFTER_DAYS.
+  useEffect(() => {
+    let cancelled = false
+    setState({ loading: true, data: null, error: null, searching: false })
+    callFindWinner({ signal_id: signalId, oip_id: oipId, cache_only: true })
+      .then(d => {
+        if (cancelled) return
+        const cached = d.status === 'none' ? null : d
+        const key = `${signalId}|${oipId}`
+        const stale = cached && cached.method === 'none' && cached.searched_at &&
+          (Date.now() - new Date(cached.searched_at).getTime()) > WINNER_RESEARCH_AFTER_DAYS * 86400000
+        if ((!cached || stale) && !_winnerAutoRuns.has(key)) {
+          _winnerAutoRuns.add(key)
+          if (cached) setState({ loading: false, data: cached, error: null, searching: false })
+          run(!!cached)
+          return
+        }
+        setState({ loading: false, data: cached, error: null, searching: false })
+      })
+      .catch(e => { if (!cancelled) setState({ loading: false, data: null, error: e.message, searching: false }) })
+    return () => { cancelled = true }
+  }, [signalId, oipId])
+
+  const mono = { fontFamily: "'IBM Plex Mono', monospace" }
+  const confColor = { high: '#2e7d32', medium: '#1565c0', low: '#b45309' }
+  const btn = {
+    background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 4,
+    padding: '8px 16px', fontWeight: 600, cursor: 'pointer', fontSize: 13, ...mono,
+  }
+
+  if (state.loading) return <div style={{ fontSize: 13, color: 'var(--ink-fade)', fontStyle: 'italic', ...mono }}>Checking…</div>
+
+  const d = state.data
+  const award = d?.award
+  const candidates = d?.candidates || []
+
+  return (
+    <div className="blurable">
+      {!d && state.searching && (
+        <div style={{ fontSize: 13, color: 'var(--ink-fade)', fontStyle: 'italic', lineHeight: 1.5, ...mono }}>
+          Closed solicitation — looking for the winner (City Record award notice, then web search)…
+        </div>
+      )}
+      {!d && !state.searching && state.error && (
+        <button style={btn} onClick={() => run(false)}>Retry winner lookup</button>
+      )}
+
+      {award && (
+        <div style={{ padding: '12px 14px', background: 'var(--primary-soft)', borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0' }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--primary)', fontWeight: 700, marginBottom: 6, ...mono }}>
+            Award notice · NYC City Record
+          </div>
+          {Object.entries(award).map(([k, v]) => (
+            <div key={k} style={{ fontSize: 13, color: 'var(--ink)', lineHeight: 1.6 }}>
+              <span style={{ color: 'var(--ink-fade)', ...mono, fontSize: 11 }}>{k.replace(/_/g, ' ')}: </span>{String(v)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!award && d && candidates.length > 0 && candidates.map((c, i) => (
+        <div key={i} style={{ padding: '12px 14px', marginBottom: 8, background: 'var(--bg-soft, #f8f8f8)',
+          borderLeft: `3px solid ${confColor[c.confidence] || 'var(--rule-strong)'}`, borderRadius: '0 4px 4px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{c.vendor}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em',
+              color: confColor[c.confidence] || 'var(--ink-fade)', ...mono }}>{c.confidence} confidence</span>
+          </div>
+          {c.evidence && <div style={{ fontSize: 13, color: 'var(--ink-light)', lineHeight: 1.5, marginBottom: 4 }}>“{c.evidence}”</div>}
+          {c.source_url && (
+            <a href={c.source_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: 'var(--primary)', ...mono }}>
+              Source →
+            </a>
+          )}
+        </div>
+      ))}
+
+      {!award && d && candidates.length === 0 && d.status !== 'open' && (
+        <div style={{ fontSize: 13, color: 'var(--ink-fade)', lineHeight: 1.5 }}>
+          No winner found yet{d.note ? ` — ${d.note}` : '.'} NYC award notices often post 1–3 months after the due date.
+        </div>
+      )}
+
+      {d && d.status === 'open' && (
+        <div style={{ fontSize: 13, color: 'var(--ink-fade)' }}>{d.note}</div>
+      )}
+
+      {d && d.searched_at && (
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--ink-fade)', ...mono }}>
+          Checked {new Date(d.searched_at).toLocaleDateString()}
+          {' · '}
+          <button onClick={() => run(true)} disabled={state.searching} style={{ background: 'none', border: 'none', padding: 0,
+            color: 'var(--primary)', cursor: 'pointer', fontSize: 11, textDecoration: 'underline', ...mono }}>
+            {state.searching ? 'Searching…' : 'Search again'}
+          </button>
+        </div>
+      )}
+
+      {state.error && <div style={{ marginTop: 8, fontSize: 12, color: '#c62828', ...mono }}>Lookup failed: {state.error}</div>}
+    </div>
+  )
+}
+
 // Long selection-method names from source systems -> short table labels.
 const SLED_TYPE_ALIASES = {
   'request for proposals': 'RFP',
@@ -4806,6 +4955,20 @@ ${analysisHtml}
             <div style={{ marginBottom: 20 }}>
               {lbl('Solicitation Details')}
               <SolicitationDetails meta={meta} />
+            </div>
+          </>
+        )}
+
+        {/* Likely Winner — recently closed SLED notices (due date passed, still
+            inside the recently-closed window). The winning vendor is the
+            teaming target. Lookup is on-demand; opening the drawer only reads
+            the cache. */}
+        {!isSam && sig.state && sig.state.length === 2 && isRecentlyClosed(os) && (
+          <>
+            {divider}
+            <div style={{ marginBottom: 20 }}>
+              {lbl('Likely Winner')}
+              <LikelyWinner signalId={os.signal_id} oipId={os.oip_id} />
             </div>
           </>
         )}
