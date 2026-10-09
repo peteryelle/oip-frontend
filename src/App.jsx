@@ -1548,6 +1548,11 @@ function MarketReviewPage() {
       if (!ok) return false
     }
     if (!isSam) {
+      // Recently-closed window: a SLED notice whose due date passed more than
+      // SLED_CLOSED_WINDOW_DAYS ago is history, not an opportunity. Hidden in
+      // BOTH tabs (Opportunities and Entities) unless "Show stale" is on.
+      // Notices with no stored due date are unaffected.
+      if (!showStale && isBeyondClosedWindow(s)) return false
       if (stateFilter && s.signals?.state !== stateFilter) return false
       if (groupFilter && !(s.matched_groups || []).includes(groupFilter)) return false
       if (entityFilter && s.signals?.source_name !== entityFilter) return false
@@ -2314,6 +2319,23 @@ function parseLocalDate(d) {
     return new Date(y, m - 1, day)
   }
   return new Date(d)
+}
+
+// Recently-closed window (days after the due date that a closed SLED notice
+// stays visible, so the winning vendor can still be targeted). Matches the
+// Derived Demand new-award default; becomes a per-OIP setting
+// (sentinel pull_config.closed_window_days) when that UI is built.
+const SLED_CLOSED_WINDOW_DAYS = 120
+
+function isBeyondClosedWindow(s) {
+  const meta = s.signals?.metadata || {}
+  const due = meta.response_deadline || meta.due_date
+  if (!due) return false
+  const d = parseLocalDate(due)
+  if (isNaN(d)) return false
+  const cutoff = new Date(); cutoff.setHours(0, 0, 0, 0)
+  cutoff.setDate(cutoff.getDate() - SLED_CLOSED_WINDOW_DAYS)
+  return d < cutoff
 }
 
 // Long selection-method names from source systems -> short table labels.
