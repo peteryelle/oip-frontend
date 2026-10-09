@@ -67,6 +67,42 @@ const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\.
 const blocked = (u: string) => BLOCKED_HOSTS.some(h => hostOf(u).endsWith(h));
 const isPdfUrl = (u: string) => /\.pdf(\?|#|$)/i.test(u);
 
+// NYC City Record lists agencies by short names that are too generic to
+// search on ("City University" matched the University of Maine). Expand them
+// to the full name + acronym used in the agencies' own documents.
+const AGENCY_ALIASES: Record<string, string> = {
+  "city university": "City University of New York (CUNY)",
+  "economic development corporation": "NYC Economic Development Corporation (NYCEDC)",
+  "nyc health + hospitals": "NYC Health + Hospitals (H+H)",
+  "housing authority": "New York City Housing Authority (NYCHA)",
+  "school construction authority": "NYC School Construction Authority (SCA)",
+  "education": "NYC Department of Education (DOE)",
+  "campaign finance board": "NYC Campaign Finance Board (CFB)",
+  "parks and recreation": "NYC Department of Parks and Recreation (NYC Parks)",
+  "transportation": "NYC Department of Transportation (NYC DOT)",
+  "environmental protection": "NYC Department of Environmental Protection (DEP)",
+  "design and construction": "NYC Department of Design and Construction (DDC)",
+  "citywide administrative services": "NYC Department of Citywide Administrative Services (DCAS)",
+  "health and mental hygiene": "NYC Department of Health and Mental Hygiene (DOHMH)",
+  "small business services": "NYC Department of Small Business Services (SBS)",
+};
+const expandAgency = (a: string) => AGENCY_ALIASES[a.trim().toLowerCase()] ?? a;
+
+// Distinctive words of the agency name, for relevance checks on search hits
+// and PDF candidates. "Campaign Finance Board" -> ["campaign","finance","board"].
+const STOP = new Set(["of","the","and","for","new","york","state","city","department","office","nys","nyc","authority","division","services"]);
+function agencyTokens(agency: string): string[] {
+  return agency.toLowerCase().replace(/[()]/g, " ").split(/[^a-z0-9]+/)
+    .filter(w => w.length >= 4 && !STOP.has(w));
+}
+function mentionsAgency(text: string, tokens: string[], acronym: string): boolean {
+  const t = text.toLowerCase();
+  if (acronym && acronym.length >= 3 && new RegExp(`\\b${acronym.toLowerCase()}\\b`).test(t)) return true;
+  if (!tokens.length) return true;
+  const hits = tokens.filter(w => t.includes(w)).length;
+  return hits >= Math.min(2, tokens.length);
+}
+
 // ── Tavily ────────────────────────────────────────────────────────────────
 type Hit = { title: string; url: string; content: string; raw?: string };
 
@@ -117,6 +153,7 @@ async function claudeJSON(content: unknown[], maxTokens = 2000): Promise<Record<
 
 const EXTRACT_SPEC = `Return ONLY JSON, no preamble:
 {
+ "same_procurement": {"match": false, "reason": ""},
  "contacts": [{"name":"","title":"","organization":"","email":"","phone":"","role":"designated|administrative|subject_matter|consultant|listed"}],
  "timeline": [{"event":"","date":"YYYY-MM-DD","time":""}],
  "gates": [""],
@@ -127,7 +164,8 @@ const EXTRACT_SPEC = `Return ONLY JSON, no preamble:
  "tenant_signals": [{"quote":"","why":""}],
  "summary": ""
 }
-Rules: use only what the material states; leave fields empty rather than guessing.
+Rules: FIRST decide same_procurement: match=true ONLY if the material is about THIS procurement — same issuing agency (or its parent) AND the same scope/title or solicitation number. A different organization's RFP on a similar topic is match=false. If match=false, leave every other field empty.
+Use only what the material states; leave fields empty rather than guessing.
 contacts: only people/offices named as contacts for THIS procurement.
 timeline: every dated event (intent to propose, questions due, answers, proposals due, finalists, presentations, award, contract start).
 gates: requirements to participate (letter of intent, NDA, mandatory meeting, registration, eligibility).
@@ -227,11 +265,25 @@ Deno.serve(async (req: Request) => {
       .select("title, source_name, doc_url, metadata").eq("id", signal_id).single();
     if (!sig) return json({ error: "signal not found" }, 404);
     const meta  = (sig.metadata ?? {}) as Record<string, unknown>;
-    const agency = String(meta.agency_name || sig.source_name || "");
+    const agency = expandAgency(String(meta.agency_name || sig.source_name || ""));
+    // First sentence of the notice's own description: names the actual buyer
+    // (e.g. "LaGuardia Community College, CUNY is seeking...").
+    const descLead = String(meta.additional_description_1 || meta.note || "")
+      .split(/(?<=[.!?])\s/)[0].slice(0, 220);
     const title  = String(meta.short_title || String(sig.title ?? "").split(" — ").slice(-1)[0]);
     const ident  = String(meta.pin || meta.cr_number || meta.request_id || "");
     const dueStr = String(meta.response_deadline || meta.due_date || "");
-    const notice = `${agency} — ${title}${ident ? ` (#${ident})` : ""}${dueStr ? `, due ${dueStr}` : ""}`;
+    const notice = `${agency} — ${title}${ident ? ` (#${ident})` : ""}${dueStr ? `, due ${dueStr}` : ""}`
+      + (descLead ? `. Description: ${descLead}` : "");
+    const acronym = (agency.match(/\(([A-Z]{3,})\)/) || [])[1] || "";
+    const aTokens = agencyTokens(agency);
+    // Facts from the source record itself. These outrank anything found online.
+    const authoritative: Record<string, unknown> = {};
+    for (const k of ["response_deadline", "due_date", "ad_end_date", "issue_date", "pin", "cr_number",
+                     "selection_method_description", "ad_type", "notice_type", "category_description",
+                     "contact_name", "contact_phone", "email", "address_to_request", "goals"]) {
+      if (meta[k] != null && meta[k] !== "") authoritative[k] = meta[k];
+    }
 
     const { data: oip } = await sb.from("oips").select("name, slug").eq("id", oip_id).single();
     const { data: profile } = await sb.rpc("get_canonical_profile", { p_oip_id: oip_id });
@@ -253,10 +305,12 @@ Deno.serve(async (req: Request) => {
     if (srcUrl && isPdfUrl(srcUrl)) { docUrl = srcUrl; docTitle = "Solicitation document (source)"; }
     let searchHits: Hit[] = [];
     if (!docUrl) {
-      const q = `"${agency}" "${title}" RFP${ident ? ` ${ident}` : ""}`;
+      const buyer = (descLead.match(/^([A-Z][\w&.,' -]{3,80}?) (is|are) (seeking|requesting|soliciting)/) || [])[1] || "";
+      const q = `"${agency}"${buyer ? ` "${buyer}"` : ""} "${title}" RFP${ident ? ` ${ident}` : ""}`;
       queries.push(q);
-      searchHits = await tavily(q, { raw: true, max: 6 });
-      const pdf = searchHits.find(h => isPdfUrl(h.url)) ;
+      searchHits = (await tavily(q, { raw: true, max: 8 }))
+        .filter(h => mentionsAgency(`${h.title} ${h.url} ${h.content} ${h.raw ?? ""}`, aTokens, acronym));
+      const pdf = searchHits.find(h => isPdfUrl(h.url));
       if (pdf) { docUrl = pdf.url; docTitle = pdf.title; }
     }
 
@@ -269,6 +323,12 @@ Deno.serve(async (req: Request) => {
         const buf = r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
         if (buf && buf.byteLength > 0 && buf.byteLength <= MAX_PDF_BYTES) {
           facts = await extractFromPdf(encodeBase64(buf), notice, tenant);
+          const sp = (facts?.same_procurement ?? {}) as Record<string, unknown>;
+          if (facts && sp.match !== true) {
+            console.log("document rejected (not this procurement):", docUrl, sp.reason);
+            sources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — ${String(sp.reason ?? "not this procurement").slice(0, 120)}` });
+            facts = null;
+          }
           if (facts) {
             document = { url: docUrl, title: docTitle, source: hostOf(docUrl) };
             sources.push({ title: docTitle || "Solicitation document", url: docUrl, used_for: "document" });
@@ -280,7 +340,9 @@ Deno.serve(async (req: Request) => {
       const material = searchHits.map((h, i) =>
         `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.raw || h.content}`).join("\n\n").slice(0, 18000);
       facts = await extractFromText(material, notice, tenant);
-      for (const h of searchHits) sources.push({ title: h.title, url: h.url, used_for: "listing" });
+      const sp = (facts?.same_procurement ?? {}) as Record<string, unknown>;
+      if (facts && sp.match !== true) facts = null;
+      else for (const h of searchHits) sources.push({ title: h.title, url: h.url, used_for: "listing" });
     }
     facts = facts ?? {};
 
@@ -326,6 +388,7 @@ Return ONLY JSON: {"people":[{"name":"","title":"","note":"","source_url":""}]}`
 TENANT PROFILE: ${tenant}
 
 OPPORTUNITY: ${notice}
+AUTHORITATIVE FACTS (from the official source record — these override anything below): ${JSON.stringify(authoritative)}
 FACTS (from the solicitation document or listings): ${JSON.stringify(facts).slice(0, 9000)}
 DECISION-MAKERS: ${JSON.stringify(decision_makers)}
 WINNER: ${JSON.stringify(winner)}
@@ -339,7 +402,16 @@ Return ONLY JSON:
  "next_steps": [{"when":"YYYY-MM-DD or a window","action":"","why":""}],
  "compliance": [""]
 }
-Rules: next_steps in date order, 3-6 items, concrete and dated from the timeline. If a restricted communication period applies, NEVER suggest contacting agency staff other than the designated contacts before it ends, and list that in compliance. Do not invent names, dates, or facts not present above.` }], 1500);
+Rules: stage must be consistent with the authoritative due date — a procurement whose due date has passed is NOT open. If the source record says sole source / exempt from advertising / noncompetitive, say so in angle and do not suggest bidding.
+next_steps in date order, 3-6 items, concrete and dated from the timeline. If a restricted communication period applies, NEVER suggest contacting agency staff other than the designated contacts before it ends, and list that in compliance. Do not invent names, dates, or facts not present above.` }], 1500);
+
+    // Stage guard: never "open"-type once the authoritative due date passed.
+    let stage = String(synth?.stage ?? "");
+    const preDue = new Set(["open", "intent_closed", "questions_closed", ""]);
+    if (dueDate && now > dueDate && preDue.has(stage)) {
+      const w = winner as Record<string, unknown> | null;
+      stage = (w && (w.award || ((w.candidates as unknown[]) ?? []).length)) ? "awarded" : "proposals_in";
+    }
 
     // ── 5. Next refresh, from the opportunity's own milestones ──
     const milestones = [findEvent(timeline, /finalist/i), awardDate, findEvent(timeline, /contract start|start date/i), dueDate]
@@ -352,7 +424,7 @@ Rules: next_steps in date order, 3-6 items, concrete and dated from the timeline
     const row = {
       signal_id, oip_id,
       status: (document || Object.keys(facts).length) ? "ok" : "partial",
-      stage: String(synth?.stage ?? ""),
+      stage,
       document, facts, decision_makers, winner,
       angle: String(synth?.angle ?? ""),
       next_steps: (synth?.next_steps as unknown[]) ?? [],
