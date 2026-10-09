@@ -2384,7 +2384,6 @@ function SolicitationDetails({ meta }) {
   })()
   const solicitation = [meta.pin || meta.solicitation_number, meta.selection_method_description || meta.notice_type]
     .filter(Boolean).join(' · ')
-  const contact = [meta.contact_name, meta.contact_phone].filter(Boolean).join(' · ')
   const goals = meta.goals && typeof meta.goals === 'object'
     ? GOAL_LABELS.filter(([k]) => meta.goals[k] != null).map(([k, label]) => `${label} ${meta.goals[k]}%`).join(' · ')
     : ''
@@ -2393,11 +2392,6 @@ function SolicitationDetails({ meta }) {
       {dueText.past ? 'Past due · ' : ''}{dueText.text}</span>],
     solicitation && ['Solicitation', solicitation],
     meta.category_description && ['Category', meta.category_description],
-    (contact || meta.email) && ['Contact', <span>
-      {contact}{contact && meta.email ? ' · ' : ''}
-      {meta.email && <a href={`mailto:${meta.email}`} style={{ color: 'var(--primary)' }}>{meta.email}</a>}
-    </span>],
-    meta.address_to_request && ['Request documents', meta.address_to_request],
     goals && ['Participation goals', goals],
   ].filter(Boolean)
 
@@ -4164,6 +4158,27 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
   useEffect(() => {
     if (!sig.state || sig.state.length !== 2 || isSam) return
     if (!os.signal_id || !os.oip_id) return
+    // The solicitation itself names a contact (e.g. NYC City Record:
+    // contact_name / contact_phone / email, stored in signals.metadata).
+    // Use it directly — it is the buyer's own point of contact — instead of
+    // calling find-signal-contact, which only reads vertical_data.contact and
+    // otherwise falls back to an inferred role.
+    const sm = sig.metadata || {}
+    if (sm.contact_name || sm.email || sm.contact_phone) {
+      setContactLoading(false)
+      setContactInfo({
+        mode: 'solicitation',
+        contacts: [{
+          contact_mode: 'named',
+          full_name: sm.contact_name || null,
+          title: [sm.agency_name || sig.source_name, sm.agency_division].filter(Boolean).join(' · ') || null,
+          email: sm.email || null,
+          phone: sm.contact_phone || null,
+          address: sm.address_to_request || null,
+        }],
+      })
+      return
+    }
     setContactInfo(null)
     setContactLoading(true)
     fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/find-signal-contact', {
@@ -4848,6 +4863,11 @@ ${analysisHtml}
                       }}>
                         <span style={{ fontSize: 11, opacity: 0.7 }}>☎</span> {c.phone}
                       </a>
+                    )}
+                    {c.address && (
+                      <div style={{ fontSize: 13, color: 'var(--ink-light)', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                        <span style={{ fontSize: 11, opacity: 0.7 }}>⌂</span> {c.address}
+                      </div>
                     )}
                     {c.linkedin_url && (
                       <a href={`https://${c.linkedin_url.replace(/^https?:\/\//, '')}`}
