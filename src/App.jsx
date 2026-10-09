@@ -2519,6 +2519,7 @@ const SLED_DETAIL_KEYS = [
   'category_description', 'contact_name', 'contact_phone', 'email',
   'address_to_request', 'additional_description_1', 'goals',
   'cr_number', 'ad_type', 'location', 'issue_date', 'ad_end_date', 'note',
+  'goals_text', 'status',
 ]
 function hasSolicitationDetail(meta) {
   return SLED_DETAIL_KEYS.some(k => {
@@ -2558,7 +2559,8 @@ function SolicitationDetails({ meta }) {
     meta.agency_division && ['Division', meta.agency_division],
     meta.issue_date && ['Issued', meta.issue_date],
     meta.location && ['Location', meta.location],
-    goals && ['Participation goals', goals],
+    (goals || meta.goals_text) && ['Participation goals', goals || meta.goals_text],
+    meta.status && ['Status', meta.status],
   ].filter(Boolean)
 
   const labelStyle = { fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)',
