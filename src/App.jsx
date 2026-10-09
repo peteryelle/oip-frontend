@@ -2546,7 +2546,7 @@ function SolicitationDetails({ meta }) {
   })()
   const solicitation = [
     meta.pin || meta.solicitation_number || (meta.cr_number ? `CR# ${meta.cr_number}` : null),
-    meta.selection_method_description || meta.notice_type || meta.ad_type,
+    meta.selection_method_description || meta.notice_type,
   ].filter(Boolean).join(' · ')
   const goals = meta.goals && typeof meta.goals === 'object'
     ? GOAL_LABELS.filter(([k]) => meta.goals[k] != null).map(([k, label]) => `${label} ${meta.goals[k]}%`).join(' · ')
@@ -2555,6 +2555,7 @@ function SolicitationDetails({ meta }) {
     dueText && ['Due', <span style={{ color: dueText.past ? '#c62828' : 'var(--ink)', fontWeight: 600 }}>
       {dueText.past ? 'Past due · ' : ''}{dueText.text}</span>],
     solicitation && ['Solicitation', solicitation],
+    meta.ad_type && ['Ad type', meta.ad_type],
     meta.category_description && ['Category', meta.category_description],
     meta.agency_division && ['Division', meta.agency_division],
     meta.issue_date && ['Issued', meta.issue_date],
@@ -2641,6 +2642,8 @@ function sledRow(s) {
   const rule = SLED_TYPE_RULES.find(([re]) => re.test(title))
   const metaType = meta.ad_type && /sole|single source|exempt from advertising/i.test(meta.ad_type)
     ? 'Sole Source'
+    : meta.ad_type && /discretionary/i.test(meta.ad_type)
+    ? ((meta.ad_type.match(/\$[\d,]+/) || [])[0] ? `Discretionary <${meta.ad_type.match(/\$[\d,]+/)[0].replace(/,000$/, 'K')}` : 'Discretionary')
     : meta.notice_type ? (SLED_TYPE_ALIASES[String(meta.notice_type).toLowerCase()] || meta.notice_type) : null
   const type = metaType || (rule ? rule[1] : 'Solicitation')
 
