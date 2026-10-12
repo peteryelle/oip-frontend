@@ -307,15 +307,6 @@ timeline: dated events stated in the text — next meeting, effective dates, dea
 tenant_signals: up to 5 short quotes (max 30 words) from the text that matter to the TENANT, with why.
 summary: 2 sentences on what this meeting covered that is relevant to the TENANT; say plainly if nothing relevant was on it.`;
 
-// Keep a step if any date in its "when" is today or later, or it has no date.
-function futureSteps(steps: { when?: string }[], now: Date) {
-  const today = now.toISOString().slice(0, 10);
-  return steps.filter(s => {
-    const ds = String(s?.when ?? "").match(/\d{4}-\d{2}-\d{2}/g);
-    return !ds || ds.some(d => d >= today);
-  });
-}
-
 // deno-lint-ignore no-explicit-any
 async function enrichBoardSignal(ctx: any) {
   const { sb, sig, signal_id, oip_id, tenant, oipName, dmTemplate, cached } = ctx;
@@ -343,21 +334,6 @@ async function enrichBoardSignal(ctx: any) {
     ? { url: docUrl, title: `${board} ${docType} (${meetingStr})`, source: hostOf(docUrl), kind: "meeting" }
     : null;
   if (document) sources.push({ title: document.title, url: docUrl, used_for: "meeting document" });
-
-  // 1b. The same board's other captured meetings (e.g. the next agenda is
-  // already posted) — so next steps point at real, current documents.
-  let otherMeetings: { date: string; title: string; type: string }[] = [];
-  try {
-    const { data: sibs } = await sb.from("signals")
-      .select("meeting_date, title, doc_type")
-      .eq("source_name", sig.source_name)
-      .neq("id", signal_id)
-      .gte("meeting_date", addDays(meetingDate ?? now, -60).toISOString().slice(0, 10))
-      .order("meeting_date", { ascending: true }).limit(12);
-    otherMeetings = ((sibs ?? []) as { meeting_date?: string; title?: string; doc_type?: string }[])
-      .filter(m => m.meeting_date)
-      .map(m => ({ date: String(m.meeting_date).slice(0, 10), title: String(m.title ?? ""), type: String(m.doc_type ?? "") }));
-  } catch (e) { console.error("sibling meetings lookup failed", e); }
 
   // 2. Web context (corroboration only) + decision-makers
   const items = (facts.relevant_items as { item?: string }[]) ?? [];
@@ -405,7 +381,6 @@ MEETING: ${docType} for ${meetingStr}${meetingDate && meetingDate > now ? " (upc
 FACTS FROM THE MEETING TEXT: ${JSON.stringify(facts).slice(0, 9000)}
 WEB CONTEXT (corroboration only; ignore anything not about this board): ${JSON.stringify(webContext)}
 DECISION-MAKERS: ${JSON.stringify(decision_makers)}
-OTHER MEETINGS OF THIS BOARD ALREADY ON FILE (agendas/minutes we hold): ${JSON.stringify(otherMeetings)}
 
 This is a board meeting, NOT a procurement. The meeting date is when the board met (or will meet) — it is not a deadline, and a past meeting date does not make the signal stale. A municipal utility typically moves from discussion -> study/consultant -> budget -> procurement authorized -> RFP issued -> award -> implementation; place this signal on that path from what the text says.
 
@@ -416,7 +391,7 @@ Return ONLY JSON:
  "next_steps": [{"when":"YYYY-MM-DD or a window","action":"","why":""}],
  "compliance": [""]
 }
-Rules: next_steps 2-5 items, concrete (e.g. review a later agenda that is already on file, request the minutes or the rate study, contact an official named in the text). Every "when" must be today or later — never schedule a step on a date that has passed; if a later meeting of this board is already on file, point to it by date instead of saying "monitor". Use dates only from the facts above. Label any estimate (e.g. time to procurement) as an estimate. compliance only for rules actually stated (e.g. an open procurement's communication restrictions); otherwise []. Do not invent names, dates, amounts, or procurements.` }], 1300);
+Rules: next_steps 2-5 items, concrete (e.g. watch the next meeting's agenda, request the minutes or the rate study, contact the general manager named in the text). Use dates only from the facts above. compliance only for rules actually stated (e.g. an open procurement's communication restrictions); otherwise []. Do not invent names, dates, amounts, or procurements.` }], 1300);
   }
 
   const stage = canceled ? "no_activity" : String(synth?.stage ?? (Object.keys(facts).length > 2 ? "discussion" : "no_activity"));
@@ -433,7 +408,7 @@ Rules: next_steps 2-5 items, concrete (e.g. review a later agenda that is alread
     document, facts, decision_makers, winner: null,
     angle: canceled ? "This meeting was canceled; nothing to act on." :
       String(synth?.angle ?? (text ? "" : "The meeting text was not available to review.")),
-    next_steps: futureSteps((synth?.next_steps as { when?: string }[]) ?? [], now),
+    next_steps: (synth?.next_steps as unknown[]) ?? [],
     compliance: ((synth?.compliance as unknown[]) ?? []).filter(c => String(c ?? "").trim()),
     sources, queries, error: null,
     enriched_at: now.toISOString(),
@@ -459,7 +434,7 @@ Deno.serve(async (req: Request) => {
 
     // ── Load notice, tenant profile, sentinel settings ──
     const { data: sig } = await sb.from("signals")
-      .select("title, source_name, state, doc_url, metadata, meeting_date, doc_type, full_text_storage_path, vertical_data").eq("id", signal_id).single();
+      .select("title, source_name, doc_url, metadata, meeting_date, doc_type, full_text_storage_path, vertical_data").eq("id", signal_id).single();
     if (!sig) return json({ error: "signal not found" }, 404);
     const meta  = (sig.metadata ?? {}) as Record<string, unknown>;
     const agency = expandAgency(String(meta.agency_name || sig.source_name || ""));
