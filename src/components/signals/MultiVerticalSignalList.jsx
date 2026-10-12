@@ -16,6 +16,7 @@
 
 import { useState } from 'react'
 import SignalSourceBadge from './SignalSourceBadge'
+import { displaySource } from '../../lib/displaySource'
 
 const TIER_CONFIG = {
   tier1_strong: { label: 'Strong',  bg: '#dcfce7', color: '#166534' },
@@ -224,7 +225,7 @@ export default function MultiVerticalSignalList({
                     marginTop: 4,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
-                    {sig.source_name}
+                    {displaySource(sig)}
                     {oipName && <span style={{ marginLeft: 8, opacity: .6 }}>· {oipName}</span>}
                   </div>
                   {s.match_reason && (

@@ -8,7 +8,7 @@
 const VERTICAL_CONFIG = {
   oe417:  { label: 'OE-417',  bg: '#fef3c7', color: '#92400e' },
   grants: { label: 'Grants',  bg: '#dcfce7', color: '#166534' },
-  puc:    { label: 'PUC',     bg: '#dbeafe', color: '#1e40af' },
+  puc:    { label: 'Regulatory', bg: '#dbeafe', color: '#1e40af' },
   sam:    { label: 'SAM',     bg: '#ede9fe', color: '#5b21b6' },
   sled:   { label: 'SLED',    bg: '#f1f5f9', color: '#475569' },
   ferc:   { label: 'FERC',    bg: '#fce7f3', color: '#9d174d' },

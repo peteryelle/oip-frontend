@@ -1,3 +1,4 @@
+import { displaySource } from './displaySource'
 // src/lib/generateBriefs.js
 //
 // Client-side port of workers/sled/generate_briefs.py. Deliberately a
@@ -271,7 +272,7 @@ export function generateActionBrief(signal, oipSignal) {
     objective,
     badge: BADGE_LABELS[objective] || objective,
     project: projectLabel(oipSignal, signal),
-    district: signal?.source_name || null,
+    district: displaySource(signal) || null,
     pmActions: template.pmActions,
     whyItMovesTheOdds: template.why,
     context: oipSignal.why_now || null,
@@ -295,7 +296,7 @@ export function generatePartnerBrief(signal, oipSignal) {
     objective,
     badge: BADGE_LABELS[objective] || objective,
     project: projectLabel(oipSignal, signal),
-    district: signal?.source_name || null,
+    district: displaySource(signal) || null,
     handToPartner: template.handToPartner,
     partnerConfirmsBack: template.confirmsBack,
     context: oipSignal.why_now || null,

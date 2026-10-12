@@ -25,6 +25,7 @@ import { OipProvider, useOip } from './lib/oip'
 import { validatePassword } from './lib/password'
 import { USER_GUIDE, HELP_ANCHORS } from './lib/help'
 import { groupProjectsForEntity } from './lib/generateBriefs'
+import { displaySource, entityName, entityKey } from './lib/displaySource'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
@@ -885,7 +886,7 @@ function HomePage() {
         .from('oip_signals')
         .select(`
           signal_id, signal_tier, matched_keywords, matched_groups,
-          signals:signal_id (id, source_name, entity_key, state, portal_id, scraped_at)
+          signals:signal_id (id, source, source_name, entity_key, state, portal_id, scraped_at, metadata)
         `)
         .eq('oip_id', selectedOip.id)
 
@@ -900,11 +901,11 @@ function HomePage() {
       ;(scoredSignals || []).forEach(os => {
         const sig = os.signals
         if (!sig) return
-        const entityKey = sig.entity_key || sig.source_name || 'Unknown'
-        const entityName = sig.source_name || 'Unknown'
-        if (!entityMap.has(entityKey)) {
-          entityMap.set(entityKey, {
-            name: entityName,
+        const eKey  = entityKey(sig)
+        const eName = entityName(sig)
+        if (!entityMap.has(eKey)) {
+          entityMap.set(eKey, {
+            name: eName,
             state: sig.state,
             signals: 0,
             strongHits: 0,
@@ -913,7 +914,7 @@ function HomePage() {
             latestAt: sig.scraped_at,
           })
         }
-        const e = entityMap.get(entityKey)
+        const e = entityMap.get(eKey)
         e.signals++
         if (os.signal_tier === 'tier1_strong') e.strongHits++
         ;(os.matched_keywords || []).forEach(k => e.allKws.add(k))
@@ -1066,7 +1067,7 @@ function HomePage() {
 function entityLabel(name) {
   if (name === 'SAM.gov') return 'B2G'
   if (name === 'USASpending') return 'B2B'
-  return name
+  return displaySource(name)
 }
 
 function Top10Row({ r, onView }) {
@@ -1160,7 +1161,7 @@ function WeeklyUpdatePage() {
         .from('oip_signals')
         .select(`
           signal_tier, matched_keywords, matched_groups, scored_at,
-          signals:signal_id (state, source_name, entity_key, title, doc_url, scraped_at)
+          signals:signal_id (state, source, source_name, entity_key, title, doc_url, scraped_at, metadata)
         `)
         .eq('oip_id', selectedOip.id)
         .gte('scored_at', new Date(new Date(since).getTime() - 1000 * 60 * 60 * 12).toISOString())
@@ -1172,8 +1173,9 @@ function WeeklyUpdatePage() {
       const strong = (newSinceRun || []).filter(r => r.signal_tier === 'tier1_strong')
       const byEntity = new Map()
       ;(newSinceRun || []).forEach(os => {
-        const key = os.signals?.entity_key || os.signals?.source_name
-        const name = os.signals?.source_name
+        if (!os.signals) return
+        const key = entityKey(os.signals)
+        const name = displaySource(os.signals)
         if (!key) return
         if (!byEntity.has(key)) byEntity.set(key, { name, state: os.signals.state, count: 0, strong: 0 })
         byEntity.get(key).count++
@@ -1552,12 +1554,12 @@ function MarketReviewPage() {
       if (!showStale && isBeyondClosedWindow(s)) return false
       if (stateFilter && s.signals?.state !== stateFilter) return false
       if (groupFilter && !(s.matched_groups || []).includes(groupFilter)) return false
-      if (entityFilter && s.signals?.source_name !== entityFilter) return false
+      if (entityFilter && entityName(s.signals) !== entityFilter) return false
     }
     if (search) {
       const q  = search.toLowerCase()
       const t  = (s.signals?.title || '').toLowerCase()
-      const sn = (s.signals?.source_name || s.signals?.metadata?.company_name || '').toLowerCase()
+      const sn = `${s.signals?.source_name || s.signals?.metadata?.company_name || ''} ${displaySource(s.signals)}`.toLowerCase()
       const dept = (s.signals?.metadata?.department_name || '').toLowerCase()
       if (!t.includes(q) && !sn.includes(q) && !dept.includes(q)) return false
     }
@@ -1586,11 +1588,11 @@ function MarketReviewPage() {
     if (tierFilter && s.signal_tier !== tierFilter) return false
     if (stateFilter && s.signals?.state !== stateFilter) return false
     if (groupFilter && !(s.matched_groups || []).includes(groupFilter)) return false
-    if (entityFilter && s.signals?.source_name !== entityFilter) return false
+    if (entityFilter && entityName(s.signals) !== entityFilter) return false
     if (search) {
       const q  = search.toLowerCase()
       const t  = (s.signals?.title || '').toLowerCase()
-      const sn = (s.signals?.source_name || '').toLowerCase()
+      const sn = `${s.signals?.source_name || ''} ${displaySource(s.signals)}`.toLowerCase()
       if (!t.includes(q) && !sn.includes(q)) return false
     }
     return true
@@ -1604,7 +1606,7 @@ function MarketReviewPage() {
           {isSam
             ? (samTab === 'dib' ? 'DIB Prospects' : samTab === 'busdev' ? 'B2B Bus Dev' : 'Opportunities')
             : isBidReview ? 'Bid Packages'
-            : (entityFilter ? entityFilter : (sledOppsView ? 'Opportunities' : 'Entity Board'))}
+            : (entityFilter ? displaySource(entityFilter) : (sledOppsView ? 'Opportunities' : 'Entity Board'))}
         </h1>
         {entityFilter && !isSam && !isBidReview && (
           <Link to="/market" style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -1830,7 +1832,7 @@ function MarketReviewPage() {
         <EntityDrawer
           entityName={openEntity.name}
           entityKey={openEntity.key}
-          signals={signals.filter(s => (s.signals?.entity_key || s.signals?.source_name) === openEntity.key)}
+          signals={signals.filter(s => entityKey(s.signals) === openEntity.key)}
           oipId={selectedOip?.id}
           keywordTierMap={keywordTierMap}
           onClose={() => setOpenEntity(null)}
@@ -1943,10 +1945,10 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
     const perSignal = isDerived || PER_SIGNAL_DOC_TYPES.has(s.signals?.doc_type)
     const key = perSignal
       ? (s.signal_id || s.signals?.id)
-      : (s.signals?.entity_key || s.signals?.source_name || 'Unknown')
+      : entityKey(s.signals)
     const name = perSignal
       ? (s.signals?.title || 'Untitled opportunity')
-      : (s.signals?.source_name || 'Unknown')
+      : displaySource(s.signals)
     const state = s.signals?.state || ''
     if (!entityMap.has(key)) {
       entityMap.set(key, { key, name, state, perSignal, strong: 0, tier1: 0, tier2: 0, total: 0, topReason: '', fit: null, kwScore: null, compositeScore: null, stageScale: null, row: s })
@@ -2884,7 +2886,7 @@ function sledRow(s) {
   const fit = s.signal_score ?? s.scores?.llm_relevance ?? null
 
   return {
-    title, agency, noticeId, feed, type, deadline, fit,
+    title, agency, agencyLabel: displaySource(sig), noticeId, feed, type, deadline, fit,
     posted: sig.meeting_date || null,
     key: `${agency.toLowerCase()}|${noticeId || title.toLowerCase()}`,
   }
@@ -3031,7 +3033,7 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                   <div className="blurable" style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace",
                     color: 'var(--ink-fade)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {row.noticeId && <span>{row.noticeId.slice(0, 20)}</span>}
-                    {row.agency && <span>{row.agency.slice(0, 45)}</span>}
+                    {row.agencyLabel && <span>{row.agencyLabel.slice(0, 45)}</span>}
                     {row.feed && <span>· {row.feed}{copies > 1 ? ` +${copies - 1}` : ''}</span>}
                     {row.posted && <span>· posted {fmtDate(row.posted)}</span>}
                   </div>
@@ -3562,7 +3564,7 @@ function SignalCard({ os, onClick }) {
               <>
                 <span>{sig.state}</span>
                 <span>·</span>
-                <span>{sig.source_name}</span>
+                <span>{displaySource(sig)}</span>
                 {sig.meeting_date && <><span>·</span><span>{new Date(sig.meeting_date).toLocaleDateString()}</span></>}
               </>
             )}
@@ -4823,8 +4825,8 @@ ${analysisHtml}
                   : isGrants
                     ? <>GRANTS.GOV · {primaryEntity?.entity_name || meta.agency_name || 'Federal Agency'}</>
                     : isPuc
-                      ? <>PUC · {sig.source_name}{sig.meeting_date && ` · ${parseLocalDate(sig.meeting_date).toLocaleDateString()}`}</>
-                      : <>{sig.source || sig.source_name || sig.state} · {sig.source_name}{sig.meeting_date && ` · ${parseLocalDate(sig.meeting_date).toLocaleDateString()}`}</>
+                      ? <>REGULATORY PROCEEDING · {displaySource(sig)}{sig.meeting_date && ` · ${parseLocalDate(sig.meeting_date).toLocaleDateString()}`}</>
+                      : <>{[sig.state, displaySource(sig)].filter(Boolean).join(' · ')}{sig.meeting_date && ` · ${parseLocalDate(sig.meeting_date).toLocaleDateString()}`}</>
           }
         </div>
 
