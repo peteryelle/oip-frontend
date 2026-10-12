@@ -26,6 +26,7 @@ import { validatePassword } from './lib/password'
 import { USER_GUIDE, HELP_ANCHORS } from './lib/help'
 import { groupProjectsForEntity } from './lib/generateBriefs'
 import { displaySource, entityName, entityKey } from './lib/displaySource'
+import ProceedingDetails, { DeadlineChip } from './components/signals/ProceedingDetails'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
@@ -3569,6 +3570,7 @@ function SignalCard({ os, onClick }) {
               </>
             )}
             <span className={`tier-pill ${tierClass}`}>{tierLabel(os.signal_tier)}</span>
+            {sig.source === 'puc' && <DeadlineChip sig={sig} />}
           </div>
           <div className="signal-title" style={{ fontFamily: "'Spectral', serif", fontSize: 16, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.3 }}>
             {sig.title}
@@ -4891,6 +4893,9 @@ ${analysisHtml}
             {primaryEntity?.entity_name || meta.agency_name}
           </div>
         )}
+
+        {/* Regulatory: facts extracted from the notice / filing */}
+        {isPuc && <ProceedingDetails sig={sig} />}
 
         {/* OE-417: key stats */}
         {isOe417 && (
