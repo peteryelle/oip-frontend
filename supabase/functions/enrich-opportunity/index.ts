@@ -29,6 +29,13 @@
 //   decision-makers. Stored in the same opportunity_intel shape, with
 //   facts.mode = "board".
 //
+// Regulatory mode (PUC / DPU docket signals):
+//   Starts from the verified docket facts in puc_docket_enrichment (summary,
+//   proposal, key dates read from the notice / filing). Web search adds what
+//   filings don't have: utility announcements, billing / customer-system
+//   vendor news or RFPs tied to the program, and decision-makers at the
+//   utility itself. Stored with facts.mode = "regulatory".
+//
 // Request body:
 //   { signal_id, oip_id, cache_only?, force?, also_signal_ids? }
 //   cache_only -> return the stored record (or {status:"none"}); never spends.
@@ -307,6 +314,15 @@ timeline: dated events stated in the text — next meeting, effective dates, dea
 tenant_signals: up to 5 short quotes (max 30 words) from the text that matter to the TENANT, with why.
 summary: 2 sentences on what this meeting covered that is relevant to the TENANT; say plainly if nothing relevant was on it.`;
 
+// Keep a step if any date in its "when" is today or later, or it has no date.
+function futureSteps(steps: { when?: string }[], now: Date) {
+  const today = now.toISOString().slice(0, 10);
+  return steps.filter(s => {
+    const ds = String(s?.when ?? "").match(/\d{4}-\d{2}-\d{2}/g);
+    return !ds || ds.some(d => d >= today);
+  });
+}
+
 // deno-lint-ignore no-explicit-any
 async function enrichBoardSignal(ctx: any) {
   const { sb, sig, signal_id, oip_id, tenant, oipName, dmTemplate, cached } = ctx;
@@ -335,11 +351,26 @@ async function enrichBoardSignal(ctx: any) {
     : null;
   if (document) sources.push({ title: document.title, url: docUrl, used_for: "meeting document" });
 
+  // 1b. The same board's other captured meetings (e.g. the next agenda is
+  // already posted) — so next steps point at real, current documents.
+  let otherMeetings: { date: string; title: string; type: string }[] = [];
+  try {
+    const { data: sibs } = await sb.from("signals")
+      .select("meeting_date, title, doc_type")
+      .eq("source_name", sig.source_name)
+      .neq("id", signal_id)
+      .gte("meeting_date", addDays(meetingDate ?? now, -60).toISOString().slice(0, 10))
+      .order("meeting_date", { ascending: true }).limit(12);
+    otherMeetings = ((sibs ?? []) as { meeting_date?: string; title?: string; doc_type?: string }[])
+      .filter(m => m.meeting_date)
+      .map(m => ({ date: String(m.meeting_date).slice(0, 10), title: String(m.title ?? ""), type: String(m.doc_type ?? "") }));
+  } catch (e) { console.error("sibling meetings lookup failed", e); }
+
   // 2. Web context (corroboration only) + decision-makers
   const items = (facts.relevant_items as { item?: string }[]) ?? [];
   const topic = items.map(i => String(i.item ?? "")).filter(Boolean).slice(0, 2).join(" ").slice(0, 120);
   let webContext: { title: string; url: string; snippet: string }[] = [];
-  if (topic) {
+  if (topic && !canceled) {
     const q = `"${board}" ${topic}`;
     queries.push(q);
     const toks = agencyTokens(board);
@@ -348,9 +379,10 @@ async function enrichBoardSignal(ctx: any) {
     for (const h of hits.slice(0, 4)) sources.push({ title: h.title, url: h.url, used_for: "context" });
   }
 
+  // Canceled meetings: nothing happened, so no web searches at all.
   const dmQuery = String(dmTemplate).replaceAll("{agency}", board);
-  queries.push(dmQuery);
-  const dmHits = await tavily(dmQuery, { max: 5 });
+  if (!canceled) queries.push(dmQuery);
+  const dmHits = canceled ? [] : await tavily(dmQuery, { max: 5 });
   let decision_makers: unknown[] = [];
   if (dmHits.length) {
     const src = dmHits.map((h, i) => `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.content}`).join("\n\n");
@@ -381,6 +413,7 @@ MEETING: ${docType} for ${meetingStr}${meetingDate && meetingDate > now ? " (upc
 FACTS FROM THE MEETING TEXT: ${JSON.stringify(facts).slice(0, 9000)}
 WEB CONTEXT (corroboration only; ignore anything not about this board): ${JSON.stringify(webContext)}
 DECISION-MAKERS: ${JSON.stringify(decision_makers)}
+OTHER MEETINGS OF THIS BOARD ALREADY ON FILE (agendas/minutes we hold): ${JSON.stringify(otherMeetings)}
 
 This is a board meeting, NOT a procurement. The meeting date is when the board met (or will meet) — it is not a deadline, and a past meeting date does not make the signal stale. A municipal utility typically moves from discussion -> study/consultant -> budget -> procurement authorized -> RFP issued -> award -> implementation; place this signal on that path from what the text says.
 
@@ -391,7 +424,7 @@ Return ONLY JSON:
  "next_steps": [{"when":"YYYY-MM-DD or a window","action":"","why":""}],
  "compliance": [""]
 }
-Rules: next_steps 2-5 items, concrete (e.g. watch the next meeting's agenda, request the minutes or the rate study, contact the general manager named in the text). Use dates only from the facts above. compliance only for rules actually stated (e.g. an open procurement's communication restrictions); otherwise []. Do not invent names, dates, amounts, or procurements.` }], 1300);
+Rules: next_steps 2-5 items, concrete (e.g. review a later agenda that is already on file, request the minutes or the rate study, contact an official named in the text). Every "when" must be today or later — never schedule a step on a date that has passed; if a later meeting of this board is already on file, point to it by date instead of saying "monitor". Use dates only from the facts above. Label any estimate (e.g. time to procurement) as an estimate. compliance only for rules actually stated (e.g. an open procurement's communication restrictions); otherwise []. Do not invent names, dates, amounts, or procurements.` }], 1300);
   }
 
   const stage = canceled ? "no_activity" : String(synth?.stage ?? (Object.keys(facts).length > 2 ? "discussion" : "no_activity"));
@@ -408,11 +441,145 @@ Rules: next_steps 2-5 items, concrete (e.g. watch the next meeting's agenda, req
     document, facts, decision_makers, winner: null,
     angle: canceled ? "This meeting was canceled; nothing to act on." :
       String(synth?.angle ?? (text ? "" : "The meeting text was not available to review.")),
-    next_steps: (synth?.next_steps as unknown[]) ?? [],
+    next_steps: futureSteps((synth?.next_steps as { when?: string }[]) ?? [], now),
     compliance: ((synth?.compliance as unknown[]) ?? []).filter(c => String(c ?? "").trim()),
     sources, queries, error: null,
     enriched_at: now.toISOString(),
     next_refresh_at,
+    refresh_count: (cached?.refresh_count ?? -1) + 1,
+  };
+}
+
+// ── Regulatory mode ───────────────────────────────────────────────────────
+const REG_DM_TEMPLATE = '"{agency}" director OR manager OR "vice president" "rate design" OR pricing OR billing OR "customer information system" OR "customer systems"';
+// Brands that stand for every utility at once — no single company to research.
+const COMMISSION_WIDE = /^all ma\b/i;
+
+// deno-lint-ignore no-explicit-any
+async function enrichRegulatorySignal(ctx: any) {
+  const { sb, sig, signal_id, oip_id, tenant, oipName, dmTemplate, cached } = ctx;
+  const now = new Date();
+  const meta = (sig.metadata ?? {}) as Record<string, unknown>;
+  const docketNo = String(meta.proceeding_number ?? "").trim().toUpperCase();
+  const brand = String(meta.utility_brand ?? "").trim();
+  const utilityType = String(meta.utility_type ?? "");
+  const commissionWide = !brand || COMMISSION_WIDE.test(brand) || utilityType === "commission_proceeding";
+  const sources: { title: string; url: string; used_for: string }[] = [];
+  const queries: string[] = [];
+
+  // 1. Verified docket facts (shared across tenants; written by the worker)
+  let dk: Record<string, unknown> | null = null;
+  if (docketNo) {
+    const { data } = await sb.from("puc_docket_enrichment")
+      .select("docket_number, docket_title, status, summary, key_dates, extracted, source_filings")
+      .eq("state", String(sig.state ?? "MA")).eq("docket_number", docketNo).maybeSingle();
+    if (data && data.status === "ok") dk = data as Record<string, unknown>;
+  }
+  const ex = ((dk?.extracted ?? {}) as Record<string, unknown>);
+  const keyDates = ((dk?.key_dates ?? {}) as Record<string, { date?: string; time?: string; format?: string; phrase?: string }>);
+  const LABEL: Record<string, string> = {
+    filed: "Filed", public_hearing: "Public hearing", comment_deadline: "Comments due",
+    intervention_deadline: "Petitions to intervene due", evidentiary_hearing: "Evidentiary hearing",
+    effective_date: "Proposed effective date", implementation_date: "Implementation",
+  };
+  const timeline = Object.entries(keyDates)
+    .filter(([k, v]) => v && v.date && LABEL[k])
+    .map(([k, v]) => ({ event: LABEL[k], date: String(v.date), time: String(v.time ?? "") }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const docketTitle = String(dk?.docket_title ?? sig.title ?? "");
+  const programs = ((ex.rates_or_programs as string[]) ?? []).slice(0, 4);
+
+  const facts: Record<string, unknown> = {
+    mode: "regulatory",
+    docket_number: docketNo,
+    utility: brand,
+    summary: String(dk?.summary ?? ""),
+    proposal: String(ex.proposal ?? ""),
+    timeline,
+    contacts: ex.hearing_officer
+      ? [{ name: String(ex.hearing_officer), title: "Hearing Officer", organization: "Massachusetts DPU", role: "listed" }]
+      : [],
+    related_dockets: (ex.related_dockets as string[]) ?? [],
+    rates_or_programs: programs,
+  };
+
+  const firstDoc = ((dk?.source_filings as { url?: string; type?: string }[]) ?? []).find(d => d.url);
+  const docUrl = String(firstDoc?.url ?? sig.doc_url ?? "");
+  const document = docUrl
+    ? { url: docUrl, title: `D.P.U. ${docketNo} — ${String(firstDoc?.type ?? "filing")}`, source: hostOf(docUrl), kind: "regulatory" }
+    : null;
+  if (document) sources.push({ title: document.title, url: docUrl, used_for: "docket filing" });
+
+  // 2. Web context the filings don't have (utility-specific dockets only)
+  let webContext: { title: string; url: string; snippet: string }[] = [];
+  let decision_makers: unknown[] = [];
+  if (!commissionWide) {
+    const topic = (programs[0] || docketTitle).replace(/\s+/g, " ").slice(0, 90);
+    const q = `"${brand}" ${topic} ${now.getFullYear()}`;
+    queries.push(q);
+    const hits = (await tavily(q, { max: 6 }))
+      .filter(h => `${h.title} ${h.url} ${h.content}`.toLowerCase().includes(brand.toLowerCase()));
+    webContext = hits.slice(0, 5).map(h => ({ title: h.title, url: h.url, snippet: String(h.content ?? "").slice(0, 500) }));
+    for (const h of hits.slice(0, 5)) sources.push({ title: h.title, url: h.url, used_for: "context" });
+
+    const dmQuery = String(dmTemplate).replaceAll("{agency}", brand);
+    queries.push(dmQuery);
+    const dmHits = await tavily(dmQuery, { max: 5 });
+    if (dmHits.length) {
+      const src = dmHits.map((h, i) => `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.content}`).join("\n\n");
+      const out = await claudeJSON([{ type: "text", text:
+`From these results, list people at ${brand} (a Massachusetts investor-owned utility) who would own or influence a purchase relevant to this tenant — e.g. rate design, pricing, billing, customer information systems, customer programs.
+Use ONLY names and titles stated in the results. Note departures or new appointments if stated.
+TENANT (for relevance): ${String(tenant).slice(0, 1200)}
+
+${src}
+
+Return ONLY JSON: {"people":[{"name":"","title":"","note":"","source_url":""}]}` }], 800);
+      const urls = new Set(dmHits.map(h => h.url));
+      decision_makers = ((out?.people as Record<string, unknown>[]) ?? [])
+        .filter(p => p && p.name && urls.has(String(p.source_url ?? ""))).slice(0, 6);
+      for (const h of dmHits) sources.push({ title: h.title, url: h.url, used_for: "decision_makers" });
+    }
+  }
+
+  // 3. Synthesize (regulatory frame)
+  const synth = await claudeJSON([{ type: "text", text:
+`You advise ${oipName || "the tenant"} on a utility regulatory proceeding before the Massachusetts DPU. Today is ${now.toISOString().slice(0, 10)}.
+
+TENANT PROFILE: ${tenant}
+
+DOCKET: D.P.U. ${docketNo} — ${docketTitle}
+UTILITY: ${commissionWide ? "Commission-wide proceeding (applies to Massachusetts investor-owned utilities)" : brand}
+VERIFIED DOCKET FACTS (read from the notice / filing): ${JSON.stringify(facts).slice(0, 7000)}
+WEB CONTEXT (utility announcements, vendor news, RFPs — corroboration only; ignore anything not about this utility and program): ${JSON.stringify(webContext)}
+DECISION-MAKERS AT THE UTILITY: ${JSON.stringify(decision_makers)}
+
+A regulatory proceeding is NOT a procurement. It tells the tenant what a utility must build, change, or implement — and when. The tenant sells to the UTILITY, not to the DPU. Typical path: filed -> comment_period -> hearing/discovery -> decided -> compliance -> implementation.
+
+Return ONLY JSON:
+{
+ "stage": "filed|comment_period|hearing|discovery|decided|compliance|implementation",
+ "angle": "2-3 sentences: what the utility must do or change because of this proceeding, why it creates need for the tenant now, and the timing that matters",
+ "next_steps": [{"when":"YYYY-MM-DD or a window","action":"","why":""}],
+ "compliance": [""]
+}
+Rules: next_steps 2-5 items, concrete (e.g. reach the utility's rate design or billing lead before the effective date, file comments by the stated deadline if the tenant has a public view, track the order). Every "when" must be today or later. Use dates only from the verified facts. Label estimates as estimates. compliance only for rules actually stated in the facts; otherwise []. Do not invent names, dates, amounts, or procurements.` }], 1300);
+
+  const future = timeline.map(t => toDate(t.date)).filter((d): d is Date => !!d && d > now)
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  return {
+    signal_id, oip_id,
+    status: dk ? "ok" : "partial",
+    stage: String(synth?.stage ?? (dk ? "filed" : "filed")),
+    document, facts, decision_makers, winner: null,
+    angle: String(synth?.angle ?? ""),
+    next_steps: futureSteps((synth?.next_steps as { when?: string }[]) ?? [], now),
+    compliance: ((synth?.compliance as unknown[]) ?? []).filter(c => String(c ?? "").trim()),
+    sources, queries, error: null,
+    enriched_at: now.toISOString(),
+    // Re-brief the day after the next dated event (comment deadline, hearing, effective date).
+    next_refresh_at: future.length ? addDays(future[0], 1).toISOString() : null,
     refresh_count: (cached?.refresh_count ?? -1) + 1,
   };
 }
@@ -434,7 +601,7 @@ Deno.serve(async (req: Request) => {
 
     // ── Load notice, tenant profile, sentinel settings ──
     const { data: sig } = await sb.from("signals")
-      .select("title, source_name, doc_url, metadata, meeting_date, doc_type, full_text_storage_path, vertical_data").eq("id", signal_id).single();
+      .select("title, source, source_name, state, doc_url, metadata, meeting_date, doc_type, full_text_storage_path, vertical_data").eq("id", signal_id).single();
     if (!sig) return json({ error: "signal not found" }, 404);
     const meta  = (sig.metadata ?? {}) as Record<string, unknown>;
     const agency = expandAgency(String(meta.agency_name || sig.source_name || ""));
@@ -486,6 +653,19 @@ Deno.serve(async (req: Request) => {
 
     const sources: { title: string; url: string; used_for: string }[] = [];
     const queries: string[] = [];
+
+    // ── Regulatory mode: utility proceedings before the DPU ──
+    if (String(sig.source ?? "") === "puc") {
+      const row = await enrichRegulatorySignal({
+        sb, sig, signal_id, oip_id, tenant, oipName: String(oip?.name ?? ""),
+        dmTemplate: pc.enrichment_decision_maker_query ? dmTemplate : REG_DM_TEMPLATE, cached,
+      });
+      const rows = [row, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id)
+        .map(id => ({ ...row, signal_id: id }))];
+      const { error } = await sb.from("opportunity_intel").upsert(rows, { onConflict: "signal_id,oip_id" });
+      if (error) console.error("upsert opportunity_intel (regulatory)", error);
+      return json({ status: "enriched", ...row });
+    }
 
     // ── Board-meeting mode: agendas / minutes are not procurements ──
     if (isBoardSignal(sig)) {

@@ -2526,6 +2526,9 @@ const STAGE_LABELS = {
   no_activity: 'No relevant activity', discussion: 'Under discussion', planning: 'Planning / study',
   budgeted: 'Budgeted', procurement_authorized: 'Procurement authorized', procurement_open: 'Procurement open',
   implementation: 'Implementation',
+  // Regulatory proceedings
+  filed: 'Filed', comment_period: 'Comment period', hearing: 'Hearing',
+  discovery: 'Discovery', decided: 'Decided', compliance: 'Compliance',
 }
 const CONTACT_ROLE_LABELS = {
   designated: 'Designated', administrative: 'Administrative', subject_matter: 'Subject matter',
@@ -2565,7 +2568,7 @@ function OpportunityIntel({ signalId, oipId }) {
           : <>Not researched yet — runs automatically after the next scoring pass.{' '}
               <button onClick={runNow} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--primary)',
                 cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}>Run now</button>
-              <span style={{ fontSize: 11, ...mono }}> (~5¢)</span></>}
+</>}
         {st.error && <div style={{ color: '#c62828', marginTop: 6, ...mono, fontSize: 12 }}>Failed: {st.error}</div>}
       </div>
     )
@@ -2590,7 +2593,9 @@ function OpportunityIntel({ signalId, oipId }) {
           <a href={d.document.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--primary)' }}>
             📄 {d.document.kind === 'meeting' || f.mode === 'board'
                   ? `Meeting ${f.meeting_type || 'document'}`
-                  : `Solicitation document (${d.document.source})`} →
+                  : (d.document.kind === 'regulatory' || f.mode === 'regulatory')
+                    ? 'Docket filing'
+                    : `Solicitation document (${d.document.source})`} →
           </a>
         )}
       </div>
@@ -2637,7 +2642,8 @@ function OpportunityIntel({ signalId, oipId }) {
 
       {contacts.length > 0 && (
         <>
-          <div style={sub}>{f.mode === 'board' ? 'People named in the meeting' : 'Contacts (from the solicitation)'}</div>
+          <div style={sub}>{f.mode === 'board' ? 'People named in the meeting'
+            : f.mode === 'regulatory' ? 'Named in the proceeding' : 'Contacts (from the solicitation)'}</div>
           {contacts.map((c, i) => (
             <div key={i} style={{ padding: '4px 0' }}>
               <strong>{c.name || c.organization}</strong>
