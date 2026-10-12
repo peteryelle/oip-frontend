@@ -27,6 +27,8 @@ import { USER_GUIDE, HELP_ANCHORS } from './lib/help'
 import { groupProjectsForEntity } from './lib/generateBriefs'
 import { displaySource, entityName, entityKey } from './lib/displaySource'
 import ProceedingDetails, { DeadlineChip } from './components/signals/ProceedingDetails'
+import UtilityActivity from './components/signals/UtilityActivity'
+import { loadUtilityLinks, CROSS_LANE, relatedTitle } from './lib/utilityLinks'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
@@ -1303,6 +1305,7 @@ function MarketReviewPage() {
   useEffect(() => {
     let alive = true
     loadPucDeadlines(signals).then(changed => { if (alive && changed) setPucDeadlineTick(t => t + 1) })
+    loadUtilityLinks(signals).then(changed => { if (alive && changed) setPucDeadlineTick(t => t + 1) }).catch(() => {})
     return () => { alive = false }
   }, [signals])
   const [loading, setLoading] = useState(true)
@@ -3112,6 +3115,10 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                     {row.agencyLabel && <span>{row.agencyLabel.slice(0, 45)}</span>}
                     {row.feed && <span>· {row.feed}{copies > 1 ? ` +${copies - 1}` : ''}</span>}
                     {row.posted && <span>· posted {fmtDate(row.posted)}</span>}
+                    {CROSS_LANE.get(s.signal_id) && (
+                      <span title={relatedTitle(CROSS_LANE.get(s.signal_id))}
+                        style={{ color: 'var(--primary)', fontWeight: 600 }}>· ↔ {CROSS_LANE.get(s.signal_id).count} related</span>
+                    )}
                   </div>
                 </td>
                 <td style={{ padding: '12px 8px', whiteSpace: 'nowrap' }}>
@@ -3649,6 +3656,12 @@ function SignalCard({ os, onClick }) {
             )}
             <span className={`tier-pill ${tierClass}`}>{tierLabel(os.signal_tier)}</span>
             {sig.source === 'puc' && <DeadlineChip sig={sig} />}
+            {CROSS_LANE.get(os.signal_id) && (
+              <span title={relatedTitle(CROSS_LANE.get(os.signal_id))} style={{
+                padding: '2px 8px', borderRadius: 3, fontSize: 11, fontWeight: 600,
+                fontFamily: "'IBM Plex Mono', monospace", background: 'var(--primary-soft, #e8f0fe)',
+                color: 'var(--primary)', whiteSpace: 'nowrap' }}>↔ {CROSS_LANE.get(os.signal_id).count} related</span>
+            )}
           </div>
           <div className="signal-title" style={{ fontFamily: "'Spectral', serif", fontSize: 16, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.3 }}>
             {sig.title}
@@ -5386,6 +5399,9 @@ ${analysisHtml}
             </div>
           </>
         )}
+
+        {/* Other activity at this utility (any lane, tenant-scoped) */}
+        <UtilityActivity sig={sig} />
 
         {/* Opportunity Intelligence — enrichment record for this opportunity
             (solicitation document, contacts, timeline, decision-makers,

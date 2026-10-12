@@ -9,6 +9,8 @@
 // Raw source_name is still the dedup/filter key in the database and in the
 // ?entity= URL filter — only the rendered text changes here.
 
+import { UTILITY_BY_SIGNAL } from './utilityLinks'
+
 // Exact source_name -> display label. Add entries as new feeds land.
 const LABEL_OVERRIDES = {
   'MA DPU':                          'Massachusetts DPU',
@@ -53,6 +55,10 @@ export function entityName(sig) {
 export function entityKey(sig) {
   if (!sig) return 'Unknown'
   if (sig.source === 'puc' && sig.metadata?.utility_brand) return `puc:${sig.metadata.utility_brand}`
+  // Board / procurement signals linked to a canonical utility group by that
+  // utility, so a utility's several bodies (board, sub-committee) form one entity.
+  const u = sig.id && UTILITY_BY_SIGNAL.get(sig.id)
+  if (u && u.length === 1) return `util:${u[0].id}`
   return sig.entity_key || sig.source_name || 'Unknown'
 }
 
