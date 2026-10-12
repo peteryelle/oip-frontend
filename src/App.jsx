@@ -2675,7 +2675,7 @@ function OpportunityIntel({ signalId, oipId }) {
 
       {(f.tenant_signals || []).length > 0 && (
         <>
-          <div style={sub}>In the solicitation's own words</div>
+          <div style={sub}>{f.mode === 'board' ? "In the meeting's own words" : "In the solicitation's own words"}</div>
           {f.tenant_signals.map((q, i) => (
             <div key={i} style={{ padding: '3px 0' }}>
               <span style={{ fontStyle: 'italic' }}>“{q.quote}”</span>
