@@ -1299,6 +1299,12 @@ function MarketReviewPage() {
   const { selectedOip, oips } = useOip()
   const keywordTierMap = useKeywordTierMap(selectedOip?.id)
   const [signals, setSignals] = useState([])
+  const [, setPucDeadlineTick] = useState(0)
+  useEffect(() => {
+    let alive = true
+    loadPucDeadlines(signals).then(changed => { if (alive && changed) setPucDeadlineTick(t => t + 1) })
+    return () => { alive = false }
+  }, [signals])
   const [loading, setLoading] = useState(true)
   const [tierFilter, setTierFilter] = useState('')
   const [stateFilter, setStateFilter] = useState('')
@@ -1602,7 +1608,7 @@ function MarketReviewPage() {
   return (
     <>
       <div className="hero" style={{ marginBottom: 16 }}>
-        <div className="hero-eyebrow">{isSam ? 'SAM.gov' : isBidReview ? 'Bid/No-Bid' : sledTabsApply ? `SLED${allStates.length ? ' · ' + allStates.join(', ') : ''}` : 'Market Review'}</div>
+        <div className="hero-eyebrow">{isSam ? 'SAM.gov' : isBidReview ? 'Bid/No-Bid' : sledTabsApply ? `${signals.length && signals.every(x => x.signals?.source === 'puc') ? 'Regulatory' : 'SLED'}${allStates.length ? ' · ' + allStates.join(', ') : ''}` : 'Market Review'}</div>
         <h1 className="hero-title" style={{ fontSize: 30 }}>
           {isSam
             ? (samTab === 'dib' ? 'DIB Prospects' : samTab === 'busdev' ? 'B2B Bus Dev' : 'Opportunities')
@@ -2526,6 +2532,9 @@ const STAGE_LABELS = {
   no_activity: 'No relevant activity', discussion: 'Under discussion', planning: 'Planning / study',
   budgeted: 'Budgeted', procurement_authorized: 'Procurement authorized', procurement_open: 'Procurement open',
   implementation: 'Implementation',
+  // Regulatory proceedings
+  filed: 'Filed', comment_period: 'Comment period', hearing: 'Hearing',
+  discovery: 'Discovery', decided: 'Decided', compliance: 'Compliance',
 }
 const CONTACT_ROLE_LABELS = {
   designated: 'Designated', administrative: 'Administrative', subject_matter: 'Subject matter',
@@ -2565,7 +2574,7 @@ function OpportunityIntel({ signalId, oipId }) {
           : <>Not researched yet — runs automatically after the next scoring pass.{' '}
               <button onClick={runNow} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--primary)',
                 cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}>Run now</button>
-              <span style={{ fontSize: 11, ...mono }}> (~5¢)</span></>}
+</>}
         {st.error && <div style={{ color: '#c62828', marginTop: 6, ...mono, fontSize: 12 }}>Failed: {st.error}</div>}
       </div>
     )
@@ -2590,7 +2599,9 @@ function OpportunityIntel({ signalId, oipId }) {
           <a href={d.document.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--primary)' }}>
             📄 {d.document.kind === 'meeting' || f.mode === 'board'
                   ? `Meeting ${f.meeting_type || 'document'}`
-                  : `Solicitation document (${d.document.source})`} →
+                  : (d.document.kind === 'regulatory' || f.mode === 'regulatory')
+                    ? 'Docket filing'
+                    : `Solicitation document (${d.document.source})`} →
           </a>
         )}
       </div>
@@ -2637,7 +2648,8 @@ function OpportunityIntel({ signalId, oipId }) {
 
       {contacts.length > 0 && (
         <>
-          <div style={sub}>{f.mode === 'board' ? 'People named in the meeting' : 'Contacts (from the solicitation)'}</div>
+          <div style={sub}>{f.mode === 'board' ? 'People named in the meeting'
+            : f.mode === 'regulatory' ? 'Named in the proceeding' : 'Contacts (from the solicitation)'}</div>
           {contacts.map((c, i) => (
             <div key={i} style={{ padding: '4px 0' }}>
               <strong>{c.name || c.organization}</strong>
@@ -2675,7 +2687,7 @@ function OpportunityIntel({ signalId, oipId }) {
 
       {(f.tenant_signals || []).length > 0 && (
         <>
-          <div style={sub}>In the solicitation's own words</div>
+          <div style={sub}>{f.mode === 'board' ? "In the meeting's own words" : "In the solicitation's own words"}</div>
           {f.tenant_signals.map((q, i) => (
             <div key={i} style={{ padding: '3px 0' }}>
               <span style={{ fontStyle: 'italic' }}>“{q.quote}”</span>
@@ -2863,6 +2875,53 @@ function _validDate(d) {
   return isNaN(t) ? null : d
 }
 
+// ── Regulatory due dates ────────────────────────────────────────────────
+// Regulatory signals have no response deadline in their own metadata; their
+// dates live in puc_docket_enrichment (read from the DPU notice / filing).
+// The nearest UPCOMING actionable date is used as the row's due date; past
+// dates are ignored so active proceedings are never treated as closed.
+const PUC_DEADLINES = new Map()   // "STATE|DOCKET" -> { date, label }
+const PUC_DUE_FIELDS = [
+  ['comment_deadline', 'Comments due'],
+  ['intervention_deadline', 'Intervene by'],
+  ['public_hearing', 'Public hearing'],
+  ['evidentiary_hearing', 'Evidentiary hearing'],
+]
+function pucDeadlineFor(sig) {
+  const n = String(sig?.metadata?.proceeding_number || '').trim().toUpperCase()
+  return n ? PUC_DEADLINES.get(`${sig.state}|${n}`) || null : null
+}
+async function loadPucDeadlines(list) {
+  const want = new Set()
+  for (const s of list || []) {
+    const sig = s.signals || {}
+    const n = String(sig.metadata?.proceeding_number || '').trim().toUpperCase()
+    if (sig.source === 'puc' && n) want.add(n)
+  }
+  if (!want.size) return false
+  const { data, error } = await supabase
+    .from('puc_docket_enrichment')
+    .select('state, docket_number, key_dates')
+    .eq('status', 'ok')
+    .in('docket_number', [...want])
+  if (error || !data) return false
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  for (const r of data) {
+    let best = null
+    for (const [field, label] of PUC_DUE_FIELDS) {
+      const iso = r.key_dates?.[field]?.date
+      if (!iso) continue
+      const d = parseLocalDate(iso)
+      if (isNaN(d) || d < today) continue
+      if (!best || d < best.d) best = { d, date: iso, label }
+    }
+    const key = `${r.state}|${r.docket_number}`
+    if (best) PUC_DEADLINES.set(key, { date: best.date, label: best.label })
+    else PUC_DEADLINES.delete(key)
+  }
+  return true
+}
+
 function sledRow(s) {
   const sig  = s.signals || {}
   const meta = sig.metadata || {}
@@ -2889,11 +2948,21 @@ function sledRow(s) {
     : meta.notice_type ? (SLED_TYPE_ALIASES[String(meta.notice_type).toLowerCase()] || meta.notice_type) : null
   const type = metaType || (rule ? rule[1] : 'Solicitation')
 
-  const deadline = _validDate(meta.response_deadline) || _validDate(meta.due_date) || _validDate(vd.due_date)
-  const fit = s.signal_score ?? s.scores?.llm_relevance ?? null
+  const isReg = sig.source === 'puc'
+  const regDeadline = isReg ? pucDeadlineFor(sig) : null
+  const deadline = isReg
+    ? (regDeadline?.date || null)
+    : (_validDate(meta.response_deadline) || _validDate(meta.due_date) || _validDate(vd.due_date))
+  const sv = s.signal_value
+  const fit = s.signal_score ?? s.scores?.llm_relevance
+    ?? (/^\d+(\.\d+)?$/.test(String(sv ?? '')) ? Number(sv) : null)
 
   return {
-    title, agency, agencyLabel: displaySource(sig), noticeId, feed, type, deadline, fit,
+    title, agency, agencyLabel: displaySource(sig),
+    noticeId: isReg ? (meta.proceeding_number ? `D.P.U. ${meta.proceeding_number}` : '') : noticeId,
+    feed: isReg ? '' : feed,
+    type: isReg ? 'Regulatory' : type,
+    deadline, deadlineLabel: regDeadline?.label || null, fit,
     posted: sig.meeting_date || null,
     key: `${agency.toLowerCase()}|${noticeId || title.toLowerCase()}`,
   }
@@ -3057,7 +3126,10 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                           background: '#fdecea', color: '#c62828', border: '1px solid #f5c6c2', letterSpacing: '.05em' }}>CLOSED</span>
                         {fmtDate(row.deadline)}
                       </span>
-                    ) : fmtDate(row.deadline)
+                    ) : (<>
+                      {fmtDate(row.deadline)}
+                      {row.deadlineLabel && <div style={{ fontSize: 10, color: 'var(--ink-fade)', marginTop: 2 }}>{row.deadlineLabel}</div>}
+                    </>)
                   ) : (s.deadline_recency_note || '—')}
                 </td>
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
