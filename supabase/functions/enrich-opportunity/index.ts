@@ -21,6 +21,14 @@
 //                                       next_refresh_at taken from the
 //                                       opportunity's own timeline.
 //
+// Board-meeting mode (agenda / minutes signals from municipal boards):
+//   There is no solicitation to find. The signal's own meeting text (stored
+//   in signals-fulltext) is read for what the board discussed or decided,
+//   the stage of any initiative, amounts, named officials and dated next
+//   events. Web search is used only for corroborating context and
+//   decision-makers. Stored in the same opportunity_intel shape, with
+//   facts.mode = "board".
+//
 // Request body:
 //   { signal_id, oip_id, cache_only?, force?, also_signal_ids? }
 //   cache_only -> return the stored record (or {status:"none"}); never spends.
@@ -249,6 +257,166 @@ function findEvent(timeline: { event?: string; date?: string }[], re: RegExp): D
 
 function addDays(d: Date, n: number) { const x = new Date(d); x.setUTCDate(x.getUTCDate() + n); return x; }
 
+// ── Board-meeting mode ────────────────────────────────────────────────────
+const FULLTEXT_BUCKET = "signals-fulltext";
+const BOARD_TEXT_LIMIT = 30000;
+
+// deno-lint-ignore no-explicit-any
+function isBoardSignal(sig: any): boolean {
+  const dt = String(sig?.doc_type ?? "");
+  return /agenda|minutes|board_agenda_item|council/i.test(dt);
+}
+
+// "Hull Municipal Light Board (Sub-Committee) 10/13/2026 *CANCELED*" -> "Hull Municipal Light Board"
+function boardName(title: string, sourceName: string): string {
+  const t = String(title || "").split(" — ")[0]
+    .replace(/\*?canceled\*?/ig, "")
+    .replace(/\(.*?\)/g, "")
+    .replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b.*$/, "")
+    .replace(/\s+/g, " ").trim();
+  return t.length > String(sourceName || "").length ? t : String(sourceName || t);
+}
+
+// deno-lint-ignore no-explicit-any
+async function loadSignalText(sb: any, sig: any): Promise<string> {
+  const path = String(sig?.full_text_storage_path ?? "");
+  if (path) {
+    try {
+      const { data, error } = await sb.storage.from(FULLTEXT_BUCKET).download(path);
+      if (!error && data) return (await data.text()).slice(0, BOARD_TEXT_LIMIT);
+      console.error("fulltext download", path, error);
+    } catch (e) { console.error("fulltext download failed", path, e); }
+  }
+  const vd = (sig?.vertical_data ?? {}) as Record<string, unknown>;
+  return String(vd.full_text ?? "").slice(0, BOARD_TEXT_LIMIT);
+}
+
+const BOARD_SPEC = `Return ONLY JSON, no preamble:
+{
+ "meeting": {"type": "agenda|minutes", "date": "YYYY-MM-DD", "canceled": false},
+ "relevant_items": [{"item": "", "discussion": "", "decision": "", "amount": "", "status": "discussion|planning|budgeted|procurement_authorized|procurement_open|awarded|implementation"}],
+ "contacts": [{"name": "", "title": "", "organization": "", "email": "", "phone": "", "role": "listed"}],
+ "timeline": [{"event": "", "date": "YYYY-MM-DD", "time": ""}],
+ "tenant_signals": [{"quote": "", "why": ""}],
+ "summary": ""
+}
+Rules: use ONLY what the meeting text states; leave fields empty rather than guessing.
+relevant_items: agenda / minutes items that relate to the TENANT (e.g. rates, rate studies, billing or customer systems, metering / AMI, utility software, consultants, budgets for these). Max 6. "decision" only if the minutes record one (vote, approval, award, direction to staff).
+contacts: officials and staff NAMED in the text (general manager, commissioners, consultants) with their stated titles.
+timeline: dated events stated in the text — next meeting, effective dates, deadlines, scheduled presentations. Never compute dates.
+tenant_signals: up to 5 short quotes (max 30 words) from the text that matter to the TENANT, with why.
+summary: 2 sentences on what this meeting covered that is relevant to the TENANT; say plainly if nothing relevant was on it.`;
+
+// deno-lint-ignore no-explicit-any
+async function enrichBoardSignal(ctx: any) {
+  const { sb, sig, signal_id, oip_id, tenant, oipName, dmTemplate, cached } = ctx;
+  const now = new Date();
+  const board = boardName(String(sig.title ?? ""), String(sig.source_name ?? ""));
+  const meetingDate = toDate(sig.meeting_date);
+  const meetingStr = meetingDate ? meetingDate.toISOString().slice(0, 10) : "unknown date";
+  const canceled = /canceled|cancelled/i.test(String(sig.title ?? ""));
+  const docType = String(sig.doc_type ?? "agenda").toLowerCase().includes("minute") ? "minutes" : "agenda";
+  const sources: { title: string; url: string; used_for: string }[] = [];
+  const queries: string[] = [];
+
+  // 1. The meeting's own text
+  const text = await loadSignalText(sb, sig);
+  let facts: Record<string, unknown> = {};
+  if (text && !canceled) {
+    facts = (await claudeJSON([{ type: "text", text:
+      `Municipal board meeting ${docType}: ${board}, ${meetingStr}.\n\nMEETING TEXT:\n${text}\n\nTENANT: ${tenant}\n\n${BOARD_SPEC}` }], 2500)) ?? {};
+  }
+  facts.mode = "board";
+  facts.meeting_type = docType;
+  if (canceled) facts.summary = "This meeting was canceled.";
+  const docUrl = String(sig.doc_url ?? "");
+  const document = docUrl
+    ? { url: docUrl, title: `${board} ${docType} (${meetingStr})`, source: hostOf(docUrl), kind: "meeting" }
+    : null;
+  if (document) sources.push({ title: document.title, url: docUrl, used_for: "meeting document" });
+
+  // 2. Web context (corroboration only) + decision-makers
+  const items = (facts.relevant_items as { item?: string }[]) ?? [];
+  const topic = items.map(i => String(i.item ?? "")).filter(Boolean).slice(0, 2).join(" ").slice(0, 120);
+  let webContext: { title: string; url: string; snippet: string }[] = [];
+  if (topic) {
+    const q = `"${board}" ${topic}`;
+    queries.push(q);
+    const toks = agencyTokens(board);
+    const hits = (await tavily(q, { max: 5 })).filter(h => mentionsAgency(`${h.title} ${h.url} ${h.content}`, toks, ""));
+    webContext = hits.slice(0, 4).map(h => ({ title: h.title, url: h.url, snippet: String(h.content ?? "").slice(0, 400) }));
+    for (const h of hits.slice(0, 4)) sources.push({ title: h.title, url: h.url, used_for: "context" });
+  }
+
+  const dmQuery = String(dmTemplate).replaceAll("{agency}", board);
+  queries.push(dmQuery);
+  const dmHits = await tavily(dmQuery, { max: 5 });
+  let decision_makers: unknown[] = [];
+  if (dmHits.length) {
+    const src = dmHits.map((h, i) => `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.content}`).join("\n\n");
+    const out = await claudeJSON([{ type: "text", text:
+`From these results, list people at ${board} (a municipal utility / public board) who would own or influence a purchase relevant to this tenant.
+Use ONLY names and titles stated in the results. Note departures or new appointments if stated.
+TENANT (for relevance): ${String(tenant).slice(0, 1200)}
+
+${src}
+
+Return ONLY JSON: {"people":[{"name":"","title":"","note":"","source_url":""}]}` }], 800);
+    const urls = new Set(dmHits.map(h => h.url));
+    decision_makers = ((out?.people as Record<string, unknown>[]) ?? [])
+      .filter(p => p && p.name && urls.has(String(p.source_url ?? ""))).slice(0, 6);
+    for (const h of dmHits) sources.push({ title: h.title, url: h.url, used_for: "decision_makers" });
+  }
+
+  // 3. Synthesize (board frame — no RFP / award assumptions)
+  let synth: Record<string, unknown> | null = null;
+  if (!canceled) {
+    synth = await claudeJSON([{ type: "text", text:
+`You advise ${oipName || "the tenant"} on a signal from a municipal board meeting. Today is ${now.toISOString().slice(0, 10)}.
+
+TENANT PROFILE: ${tenant}
+
+BOARD: ${board}
+MEETING: ${docType} for ${meetingStr}${meetingDate && meetingDate > now ? " (upcoming)" : ""}
+FACTS FROM THE MEETING TEXT: ${JSON.stringify(facts).slice(0, 9000)}
+WEB CONTEXT (corroboration only; ignore anything not about this board): ${JSON.stringify(webContext)}
+DECISION-MAKERS: ${JSON.stringify(decision_makers)}
+
+This is a board meeting, NOT a procurement. The meeting date is when the board met (or will meet) — it is not a deadline, and a past meeting date does not make the signal stale. A municipal utility typically moves from discussion -> study/consultant -> budget -> procurement authorized -> RFP issued -> award -> implementation; place this signal on that path from what the text says.
+
+Return ONLY JSON:
+{
+ "stage": "no_activity|discussion|planning|budgeted|procurement_authorized|procurement_open|awarded|implementation",
+ "angle": "2-3 sentences: what the board is doing that matters to the tenant, citing the meeting's own words where possible; say plainly if nothing relevant was discussed",
+ "next_steps": [{"when":"YYYY-MM-DD or a window","action":"","why":""}],
+ "compliance": [""]
+}
+Rules: next_steps 2-5 items, concrete (e.g. watch the next meeting's agenda, request the minutes or the rate study, contact the general manager named in the text). Use dates only from the facts above. compliance only for rules actually stated (e.g. an open procurement's communication restrictions); otherwise []. Do not invent names, dates, amounts, or procurements.` }], 1300);
+  }
+
+  const stage = canceled ? "no_activity" : String(synth?.stage ?? (Object.keys(facts).length > 2 ? "discussion" : "no_activity"));
+  const timeline = (facts.timeline as { event?: string; date?: string }[]) ?? [];
+  const future = [meetingDate, ...timeline.map(t => toDate(t.date))]
+    .filter((d): d is Date => !!d && d > now).sort((a, b) => a.getTime() - b.getTime());
+  // Upcoming agenda: refresh the day after the meeting (minutes / outcomes).
+  const next_refresh_at = future.length ? addDays(future[0], 1).toISOString() : null;
+
+  return {
+    signal_id, oip_id,
+    status: text ? "ok" : "partial",
+    stage,
+    document, facts, decision_makers, winner: null,
+    angle: canceled ? "This meeting was canceled; nothing to act on." :
+      String(synth?.angle ?? (text ? "" : "The meeting text was not available to review.")),
+    next_steps: (synth?.next_steps as unknown[]) ?? [],
+    compliance: ((synth?.compliance as unknown[]) ?? []).filter(c => String(c ?? "").trim()),
+    sources, queries, error: null,
+    enriched_at: now.toISOString(),
+    next_refresh_at,
+    refresh_count: (cached?.refresh_count ?? -1) + 1,
+  };
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -266,7 +434,7 @@ Deno.serve(async (req: Request) => {
 
     // ── Load notice, tenant profile, sentinel settings ──
     const { data: sig } = await sb.from("signals")
-      .select("title, source_name, doc_url, metadata, meeting_date").eq("id", signal_id).single();
+      .select("title, source_name, doc_url, metadata, meeting_date, doc_type, full_text_storage_path, vertical_data").eq("id", signal_id).single();
     if (!sig) return json({ error: "signal not found" }, 404);
     const meta  = (sig.metadata ?? {}) as Record<string, unknown>;
     const agency = expandAgency(String(meta.agency_name || sig.source_name || ""));
@@ -318,6 +486,19 @@ Deno.serve(async (req: Request) => {
 
     const sources: { title: string; url: string; used_for: string }[] = [];
     const queries: string[] = [];
+
+    // ── Board-meeting mode: agendas / minutes are not procurements ──
+    if (isBoardSignal(sig)) {
+      const row = await enrichBoardSignal({
+        sb, sig, signal_id, oip_id, tenant, oipName: String(oip?.name ?? ""),
+        dmTemplate, cached,
+      });
+      const rows = [row, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id)
+        .map(id => ({ ...row, signal_id: id }))];
+      const { error } = await sb.from("opportunity_intel").upsert(rows, { onConflict: "signal_id,oip_id" });
+      if (error) console.error("upsert opportunity_intel (board)", error);
+      return json({ status: "enriched", ...row });
+    }
 
     // ── 1. Find the solicitation document ──
     let docUrl = "";

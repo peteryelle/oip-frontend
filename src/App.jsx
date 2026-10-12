@@ -2522,6 +2522,10 @@ const STAGE_LABELS = {
   open: 'Open', intent_closed: 'Intent to propose closed', questions_closed: 'Questions closed',
   proposals_in: 'Proposals in', finalists: 'Finalists', awarded: 'Awarded',
   contract_live: 'Contract live', closed: 'Closed',
+  // Board-meeting signals (agendas / minutes)
+  no_activity: 'No relevant activity', discussion: 'Under discussion', planning: 'Planning / study',
+  budgeted: 'Budgeted', procurement_authorized: 'Procurement authorized', procurement_open: 'Procurement open',
+  implementation: 'Implementation',
 }
 const CONTACT_ROLE_LABELS = {
   designated: 'Designated', administrative: 'Administrative', subject_matter: 'Subject matter',
@@ -2584,7 +2588,9 @@ function OpportunityIntel({ signalId, oipId }) {
         )}
         {d.document?.url && (
           <a href={d.document.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--primary)' }}>
-            📄 Solicitation document ({d.document.source}) →
+            📄 {d.document.kind === 'meeting' || f.mode === 'board'
+                  ? `Meeting ${f.meeting_type || 'document'}`
+                  : `Solicitation document (${d.document.source})`} →
           </a>
         )}
       </div>
@@ -2631,7 +2637,7 @@ function OpportunityIntel({ signalId, oipId }) {
 
       {contacts.length > 0 && (
         <>
-          <div style={sub}>Contacts (from the solicitation)</div>
+          <div style={sub}>{f.mode === 'board' ? 'People named in the meeting' : 'Contacts (from the solicitation)'}</div>
           {contacts.map((c, i) => (
             <div key={i} style={{ padding: '4px 0' }}>
               <strong>{c.name || c.organization}</strong>
