@@ -29,7 +29,7 @@ import { displaySource, entityName, entityKey } from './lib/displaySource'
 import ProceedingDetails, { DeadlineChip } from './components/signals/ProceedingDetails'
 import UtilityActivity from './components/signals/UtilityActivity'
 import { loadUtilityLinks, CROSS_LANE, relatedTitle } from './lib/utilityLinks'
-import { exportDrawerPdf } from './lib/briefPdf'
+import { exportDrawerPdf, exportElementPdf } from './lib/briefPdf'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
@@ -5797,6 +5797,16 @@ function ProfilePage() {
   const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
   const canEdit = ['owner', 'admin'].includes(myRole) && !borrowed
   const isSam = selectedOip?.verticals?.slug === 'sam'
+  const profileRef = useRef(null)
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const exportProfilePdf = async () => {
+    setExportingPdf(true)
+    try {
+      const name = profile?.data?.name || selectedOip?.tenants?.name || 'profile'
+      await exportElementPdf(profileRef.current, `${name} profile`)
+    } catch (e) { console.error('PDF export failed', e); alert('PDF export failed. Please try again.') }
+    finally { setExportingPdf(false) }
+  }
 
   const loadProfile = async () => {
     const { data } = await supabase
@@ -5863,7 +5873,14 @@ function ProfilePage() {
   const data = editing ? draft : profile.data
 
   return (
-    <div className="detail-section">
+    <div className="detail-section" ref={profileRef}>
+      {!editing && (
+        <button data-pdf-exclude onClick={exportProfilePdf} disabled={exportingPdf} style={{
+          float: 'right', padding: '5px 12px', borderRadius: 4,
+          border: '1px solid var(--rule-strong, #cbd5e1)', background: 'var(--paper)', cursor: exportingPdf ? 'wait' : 'pointer',
+          fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--primary)',
+        }}>{exportingPdf ? 'Preparing PDF…' : 'Export PDF'}</button>
+      )}
       <div className="detail-eyebrow">Profile · {borrowed ? 'tenant profile (read-only)' : `v${profile.version} ${profile.is_active ? '(active)' : ''}`}</div>
       <h2 className="detail-title">
         {data.name || selectedOip.tenants?.name}<HelpIcon topic="profile" />

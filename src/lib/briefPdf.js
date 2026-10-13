@@ -1,12 +1,24 @@
-// Export the signal drawer to PDF — an exact visual copy of what the reader
-// sees online (same layout, colors, fonts, collapsed/expanded sections).
+// Export a page section (the signal drawer, the Profile page, ...) to PDF —
+// an exact visual copy of what the reader sees online (same layout, colors,
+// fonts, collapsed/expanded sections).
 //
-// The drawer element is rendered with html2canvas and paginated onto US
-// Letter pages with jsPDF. Elements marked data-pdf-exclude (close button,
-// status buttons, refresh/export controls) are left out. Both libraries are
-// loaded on demand, so they add nothing to normal page loads.
+// The element is rendered with html2canvas and paginated onto US Letter pages
+// with jsPDF. Controls are left out: every <button> inside the element, plus
+// anything marked data-pdf-exclude. Both libraries are loaded on demand, so
+// they add nothing to normal page loads.
 
 const MARGIN_PT = 28
+
+// The element's own background, else the nearest ancestor's, else white —
+// a transparent background would render black in the JPEG pages.
+function pageBackground(el) {
+  for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+    const bg = getComputedStyle(n).backgroundColor
+    if (bg && bg !== 'transparent' && !/rgba\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(bg)) return bg
+  }
+  const body = getComputedStyle(document.body).backgroundColor
+  return body && !/rgba\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(body) ? body : '#ffffff'
+}
 
 function slug(s) {
   return String(s || 'brief').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'brief'
@@ -16,8 +28,21 @@ function slug(s) {
  * @param {HTMLElement} el     the drawer content element (data-brief-root)
  * @param {string}      title  used for the file name
  */
-export async function exportDrawerPdf(el, title) {
+export async function exportElementPdf(el, title) {
   if (!el) throw new Error('nothing to export')
+  // Tag the element so the cloned document can find it, whatever it is.
+  el.setAttribute('data-pdf-capture', '1')
+  try {
+    return await _capture(el, title)
+  } finally {
+    el.removeAttribute('data-pdf-capture')
+  }
+}
+
+// Kept for the drawer's existing call site.
+export const exportDrawerPdf = exportElementPdf
+
+async function _capture(el, title) {
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
   if (document.fonts?.ready) await document.fonts.ready
 
@@ -26,7 +51,7 @@ export async function exportDrawerPdf(el, title) {
   const canvas = await html2canvas(el, {
     scale: 2,
     useCORS: true,
-    backgroundColor: getComputedStyle(el).backgroundColor || '#ffffff',
+    backgroundColor: pageBackground(el),
     width,
     height: fullHeight,
     windowWidth: width,
@@ -36,8 +61,9 @@ export async function exportDrawerPdf(el, title) {
     ignoreElements: node => node.hasAttribute?.('data-pdf-exclude'),
     onclone: (doc) => {
       // Render the whole drawer, not just the visible scroll window.
-      const root = doc.querySelector('[data-brief-root]')
+      const root = doc.querySelector('[data-pdf-capture]')
       if (!root) return
+      root.querySelectorAll('button').forEach(b => { b.style.display = 'none' })
       root.style.height = 'auto'
       root.style.maxHeight = 'none'
       root.style.overflow = 'visible'
