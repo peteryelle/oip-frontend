@@ -1,4 +1,4 @@
-import { useEffect, useState, Component } from 'react'
+import { useEffect, useRef, useState, Component } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
 import B2BBusDevTab from './components/awards/B2BBusDevTab'
 import B2BBusDevReport from './components/awards/B2BBusDevReport'
@@ -29,6 +29,7 @@ import { displaySource, entityName, entityKey } from './lib/displaySource'
 import ProceedingDetails, { DeadlineChip } from './components/signals/ProceedingDetails'
 import UtilityActivity from './components/signals/UtilityActivity'
 import { loadUtilityLinks, CROSS_LANE, relatedTitle } from './lib/utilityLinks'
+import { exportDrawerPdf } from './lib/briefPdf'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Routing root
@@ -2544,8 +2545,9 @@ const CONTACT_ROLE_LABELS = {
   consultant: 'Consultant', listed: 'Listed',
 }
 
-function OpportunityIntel({ signalId, oipId }) {
+function OpportunityIntel({ signalId, oipId, header }) {
   const [st, setSt] = useState({ loading: true, data: null, error: null, running: false })
+
   const mono = { fontFamily: "'IBM Plex Mono', monospace" }
   const sub = { fontSize: 11, ...mono, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink-fade)', fontWeight: 700, margin: '14px 0 6px' }
   const confColor = { high: '#2e7d32', medium: '#1565c0', low: '#b45309' }
@@ -2746,10 +2748,12 @@ function OpportunityIntel({ signalId, oipId }) {
       <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ink-fade)', ...mono }}>
         Researched {new Date(d.enriched_at).toLocaleDateString()}
         {d.next_refresh_at && ` · next update ${new Date(d.next_refresh_at).toLocaleDateString()}`}
-        {' · '}
-        <button onClick={runNow} disabled={st.running} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--primary)',
-          cursor: 'pointer', textDecoration: 'underline', fontSize: 11, ...mono }}>{st.running ? 'Refreshing…' : 'Refresh'}</button>
-        {st.error && <span style={{ color: '#c62828' }}> · {st.error}</span>}
+        <span data-pdf-exclude>
+          {' · '}
+          <button onClick={runNow} disabled={st.running} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--primary)',
+            cursor: 'pointer', textDecoration: 'underline', fontSize: 11, ...mono }}>{st.running ? 'Refreshing…' : 'Refresh'}</button>
+          {st.error && <span style={{ color: '#c62828' }}> · {st.error}</span>}
+        </span>
       </div>
     </div>
   )
@@ -4184,7 +4188,14 @@ ${projectsHtml}
                           letterSpacing:'.08em', color:'var(--ink-fade)', fontWeight:700, marginBottom:6 }}>
                           Opportunity intelligence
                         </div>
-                        <OpportunityIntel signalId={sg.signal_id} oipId={sg.oip_id || oipId} />
+                        <OpportunityIntel signalId={sg.signal_id} oipId={sg.oip_id || oipId} header={{
+                          title: sg.signals?.title,
+                          source: displaySource(sg.signals),
+                          reference: sg.signals?.metadata?.solicitation_number || '',
+                          score: sg.signal_score ?? sg.scores?.llm_relevance ?? '',
+                          tier: sg.signal_tier,
+                          why: sg.match_reason,
+                        }} />
                       </div>
                     </div>
                   )
@@ -4592,6 +4603,14 @@ ${projectsHtml}
 
 function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = {} }) {
   const { selectedOip } = useOip()
+  const briefRef = useRef(null)
+  const [exporting, setExporting] = useState(false)
+  const exportPdf = async () => {
+    setExporting(true)
+    try { await exportDrawerPdf(briefRef.current, os.signals?.title) }
+    catch (e) { console.error('PDF export failed', e); alert('PDF export failed. Please try again.') }
+    finally { setExporting(false) }
+  }
   const sig    = os.signals || {}
   const meta   = sig.metadata || {}
   const scores = os.scores || {}
@@ -4895,14 +4914,19 @@ ${analysisHtml}
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 150,
       display: 'flex', justifyContent: 'flex-end',
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div ref={briefRef} data-brief-root onClick={e => e.stopPropagation()} style={{
         background: 'var(--paper)', width: '100%', maxWidth: 900, height: '100%',
         overflow: 'auto', padding: '40px 56px',
       }}>
-        <button onClick={onClose} style={{
+        <button data-pdf-exclude onClick={onClose} style={{
           background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
           color: 'var(--ink-fade)', float: 'right', marginRight: -10, marginTop: -10,
         }}>×</button>
+        <button data-pdf-exclude onClick={exportPdf} disabled={exporting} style={{
+          float: 'right', marginRight: 16, marginTop: -6, padding: '5px 12px', borderRadius: 4,
+          border: '1px solid var(--rule-strong, #cbd5e1)', background: 'var(--paper)', cursor: exporting ? 'wait' : 'pointer',
+          fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--primary)',
+        }}>{exporting ? 'Preparing PDF…' : 'Export PDF'}</button>
 
         {/* Eyebrow */}
         <div className="blurable" style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-light)',
@@ -4942,10 +4966,12 @@ ${analysisHtml}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <span style={{ padding: '4px 12px', borderRadius: 3, fontSize: 16, fontWeight: 700,
               fontFamily: "'IBM Plex Mono', monospace", background: sigScoreBg, color: sigScoreColor }}>
-              {sigScore}
+              {isPuc && /^\d+(\.\d+)?$/.test(String(os.signal_value ?? '')) ? os.signal_value : sigScore}
             </span>
             <span style={{ fontSize: 12, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)' }}>
-              {scoreBase} base · {scoreKeywordBonus} keyword · {scoreGroupBonus} group
+              {isPuc
+                ? (os.scores?.label ? String(os.scores.label).replace(/ = \d+$/, '') : 'fit score')
+                : <>{scoreBase} base · {scoreKeywordBonus} keyword · {scoreGroupBonus} group</>}
             </span>
           </div>
         )}
@@ -5412,7 +5438,14 @@ ${analysisHtml}
             {divider}
             <div style={{ marginBottom: 20 }}>
               {lbl('Opportunity Intelligence')}
-              <OpportunityIntel signalId={os.signal_id} oipId={os.oip_id} />
+              <OpportunityIntel signalId={os.signal_id} oipId={os.oip_id} header={{
+                title: sig.title,
+                source: displaySource(sig),
+                reference: sig.metadata?.proceeding_number ? `D.P.U. ${sig.metadata.proceeding_number}` : (sig.metadata?.solicitation_number || ''),
+                score: /^\d+(\.\d+)?$/.test(String(os.signal_value ?? '')) ? os.signal_value : (os.scores?.llm_relevance ?? ''),
+                tier: os.signal_tier,
+                why: os.match_reason,
+              }} />
             </div>
           </>
         )}
@@ -5644,7 +5677,7 @@ ${analysisHtml}
               <div style={{ marginBottom: 20 }}>
                 <a href={sig.doc_url} target="_blank" rel="noopener noreferrer"
                   style={{ fontSize: 14, color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}>
-                  {isPuc ? 'View PUC document →' : 'View source document →'}
+                  {isPuc ? 'View filing →' : 'View source document →'}
                 </a>
               </div>
             )
@@ -5689,7 +5722,7 @@ ${analysisHtml}
         )}
 
         {/* Status */}
-        <div style={{ marginBottom: 16 }}>
+        <div data-pdf-exclude style={{ marginBottom: 16 }}>
           {lbl('Status')}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {['new', 'reviewed', 'pursuing', 'dismissed'].map(s => (
