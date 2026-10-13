@@ -3140,7 +3140,7 @@ function SledOpportunityTable({ rows, onRowClick, colFilters = B2G_COL_FILTER_DE
                   ) : (s.deadline_recency_note || '—')}
                 </td>
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
-                  <ScoreBadge score={row.fit} />
+                  <span title={s.scores?.label || undefined}><ScoreBadge score={row.fit} /></span>
                 </td>
                 <td style={{ padding: '12px 8px' }}>
                   <SledTierPill tier={s.signal_tier} />
