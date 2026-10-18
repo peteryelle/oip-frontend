@@ -22,6 +22,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
     awardedOld: true,
     recompeteSoon: true,
     recompeteOutside: true,
+    recompeteAwarded: true, // past-PoP, follow-on awarded — kept online by default
   });
   const toggle = (k) => setStates((s) => ({ ...s, [k]: !s[k] }));
   const [showArchived, setShowArchived] = useState(false);
@@ -204,6 +205,14 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
               onChange={() => toggle("recompeteOutside")}
             />
             outside window
+          </label>
+          <label className="wq-check" title="Period of performance has ended; the follow-on is awarded or in award. Talk to the prime now delivering.">
+            <input
+              type="checkbox"
+              checked={states.recompeteAwarded}
+              onChange={() => toggle("recompeteAwarded")}
+            />
+            awarded
           </label>
         </span>
         <label className="wq-check">

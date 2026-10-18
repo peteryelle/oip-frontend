@@ -25,14 +25,26 @@ const CONFIDENCE_LABEL = {
   low: "✗ Low",
 };
 
-// Two-axis tags the B2B view filters and flags by. Award axis: new vs old
-// (pop_start). Recompete axis: soon vs outside-window (pop_end). Only active
-// awards (future or open-ended PoP) are tagged; past-PoP awards are untagged
-// and therefore excluded from the view.
+// Tags the B2B view filters and flags by. Award axis: new vs old (pop_start).
+// Recompete axis: soon vs outside-window vs awarded (pop_end).
+//
+// Past-PoP awards stay ONLINE as `recompeteAwarded`. Derived Demand is about
+// awarded work: when a contract's PoP ends, the follow-on has been (or is
+// being) awarded, and the prime now delivering it is exactly who a tenant
+// should be talking to. Dropping these at PoP end hid them at the moment they
+// became most actionable (ref: CDC National Tobacco Education Campaign,
+// 75D30120F09371 — flagged Yes in Aug, vanished Oct 1, re-awarded Oct 6).
 export function awardTags(a, recompeteDays = 180, awardDays = 120) {
   const active = a.daysToPopEnd == null || a.daysToPopEnd >= 0;
   if (!active) {
-    return { active: false, awardedNew: false, awardedOld: false, recompeteSoon: false, recompeteOutside: false };
+    return {
+      active: false,
+      awardedNew: false,
+      awardedOld: false,
+      recompeteSoon: false,
+      recompeteOutside: false,
+      recompeteAwarded: true,
+    };
   }
   const awardedNew =
     a.daysSincePopStart != null && a.daysSincePopStart >= 0 && a.daysSincePopStart <= awardDays;
@@ -44,6 +56,7 @@ export function awardTags(a, recompeteDays = 180, awardDays = 120) {
     awardedOld: !awardedNew,
     recompeteSoon,
     recompeteOutside: !recompeteSoon,
+    recompeteAwarded: false,
   };
 }
 
@@ -173,7 +186,7 @@ export function useAwards(oipId, opts = {}) {
       const ad = awardDays ?? 120;
       list = list.filter((a) => {
         const t = awardTags(a, rd, ad);
-        if (!t.active) return false;
+        if (t.recompeteAwarded) return !!states.recompeteAwarded;
         return (
           (states.awardedNew && t.awardedNew) ||
           (states.awardedOld && t.awardedOld) ||
