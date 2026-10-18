@@ -353,6 +353,19 @@
 .wq-atable-state { font-size: 12px; white-space: nowrap; }
 .wq-state-active { color: var(--wq-muted); }
 .wq-state-ended { color: #9aa0a6; text-decoration: line-through; }
+/* Follow-on outcomes (dd_v2_follow_on) on ended contracts */
+.wq-state-lost { color: #b45309; text-decoration: none; }
+.wq-state-lost strong { font-weight: 600; }
+.wq-state-retained { color: var(--wq-muted); text-decoration: none; }
+a.wq-state-lost:hover, a.wq-state-retained:hover { text-decoration: underline; }
+
+/* "New prime" flag — the incumbent lost the follow-on; talk to the winner */
+.wq-flag-lost {
+  display: inline-block;
+  margin: 2px 0 2px 4px;
+  background: #fef3c7;
+  color: #92400e;
+}
 
 /* Incumbent-health banner — shown on recompetes; low score = vulnerable = opening */
 .wq-rep-health {

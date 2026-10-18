@@ -206,7 +206,11 @@ export function useAwards(oipId, opts = {}) {
         (a) =>
           (a.recipient || "").toLowerCase().includes(q) ||
           (a.agency || "").toLowerCase().includes(q) ||
-          (a.piid || "").toLowerCase().includes(q)
+          (a.piid || "").toLowerCase().includes(q) ||
+          // follow-on (dd_v2_follow_on): searching the new prime or its PIID
+          // also finds the ended contract it replaced
+          (a.busdev?.follow_on?.new_prime || "").toLowerCase().includes(q) ||
+          (a.busdev?.follow_on?.piid || "").toLowerCase().includes(q)
       );
     }
     if (confidenceFilter !== "all") {

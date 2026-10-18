@@ -61,6 +61,52 @@ function fmtPopEnd(iso, daysToEnd, horizonDays) {
   }
   return { date, cls, months };
 }
+function fmtShortDate(iso) {
+  if (!iso) return "";
+  return new Date(`${String(iso).slice(0, 10)}T00:00:00Z`).toLocaleDateString(undefined, {
+    month: "short", day: "numeric", year: "numeric", timeZone: "UTC",
+  });
+}
+
+// Recompete cell for a contract whose PoP has ended. Uses the follow-on
+// written by the worker's busdev_dd_v2_follow_on job (b2b_busdev.follow_on):
+// lost -> "Lost to <new prime> · <signed>", retained -> "Retained · <signed>".
+// No follow-on yet -> the plain "Ended" state.
+function EndedState({ followOn, popDate }) {
+  const fo = followOn || {};
+  const tip = [fo.note, fo.base_and_all_options ? `Up to ${fmtMoney(fo.base_and_all_options)} with options` : null]
+    .filter(Boolean).join(" · ");
+  const linkProps = fo.url
+    ? { href: fo.url, target: "_blank", rel: "noopener noreferrer", onClick: (e) => e.stopPropagation() }
+    : null;
+  if (fo.outcome === "lost" && fo.new_prime) {
+    const body = (
+      <>
+        Lost to <strong>{fo.new_prime}</strong>
+        {fo.signed ? ` · ${fmtShortDate(fo.signed)}` : ""}
+      </>
+    );
+    return linkProps ? (
+      <a className="wq-atable-state wq-state-lost" title={tip} {...linkProps}>{body}</a>
+    ) : (
+      <span className="wq-atable-state wq-state-lost" title={tip}>{body}</span>
+    );
+  }
+  if (fo.outcome === "retained") {
+    const body = <>Retained{fo.signed ? ` · ${fmtShortDate(fo.signed)}` : ""}</>;
+    return linkProps ? (
+      <a className="wq-atable-state wq-state-retained" title={tip} {...linkProps}>{body}</a>
+    ) : (
+      <span className="wq-atable-state wq-state-retained" title={tip}>{body}</span>
+    );
+  }
+  return (
+    <span className="wq-atable-state wq-state-ended" title={fo.note || ""}>
+      Ended · {popDate}
+    </span>
+  );
+}
+
 const rankMonths = (m) => (m == null || m < 0 ? Number.POSITIVE_INFINITY : m);
 
 // The collector stores signal title as "<PIID>: <SCOPE>", sometimes with
@@ -168,6 +214,11 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                     <div className="wq-atable-prime blurable">{a.recipient || "Unknown prime"}</div>
                   )}
                   {t.awardedNew && <span className="wq-chip wq-flag-new">New award</span>}
+                  {a.busdev?.follow_on?.outcome === "lost" && (
+                    <span className="wq-chip wq-flag-lost" title={a.busdev.follow_on.note || ""}>
+                      New prime
+                    </span>
+                  )}
                   {scope && <div className="wq-atable-scope blurable">{scope}</div>}
                   <div className="wq-atable-sub blurable">
                     {a.piid && <span>{a.piid.slice(0, 22)}</span>}
@@ -181,7 +232,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                 <td className="wq-atable-td wq-atable-r wq-atable-amt">{fmtMoney(a.primeTotal)}</td>
                 <td className="wq-atable-td">
                   {!t.active ? (
-                    <span className="wq-atable-state wq-state-ended">Ended · {pop.date}</span>
+                    <EndedState followOn={a.busdev?.follow_on} popDate={pop.date} />
                   ) : t.recompeteSoon ? (
                     <span className={`wq-chip ${pop.cls || "wq-clock-warm"}`}>
                       {pop.date}{pop.months != null ? ` · ${pop.months}mo` : ""}
