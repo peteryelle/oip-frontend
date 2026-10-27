@@ -1302,6 +1302,7 @@ function MarketReviewPage() {
   const { selectedOip, oips } = useOip()
   const keywordTierMap = useKeywordTierMap(selectedOip?.id)
   const [signals, setSignals] = useState([])
+  const [docReviews, setDocReviews] = useState({}) // signal_id -> opportunity_intel.facts.doc_review (SAM document reads)
   const [, setPucDeadlineTick] = useState(0)
   useEffect(() => {
     let alive = true
@@ -1386,6 +1387,17 @@ function MarketReviewPage() {
       if (cancelled) return
       setSignals(data || [])
       setLoading(false)
+      // SAM document reads for list badges. Needs a SELECT policy on
+      // opportunity_intel for this OIP; without one this returns nothing and
+      // the list simply shows no document badges (the drawer still works).
+      const { data: intel } = await supabase
+        .from('opportunity_intel')
+        .select('signal_id, facts')
+        .eq('oip_id', selectedOip.id)
+      if (cancelled) return
+      const map = {}
+      for (const r of intel || []) if (r.facts?.doc_review) map[r.signal_id] = r.facts.doc_review
+      setDocReviews(map)
     })()
     return () => { cancelled = true }
   }, [selectedOip, statusFilter, showStale])
@@ -1488,6 +1500,11 @@ function MarketReviewPage() {
     onClose: () => setOpenSignal(null),
     onUpdateStatus: (status) => { updateStatus(openSignal.signal_id, status); setOpenSignal(prev => ({ ...prev, status })) },
     onPursue: () => { moveToPursued(openSignal); setOpenSignal(null) },
+    onPatchSignal: (patch) => {
+      const id = openSignal.signal_id
+      setOpenSignal(prev => prev ? { ...prev, ...patch } : prev)
+      setSignals(prev => prev.map(s => s.signal_id === id ? { ...s, ...patch } : s))
+    },
   } : null
 
   // Split SAM signals into opportunities vs DIB prospects
@@ -1830,7 +1847,8 @@ function MarketReviewPage() {
                 <DibProspectTable signals={filtered} onRowClick={setOpenSignal} naicsFilter={naicsFilter} setNaicsFilter={setNaicsFilter} />
               ) : (
                 <SamOpportunityTable signals={filtered} onRowClick={setOpenSignal}
-                  colFilters={colFilters} onColFilters={updateColFilters} typeCounts={typeCounts} />
+                  colFilters={colFilters} onColFilters={updateColFilters} typeCounts={typeCounts}
+                  docReviews={docReviews} />
               )}
             </>
             )
@@ -2167,7 +2185,7 @@ function EntityBoard({ signals, onEntityClick, onSignalClick, isDerived = false,
 // SAM OPPORTUNITY TABLE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_DEFAULTS, onColFilters = () => {}, typeCounts = {} }) {
+function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_DEFAULTS, onColFilters = () => {}, typeCounts = {}, docReviews = {} }) {
   // Default view: due date descending (furthest-out first, past-due/no-date
   // sinks to the bottom). Per 2026-09-10 decision, the due-date discount to
   // the Fit Score itself has been backed out — Fit Score is the raw LLM/ICP
@@ -2285,6 +2303,21 @@ function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_
                         {meta.solicitation_number && <span>{meta.solicitation_number.slice(0, 20)}</span>}
                         {dept && <span>{dept.slice(0, 35)}</span>}
                       </div>
+                      {(() => {
+                        const dr = docReviews[s.signal_id]
+                        const top = samTopDocFlag(dr)
+                        const files = sig.vertical_data?.sam_documents?.files?.length || 0
+                        const newDocs = samNewDocsSinceRead(dr, meta)
+                        if (!top && !files && !newDocs) return null
+                        return (
+                          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                            {top && <SamPill text={top.label} tone={top.severity === 'block' ? 'block' : 'warn'} title={top.detail} />}
+                            {newDocs && <SamPill text="New documents" tone="warn" />}
+                            {files > 0 && !dr && <SamPill text={`${files} doc${files === 1 ? '' : 's'}`} tone="muted" />}
+                            {dr?.relevance_score != null && <SamPill text={`Doc score ${dr.relevance_score}`} tone="info" />}
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
                 </td>
@@ -2298,6 +2331,11 @@ function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_
                   {meta.response_deadline
                     ? (isPastDue ? 'Past due ' : '') + new Date(meta.response_deadline).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
                     : (s.deadline_recency_note || '—')}
+                  {sig.vertical_data?.sam_status && (
+                    <div style={{ marginTop: 4, fontFamily: 'inherit' }}>
+                      <SamStatusPill status={sig.vertical_data.sam_status} />
+                    </div>
+                  )}
                 </td>
 
                 <td style={{ padding: '12px 8px', textAlign: 'center' }}>
@@ -4601,7 +4639,312 @@ ${projectsHtml}
 }
 
 
-function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = {} }) {
+// ─────────────────────────────────────────────────────────────────────────────
+// SAM DOCUMENTS + DOCUMENT READ — worker side: workers/sam/sam_doc_resolve_handler.py,
+// sam_doc_analyze_handler.py, sam_notice_status.py.
+//   signals.vertical_data.sam_documents  -> attachment list (filenames resolved, free)
+//   signals.vertical_data.sam_status     -> live open/closed check via GovCon (free)
+//   opportunity_intel.facts.doc_review   -> on-demand document read (metered),
+//                                           read here through enrich-opportunity
+//                                           cache_only (never spends)
+// The document read sits BESIDE the notice score. "Use document score" is the
+// only path that copies it into the ranking, and it keeps the original.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SAM_CLOSED = ['closed_pending_award', 'awarded', 'cancelled', 'archived', 'not_found']
+
+function samStatusView(status) {
+  if (!status || !status.status) return null
+  const st = status.status
+  if (st === 'open') {
+    const d = status.days_to_deadline
+    if (d != null && d <= 7) return { text: d < 1 ? 'Due today' : `Due in ${Math.floor(d)}d`, tone: 'warn' }
+    return { text: 'Open', tone: 'ok' }
+  }
+  if (st === 'awarded') return { text: 'Awarded', tone: 'block' }
+  if (SAM_CLOSED.includes(st)) return { text: 'Closed', tone: 'block' }
+  return { text: 'Status unknown', tone: 'muted' }
+}
+
+const SAM_TONE = {
+  ok:    { color: '#1b5e20', bg: '#e8f5e9', border: '#a5d6a7' },
+  warn:  { color: '#8a4b00', bg: '#fff4e0', border: '#ffcc80' },
+  block: { color: '#8e1b1b', bg: '#fdecea', border: '#f5b5ae' },
+  info:  { color: '#174a7c', bg: '#e8f0fb', border: '#b3cdee' },
+  muted: { color: 'var(--ink-fade)', bg: 'transparent', border: 'var(--rule)' },
+}
+
+function SamPill({ text, tone = 'muted', title }) {
+  const t = SAM_TONE[tone] || SAM_TONE.muted
+  return (
+    <span title={title} style={{ display: 'inline-block', fontSize: 11, fontWeight: 600, lineHeight: 1.4,
+      color: t.color, background: t.bg, border: `1px solid ${t.border}`, borderRadius: 3,
+      padding: '1px 6px', whiteSpace: 'nowrap' }}>{text}</span>
+  )
+}
+
+function SamStatusPill({ status }) {
+  const v = samStatusView(status)
+  return v ? <SamPill text={v.text} tone={v.tone} title={status.label} /> : null
+}
+
+// The single most important document flag for a list row: a blocker wins,
+// then a warning. Status flags are left to SamStatusPill.
+function samTopDocFlag(docReview) {
+  const flags = (docReview?.flags || []).filter(f => !String(f.code || '').startsWith('notice_') && !String(f.code || '').startsWith('deadline_'))
+  return flags.find(f => f.severity === 'block') || flags.find(f => f.severity === 'warn') || null
+}
+
+function samNewDocsSinceRead(docReview, meta) {
+  if (!docReview || docReview.relevance_score == null) return false
+  const seen = new Set(docReview.analyzed_source_urls || [])
+  const now = (meta?.attachment_urls || []).map(u => (typeof u === 'string' ? u : u?.url)).filter(Boolean)
+  return now.some(u => !seen.has(u))
+}
+
+function SamDocumentsPanel({ os, sig, meta, onPatch }) {
+  const vd = sig.vertical_data || {}
+  const docs = vd.sam_documents || null
+  const status = vd.sam_status || null
+  const files = docs?.files || []
+  const attachmentCount = (meta.attachment_urls || []).length
+  const samUrl = meta.ui_link || sig.doc_url
+
+  const [review, setReview] = useState({ loading: true, data: null })
+  const [busy, setBusy] = useState(null)        // 'analyze' | 'resolve' | 'promote'
+  const [note, setNote] = useState('')
+  const pollRef = useRef(null)
+
+  const loadReview = async () => {
+    try {
+      const d = await callEnrich({ signal_id: os.signal_id, oip_id: os.oip_id, cache_only: true })
+      const dr = d?.status === 'none' ? null : (d?.facts?.doc_review || null)
+      setReview({ loading: false, data: dr })
+      return dr
+    } catch {
+      setReview({ loading: false, data: null })
+      return null
+    }
+  }
+
+  useEffect(() => {
+    setReview({ loading: true, data: null }); setNote(''); setBusy(null)
+    loadReview()
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [os.signal_id, os.oip_id])
+
+  const queueJob = async (jobType, payload, maxAttempts) => {
+    const { data: oip, error: oipErr } = await supabase.from('oips').select('vertical_id, slug').eq('id', os.oip_id).single()
+    if (oipErr || !oip) throw new Error('Could not load this workspace')
+    const row = { job_type: jobType, oip_id: os.oip_id, vertical_id: oip.vertical_id, status: 'queued',
+                  payload: { ...payload, signal_id: os.signal_id, oip_slug: oip.slug, triggered_by: 'drawer' } }
+    if (maxAttempts) row.max_attempts = maxAttempts
+    const { error } = await supabase.from('worker_jobs').insert(row)
+    if (error) throw new Error(error.message)
+  }
+
+  const analyze = async ({ allowClosed = false } = {}) => {
+    if (allowClosed && !confirm('This notice is no longer open for bids. Read its documents anyway? Useful before pitching the awardee as a subcontractor.')) return
+    setBusy('analyze'); setNote('Reading the documents. This usually takes one to three minutes.')
+    const stampOf = (d) => `${d?.analyzed_at || ''}|${d?.status_rechecked_at || ''}`
+    const before = stampOf(review.data)
+    const beforeAnalyzed = review.data?.analyzed_at || ''
+    try {
+      await queueJob('sam_doc_analyze', allowClosed ? { allow_closed: true } : {}, 1)
+    } catch (e) {
+      setBusy(null); setNote(`Could not start the read: ${e.message}`); return
+    }
+    const started = Date.now()
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(async () => {
+      const dr = await loadReview()
+      if (dr && stampOf(dr) !== before) {
+        clearInterval(pollRef.current); setBusy(null)
+        const skipped = dr.skipped === 'closed' || (dr.analyzed_at || '') === beforeAnalyzed
+        setNote(skipped ? 'Not read: the notice is closed. Use "Read anyway" if you still need the documents.' : '')
+      } else if (Date.now() - started > 6 * 60 * 1000) {
+        clearInterval(pollRef.current); setBusy(null)
+        setNote('Still working. Reopen this opportunity in a few minutes to see the result.')
+      }
+    }, 8000)
+  }
+
+  const getDocuments = async () => {
+    setBusy('resolve'); setNote('Looking up the attachments on SAM.gov.')
+    try {
+      await queueJob('sam_doc_resolve', {}, null)
+      setNote('Requested. Reopen this opportunity in about a minute to see the documents.')
+    } catch (e) {
+      setNote(`Could not request the documents: ${e.message}`)
+    }
+    setBusy(null)
+  }
+
+  const scores = os.scores || {}
+  const usingDocScore = scores.score_source === 'documents'
+  const docScore = review.data?.relevance_score
+
+  const promote = async (revert = false) => {
+    setBusy('promote')
+    const nextScores = { ...scores }
+    let nextValue
+    if (revert) {
+      nextValue = scores.notice_score_original ?? scores.llm_relevance
+      nextScores.llm_relevance = nextValue
+      delete nextScores.score_source; delete nextScores.notice_score_original
+    } else {
+      nextScores.notice_score_original = scores.llm_relevance ?? (Number(os.signal_value) || null)
+      nextScores.llm_relevance = docScore
+      nextScores.score_source = 'documents'
+      nextValue = docScore
+    }
+    const { error } = await supabase.from('oip_signals')
+      .update({ scores: nextScores, signal_value: nextValue })
+      .eq('oip_id', os.oip_id).eq('signal_id', os.signal_id)
+    setBusy(null)
+    if (error) { setNote(`Could not update the score: ${error.message}`); return }
+    onPatch && onPatch({ scores: nextScores, signal_value: nextValue })
+    setNote(revert ? 'Back to the notice score.' : 'The document score is now this opportunity\'s fit score.')
+  }
+
+  const closed = SAM_CLOSED.includes(status?.status)
+  const dr = review.data
+  const hasRead = dr && dr.relevance_score != null
+  const newDocs = samNewDocsSinceRead(dr, meta)
+  const flags = dr?.flags || []
+  const h = { fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: '0 0 8px' }
+  const muted = { fontSize: 13, color: 'var(--ink-fade)' }
+  const btn = (primary) => ({
+    fontSize: 13, fontWeight: 600, padding: '6px 12px', borderRadius: 4, cursor: busy ? 'default' : 'pointer',
+    border: primary ? '1px solid var(--primary)' : '1px solid var(--rule)',
+    background: primary ? 'var(--primary)' : 'transparent', color: primary ? '#fff' : 'var(--ink)',
+    opacity: busy ? 0.6 : 1,
+  })
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {/* Live status */}
+      {status && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <SamStatusPill status={status} />
+          <span style={muted}>{status.label}</span>
+          {status.award?.awardee && <span style={{ fontSize: 13, color: 'var(--ink)' }}>Awardee: {status.award.awardee}</span>}
+        </div>
+      )}
+
+      {/* Documents */}
+      <div style={h}>Solicitation documents</div>
+      {files.length > 0 ? (
+        <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px' }}>
+          {files.map(f => (
+            <li key={f.url} style={{ padding: '4px 0', fontSize: 13, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+              {f.status === 'ok' ? (
+                <a href={f.url} target="_blank" rel="noopener noreferrer"
+                  style={{ color: 'var(--primary)', textDecoration: 'none', wordBreak: 'break-word' }}>{f.filename}</a>
+              ) : (
+                <span style={{ color: 'var(--ink-fade)', wordBreak: 'break-word' }}>{f.filename}</span>
+              )}
+              {f.status === 'restricted' && <SamPill text="Needs SAM.gov login" tone="muted" />}
+              {f.status === 'missing' && <SamPill text="Removed" tone="muted" />}
+            </li>
+          ))}
+        </ul>
+      ) : attachmentCount > 0 ? (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ ...muted, marginBottom: 6 }}>{attachmentCount} attachment{attachmentCount === 1 ? '' : 's'} on SAM.gov, not listed here yet.</div>
+          <button style={btn(false)} disabled={!!busy} onClick={getDocuments}>Get documents</button>
+        </div>
+      ) : (
+        <div style={{ ...muted, marginBottom: 8 }}>No attachments on this notice. The description above is the full posting.</div>
+      )}
+      {samUrl && (
+        <a href={samUrl} target="_blank" rel="noopener noreferrer"
+          style={{ fontSize: 13, color: 'var(--ink-fade)', textDecoration: 'underline' }}>Open on SAM.gov</a>
+      )}
+
+      {/* Document read */}
+      {(files.length > 0 || attachmentCount > 0) && (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--rule)' }}>
+          <div style={h}>Document read</div>
+          {review.loading ? (
+            <div style={muted}>Loading…</div>
+          ) : hasRead ? (
+            <>
+              <div style={{ display: 'flex', gap: 18, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 10 }}>
+                <span style={{ fontSize: 13 }}>Notice score <strong>{usingDocScore ? (scores.notice_score_original ?? '—') : (scores.llm_relevance ?? os.signal_value ?? '—')}</strong></span>
+                <span style={{ fontSize: 13 }}>Document score <strong>{dr.relevance_score}</strong></span>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{dr.recommendation}</span>
+              </div>
+              {dr.reason && <p style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--ink)', margin: '0 0 10px' }}>{dr.reason}</p>}
+              {flags.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+                  {flags.map((f, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                      <SamPill text={f.label} tone={f.severity === 'block' ? 'block' : f.severity === 'warn' ? 'warn' : 'info'} />
+                      <span style={{ fontSize: 12, color: 'var(--ink-fade)', lineHeight: 1.45 }}>{f.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {['opportunity', 'concerns', 'gaps'].map(k => {
+                const sec = dr.analysis?.[k]
+                if (!sec?.summary) return null
+                const title = { opportunity: 'Why it fits', concerns: 'Concerns', gaps: 'Verify before bidding' }[k]
+                return (
+                  <div key={k} style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
+                    <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--ink-light)' }}>{sec.summary}</div>
+                  </div>
+                )
+              })}
+              <details style={{ fontSize: 12, color: 'var(--ink-fade)', margin: '6px 0 12px' }}>
+                <summary style={{ cursor: 'pointer' }}>
+                  Read {dr.files_analyzed?.length || 0} file{(dr.files_analyzed?.length || 0) === 1 ? '' : 's'}, skipped {dr.files_skipped?.length || 0}
+                  {dr.analyzed_at ? `, ${new Date(dr.analyzed_at).toLocaleDateString()}` : ''}
+                </summary>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  {(dr.files_analyzed || []).map(f => <li key={f.filename}>{f.filename}</li>)}
+                  {(dr.files_skipped || []).map(f => <li key={f.filename} style={{ opacity: 0.7 }}>{f.filename}: skipped, {f.why}</li>)}
+                </ul>
+              </details>
+              {newDocs && (
+                <div style={{ marginBottom: 10 }}>
+                  <SamPill text="New documents since this read" tone="warn" />
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {usingDocScore ? (
+                  <button style={btn(false)} disabled={!!busy} onClick={() => promote(true)}>Use notice score</button>
+                ) : (
+                  <button style={btn(false)} disabled={!!busy} onClick={() => promote(false)}>Use document score</button>
+                )}
+                {closed ? (
+                  <button style={btn(false)} disabled={!!busy} onClick={() => analyze({ allowClosed: true })}>Read again anyway</button>
+                ) : (
+                  <button style={btn(newDocs)} disabled={!!busy} onClick={() => analyze()}>{newDocs ? 'Read new documents' : 'Read again'}</button>
+                )}
+              </div>
+            </>
+          ) : closed ? (
+            <div>
+              <div style={{ ...muted, marginBottom: 8 }}>This notice is closed, so the documents haven't been read.</div>
+              <button style={btn(false)} disabled={!!busy} onClick={() => analyze({ allowClosed: true })}>Read anyway</button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ ...muted, marginBottom: 8 }}>Read the full package against your profile: scope fit, eligibility, teaming path, certifications and deadlines.</div>
+              <button style={btn(true)} disabled={!!busy || files.length === 0} onClick={() => analyze()}>Analyze documents</button>
+              {files.length === 0 && <div style={{ ...muted, fontSize: 12, marginTop: 6 }}>Get the documents first.</div>}
+            </div>
+          )}
+          {note && <div style={{ fontSize: 12, color: 'var(--ink-fade)', marginTop: 8 }}>{note}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = {}, onPatchSignal = null }) {
   const { selectedOip } = useOip()
   const briefRef = useRef(null)
   const [exporting, setExporting] = useState(false)
@@ -5625,6 +5968,9 @@ ${analysisHtml}
 
         {/* Source link — consolidated for all verticals */}
         {(() => {
+          if (isSam && !isDib) {
+            return <SamDocumentsPanel os={os} sig={sig} meta={meta} onPatch={onPatchSignal} />
+          }
           if (isSam) {
             const url = meta.ui_link || sig.doc_url
             return url ? (
@@ -7432,7 +7778,8 @@ const SAM_DIRECT_SIGNAL_SELECT = `
   lifecycle_stage, objective, objective_confidence_note, objective_deadline_unknown,
   program_ref, project_ref, phase_ref, why_now, board_enrichment,
   signals:signal_id (id, title, source_name, source, state, doc_url, doc_type,
-                      meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key)
+                      meeting_date, scraped_at, full_text_storage_path, portal_id, metadata, signal_kind, entity_key,
+                      vertical_data)
 `
 
 function PursuedPage() {
