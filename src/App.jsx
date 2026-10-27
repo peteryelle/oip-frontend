@@ -4703,6 +4703,8 @@ function samNewDocsSinceRead(docReview, meta) {
 }
 
 function SamDocumentsPanel({ os, sig, meta, onPatch }) {
+  const navigate = useNavigate()
+  const { oips = [], selectOip } = useOip()
   const vd = sig.vertical_data || {}
   const docs = vd.sam_documents || null
   const status = vd.sam_status || null
@@ -4769,6 +4771,18 @@ function SamDocumentsPanel({ os, sig, meta, onPatch }) {
     }, 8000)
   }
 
+  const sendToDerivedDemand = async () => {
+    if (!confirm('Create a Derived Demand brief for this award? It profiles the winner and writes the subcontracting play (one brief run).')) return
+    setBusy('handoff'); setNote('')
+    try {
+      await queueJob('sam_award_handoff', {}, 1)
+      setNote('Requested. The brief appears in Derived Demand in a few minutes.')
+    } catch (e) {
+      setNote(`Could not send it: ${e.message}`)
+    }
+    setBusy(null)
+  }
+
   const getDocuments = async () => {
     setBusy('resolve'); setNote('Looking up the attachments on SAM.gov.')
     try {
@@ -4831,6 +4845,34 @@ function SamDocumentsPanel({ os, sig, meta, onPatch }) {
           {status.award?.awardee && <span style={{ fontSize: 13, color: 'var(--ink)' }}>Awardee: {status.award.awardee}</span>}
         </div>
       )}
+
+      {/* Award handoff: an awarded notice becomes a Derived Demand brief
+          (pitch the winner). The notice itself stays here. */}
+      {status?.status === 'awarded' && (() => {
+        const mine = Object.entries(vd.sam_award_handoffs || {}).find(([oipId]) => oips.some(o => o.id === oipId))
+        if (mine) {
+          const [derivedId, h] = mine
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14,
+              padding: '8px 10px', border: '1px solid var(--rule)', borderRadius: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--ink)' }}>
+                In Derived Demand{h.b2b_score != null ? `: B2B fit ${h.b2b_score}` : ''}{h.disposition ? ` (${h.disposition})` : ''}
+              </span>
+              <button style={btn(false)} onClick={() => { if (selectOip) selectOip(derivedId); navigate('/demand') }}>
+                View in Derived Demand
+              </button>
+            </div>
+          )
+        }
+        return (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ ...muted, marginBottom: 6 }}>
+              Awarded. Pitch the winner as a subcontractor while its buyout is open.
+            </div>
+            <button style={btn(true)} disabled={!!busy} onClick={sendToDerivedDemand}>Send to Derived Demand</button>
+          </div>
+        )
+      })()}
 
       {/* Documents */}
       <div style={h}>Solicitation documents</div>

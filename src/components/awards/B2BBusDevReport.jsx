@@ -297,6 +297,11 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             {!gated && bandLabel && (
               <span className="wq-chip">{scores.deliverable_band}</span>
             )}
+            {bd.origin?.type === "sam_award" && (
+              <span className="wq-chip wq-chip-soft" title="Written when the award appeared on SAM.gov, ahead of USASpending">
+                Early award · from SAM
+              </span>
+            )}
           </div>
         </div>
 
@@ -307,6 +312,9 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             {bd.piid ? <span className="blurable">{bd.piid}</span> : null}
             {bd.agency ? <span className="blurable">{bd.agency}</span> : null}
             {bd.naics_code ? <span className="blurable">NAICS {bd.naics_code}</span> : null}
+            {bd.origin?.type === "sam_award" && bd.origin.sam_url ? (
+              <a href={bd.origin.sam_url} target="_blank" rel="noopener noreferrer">Solicitation on SAM.gov</a>
+            ) : null}
           </div>
         </div>
 
