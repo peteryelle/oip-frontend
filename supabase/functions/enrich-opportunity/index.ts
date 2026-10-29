@@ -55,6 +55,13 @@ const TAVILY_KEY    = Deno.env.get("TAVILY_API_KEY") ?? "";
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 
 const MODEL         = "claude-haiku-4-5-20251001";
+// Version of this function's enrichment logic, stamped on every row as
+// opportunity_intel.intel_version. Bump it when a guard or prompt change makes
+// older briefs untrustworthy; score_handler re-enriches rows below the
+// sentinel's pull_config.enrichment_min_version (per OIP, metered, opt-in).
+//   1 (implicit, rows written before 2026-10-28)
+//   2  computed stage, tenant sales plays, incumbent lookup
+const INTEL_VERSION = 2;
 const CROL_URL      = "https://data.cityofnewyork.us/resource/tfbu-zbd2.json";
 const MAX_PDF_BYTES = 12 * 1024 * 1024;
 const NO_WINNER_RETRY_DAYS = 14;
@@ -263,6 +270,72 @@ function findEvent(timeline: { event?: string; date?: string }[], re: RegExp): D
 }
 
 function addDays(d: Date, n: number) { const x = new Date(d); x.setUTCDate(x.getUTCDate() + n); return x; }
+
+// ── Sales plays (tenant-configured) ───────────────────────────────────────
+// Stage computed by rule from the source record, BEFORE the model sees it.
+// The model may not override it: a closed RFP never gets a pre-award play,
+// and a sole-source / proprietary buy never gets a "help bidders" play.
+//   locked   sole source, proprietary, exempt, noncompetitive, emergency
+//   closed   authoritative due date has passed
+//   closing  due within CLOSING_WINDOW_DAYS
+//   open     due later than that
+//   unknown  no due date on the record
+const CLOSING_WINDOW_DAYS = 7;
+const LOCKED_RE = /sole[\s-]?source|single[\s-]?source|proprietary|exempt from (?:advertis|compet)|non-?competitive|emergency (?:purchase|procurement)/i;
+
+type ComputedStage = { code: "locked" | "closed" | "closing" | "open" | "unknown"; days_to_due: number | null; basis: string };
+
+function computeStage(meta: Record<string, unknown>, title: string, due: Date | null, now: Date): ComputedStage {
+  const lockText = [meta.selection_method_description, meta.ad_type, meta.notice_type,
+                    meta.type_of_notice_description, title].map(v => String(v ?? "")).join(" | ");
+  const days = due ? Math.ceil((due.getTime() - now.getTime()) / 86400000) : null;
+  const m = lockText.match(LOCKED_RE);
+  if (m) return { code: "locked", days_to_due: days, basis: `source record says "${m[0]}"` };
+  if (days === null) return { code: "unknown", days_to_due: null, basis: "no due date on the source record" };
+  if (days < 0) return { code: "closed", days_to_due: days, basis: `due date passed ${-days} day(s) ago` };
+  if (days <= CLOSING_WINDOW_DAYS) return { code: "closing", days_to_due: days, basis: `due in ${days} day(s)` };
+  return { code: "open", days_to_due: days, basis: `due in ${days} day(s)` };
+}
+
+type SalesPlay = { name: string; definition: string; stages: string[] };
+
+// pull_config.sales_plays: [{name, definition, stages:[locked|closed|closing|open|unknown]}]
+function salesPlaysFor(pc: Record<string, unknown>): SalesPlay[] {
+  const raw = Array.isArray(pc.sales_plays) ? pc.sales_plays as Record<string, unknown>[] : [];
+  return raw.filter(p => p && p.name && p.definition).map(p => ({
+    name: String(p.name), definition: String(p.definition),
+    stages: Array.isArray(p.stages) ? (p.stages as unknown[]).map(String) : [],
+  }));
+}
+
+// Incumbent: who held this agency's PREVIOUS contract for the same services.
+// For open opportunities it is the strongest lead among likely bidders.
+async function findIncumbent(agency: string, title: string, year: number) {
+  const queries = [
+    `"${agency}" "${title}" contract awarded ${year - 1} OR ${year - 2} OR ${year - 3}`,
+    `${agency} ${title} agency of record OR incumbent vendor`,
+  ];
+  const hits: Hit[] = [];
+  const seen = new Set<string>();
+  for (const q of queries) for (const h of await tavily(q, { max: 5 })) if (!seen.has(h.url)) { seen.add(h.url); hits.push(h); }
+  if (!hits.length) return { vendor: "", confidence: "", evidence: "", source_url: "", queries };
+  const src = hits.slice(0, 8).map((h, i) => `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.content}`).join("\n\n");
+  const out = await claudeJSON([{ type: "text", text:
+`Identify the vendor that held ${agency}'s PREVIOUS contract for the same services as: ${title}.
+Use ONLY these search results. Name a vendor ONLY if a result explicitly says it was awarded, selected, or
+is the agency of record for ${agency} for these services. A different agency's vendor does not count. Do not guess.
+evidence: max 25 words.
+
+${src}
+
+Return ONLY JSON: {"vendor":"","confidence":"high|medium|low","evidence":"","source_url":""}` }], 400);
+  const urls = new Set(hits.map(h => h.url));
+  const ok = out && out.vendor && urls.has(String(out.source_url ?? ""));
+  return {
+    vendor: ok ? String(out!.vendor) : "", confidence: ok ? String(out!.confidence ?? "") : "",
+    evidence: ok ? String(out!.evidence ?? "") : "", source_url: ok ? String(out!.source_url) : "", queries,
+  };
+}
 
 // ── Board-meeting mode ────────────────────────────────────────────────────
 const FULLTEXT_BUCKET = "signals-fulltext";
@@ -660,8 +733,9 @@ Deno.serve(async (req: Request) => {
         sb, sig, signal_id, oip_id, tenant, oipName: String(oip?.name ?? ""),
         dmTemplate: pc.enrichment_decision_maker_query ? dmTemplate : REG_DM_TEMPLATE, cached,
       });
-      const rows = [row, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id)
-        .map(id => ({ ...row, signal_id: id }))];
+      const stamped = { ...row, intel_version: INTEL_VERSION };
+      const rows = [stamped, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id)
+        .map(id => ({ ...stamped, signal_id: id }))];
       const { error } = await sb.from("opportunity_intel").upsert(rows, { onConflict: "signal_id,oip_id" });
       if (error) console.error("upsert opportunity_intel (regulatory)", error);
       return json({ status: "enriched", ...row });
@@ -673,8 +747,9 @@ Deno.serve(async (req: Request) => {
         sb, sig, signal_id, oip_id, tenant, oipName: String(oip?.name ?? ""),
         dmTemplate, cached,
       });
-      const rows = [row, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id)
-        .map(id => ({ ...row, signal_id: id }))];
+      const stamped = { ...row, intel_version: INTEL_VERSION };
+      const rows = [stamped, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id)
+        .map(id => ({ ...stamped, signal_id: id }))];
       const { error } = await sb.from("opportunity_intel").upsert(rows, { onConflict: "signal_id,oip_id" });
       if (error) console.error("upsert opportunity_intel (board)", error);
       return json({ status: "enriched", ...row });
@@ -777,6 +852,39 @@ Return ONLY JSON: {"people":[{"name":"","title":"","note":"","source_url":""}]}`
                  searched_at: now.toISOString() };
     }
 
+    // ── 3c. Computed stage + tenant sales plays ──
+    const cStage = computeStage(meta, String(sig.title ?? ""), dueDate, now);
+    const plays = salesPlaysFor(pc);
+    const allowedPlays = plays.filter(p => p.stages.includes(cStage.code));
+    const guidance = String(pc.sales_play_guidance ?? "").trim();
+
+    // ── 3d. Incumbent, for opportunities still before the due date ──
+    // Kept from the cached play once found, so refreshes do not re-search.
+    // Opt out per sentinel with pull_config.enrichment_incumbent_lookup=false.
+    const cachedPlay = (cached?.play ?? null) as Record<string, unknown> | null;
+    let incumbent = (cachedPlay?.incumbent ?? null) as Record<string, unknown> | null;
+    if (plays.length && (cStage.code === "open" || cStage.code === "closing")
+        && pc.enrichment_incumbent_lookup !== false && !(incumbent && incumbent.vendor)) {
+      const inc = await findIncumbent(agency, title, (dueDate ?? now).getUTCFullYear());
+      queries.push(...inc.queries);
+      incumbent = { vendor: inc.vendor, confidence: inc.confidence, evidence: inc.evidence,
+                    source_url: inc.source_url, searched_at: now.toISOString() };
+      if (inc.source_url) sources.push({ title: `Incumbent evidence`, url: inc.source_url, used_for: "incumbent" });
+    }
+
+    const playBlock = plays.length
+      ? `\nCOMPUTED STAGE (by rule, authoritative — do not override): ${cStage.code} (${cStage.basis})
+INCUMBENT (previous contract holder, if found): ${JSON.stringify(incumbent)}
+SALES PLAYS ALLOWED AT THIS STAGE — choose exactly one by name:
+${(allowedPlays.length ? allowedPlays : plays).map(p => `- ${p.name}: ${p.definition}`).join("\n")}`
+      : "";
+    const howTenantWins = guidance
+      ? `How the tenant wins business here: ${guidance}`
+      : `How the tenant wins business here: if the tenant cannot or would not bid as prime, the play is to partner with likely bidders before the award and with the WINNING vendor after it (derived demand: the winner may need the tenant's offering to deliver).`;
+    const playSchema = plays.length
+      ? `,\n "play": {"play":"<one allowed play name>","who":"who to approach — the incumbent, likely bidders, the winner, or the buyer — named where the facts name them","next_step":"one concrete action","teaming":"M/WBE / SDVOB or partnering angle, or empty","timing":"when to act, tied to the dates above"}`
+      : "";
+
     // ── 4. Synthesize for the tenant ──
     const synth = await claudeJSON([{ type: "text", text:
 `You advise ${oip?.name ?? "the tenant"} on a public-sector opportunity. Today is ${now.toISOString().slice(0, 10)}.
@@ -787,19 +895,20 @@ OPPORTUNITY: ${notice}
 AUTHORITATIVE FACTS (from the official source record — these override anything below): ${JSON.stringify(authoritative)}
 FACTS (from the solicitation document or listings): ${JSON.stringify(facts).slice(0, 9000)}
 DECISION-MAKERS: ${JSON.stringify(decision_makers)}
-WINNER: ${JSON.stringify(winner)}
+WINNER: ${JSON.stringify(winner)}${playBlock}
 
-How the tenant wins business here: if the tenant cannot or would not bid as prime, the play is to partner with likely bidders before the award and with the WINNING vendor after it (derived demand: the winner may need the tenant's offering to deliver).
+${howTenantWins}
 
 Return ONLY JSON:
 {
  "stage": "open|intent_closed|questions_closed|proposals_in|finalists|awarded|contract_live|closed",
  "angle": "2-3 sentences: why this matters to the tenant, citing the solicitation's own words where possible",
  "next_steps": [{"when":"YYYY-MM-DD or a window","action":"","why":""}],
- "compliance": [""]
+ "compliance": [""]${playSchema}
 }
 Rules: stage must be consistent with the authoritative due date — a procurement whose due date has passed is NOT open. If the source record says sole source / exempt from advertising / noncompetitive, say so in angle and do not suggest bidding.
-next_steps in date order, 3-6 items, concrete and dated from the timeline. If a restricted communication period applies, NEVER suggest contacting agency staff other than the designated contacts before it ends, and list that in compliance. Do not invent names, dates, or facts not present above.` }], 1500);
+next_steps in date order, 3-6 items, concrete and dated from the timeline. If a restricted communication period applies, NEVER suggest contacting agency staff other than the designated contacts before it ends, and list that in compliance. Do not invent names, dates, or facts not present above.${plays.length ? `
+The play must be one of the allowed names above and consistent with the COMPUTED STAGE. next_steps must carry out that play. Only name a person or vendor in "who" if it appears above; otherwise describe the role (e.g. "agencies that bid on prior SUNY media contracts").` : ""}` }], 1800);
 
     // Stage guard: never "open"-type once the authoritative due date passed.
     let stage = String(synth?.stage ?? "");
@@ -817,6 +926,22 @@ next_steps in date order, 3-6 items, concrete and dated from the timeline. If a 
       next_refresh_at = addDays(now, NO_WINNER_RETRY_DAYS).toISOString();
     }
 
+    // Play: keep only an allowed name; the stage code and incumbent travel with it.
+    let play: Record<string, unknown> | null = null;
+    if (plays.length) {
+      const sp = (synth?.play ?? {}) as Record<string, unknown>;
+      const allowedNames = new Set((allowedPlays.length ? allowedPlays : plays).map(p => p.name));
+      const name = String(sp.play ?? "");
+      if (!allowedNames.has(name)) console.log("play rejected (not allowed at stage)", cStage.code, name);
+      play = {
+        play: allowedNames.has(name) ? name : null,
+        who: String(sp.who ?? ""), next_step: String(sp.next_step ?? ""),
+        teaming: String(sp.teaming ?? ""), timing: String(sp.timing ?? ""),
+        computed_stage: cStage.code, stage_basis: cStage.basis, days_to_due: cStage.days_to_due,
+        incumbent,
+      };
+    }
+
     const row = {
       signal_id, oip_id,
       status: (document || Object.keys(facts).length) ? "ok" : "partial",
@@ -829,6 +954,8 @@ next_steps in date order, 3-6 items, concrete and dated from the timeline. If a 
       enriched_at: now.toISOString(),
       next_refresh_at,
       refresh_count: (cached?.refresh_count ?? -1) + 1,
+      play,
+      intel_version: INTEL_VERSION,
     };
     const rows = [row, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id)
       .map(id => ({ ...row, signal_id: id }))];
