@@ -35,13 +35,6 @@ const SOURCE_STYLE = {
 const TIER_FIT = { tier1_strong: 90, tier1: 75, tier2: 55 };
 const TIER_LABEL = { tier1_strong: "Strong", tier1: "Tier 1", tier2: "Tier 2" };
 
-// "adam+seenthis@winquest.ai" -> "adam". Tenant logins use plus-addressing,
-// so the part before "+" (or "@") is the person.
-export function displayName(email) {
-  if (!email) return "";
-  return String(email).split("@")[0].split("+")[0];
-}
-
 function sourceFor(oip) {
   if (oip?.slug?.endsWith("-derived")) return "Derived Demand";
   if (oip?.verticals?.slug === "sam") return "SAM";
@@ -204,11 +197,19 @@ export default function PursuedTab({ onViewBrief, briefLoadingId, titleExtra = n
     return () => { cancelled = true; };
   }, [tenantId]);
 
+  // Owner choices: only this tenant's own logins, matched by the tenant key in
+  // the email (OIP slug prefix: "seenthis-sled" -> "seenthis" matches
+  // adam+seenthis@winquest.ai and kathy.sanborn@seenthis.com, not
+  // adam@winquest.ai). Full emails are shown so plus-addressed logins of the
+  // same person stay distinguishable.
+  const tenantKey = String(selectedOip?.slug || "").split("-")[0].toLowerCase();
+  const ownerChoices = tenantKey
+    ? members.filter((m) => String(m.email || "").toLowerCase().includes(tenantKey))
+    : members;
   const emailOf = (uid) => members.find((m) => m.user_id === uid)?.email || "";
   const shortName = (uid) => {
     if (!uid) return "Unassigned";
-    const e = emailOf(uid);
-    return e ? displayName(e) : "Member";
+    return emailOf(uid) || "Member";
   };
 
   const updateRow = (id, patch) => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -320,7 +321,7 @@ export default function PursuedTab({ onViewBrief, briefLoadingId, titleExtra = n
               <option value="all">All owners</option>
               <option value="me">Mine</option>
               <option value="none">Unassigned</option>
-              {members.map((m) => <option key={m.user_id} value={m.user_id} title={m.email}>{displayName(m.email)}</option>)}
+              {ownerChoices.map((m) => <option key={m.user_id} value={m.user_id}>{m.email}</option>)}
             </select>
             <input type="search" placeholder="Search opportunity, agency, or ID…" value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -378,10 +379,13 @@ export default function PursuedTab({ onViewBrief, briefLoadingId, titleExtra = n
                         </td>
                         <td style={td}>
                           <select value={r.owner || ""} onChange={(e) => updateOwner(r.id, e.target.value)}
-                            title={r.pursued_by ? `Pursued by ${displayName(emailOf(r.pursued_by)) || "a team member"}` : ""}
-                            style={{ fontFamily: MONO, fontSize: 12, padding: "4px 6px", border: "1px solid var(--rule-strong)", borderRadius: 4, background: "var(--paper)", maxWidth: 160 }}>
+                            title={r.pursued_by ? `Pursued by ${emailOf(r.pursued_by) || "a team member"}` : ""}
+                            style={{ fontFamily: MONO, fontSize: 12, padding: "4px 6px", border: "1px solid var(--rule-strong)", borderRadius: 4, background: "var(--paper)", maxWidth: 240 }}>
                             <option value="">Unassigned</option>
-                            {members.map((m) => <option key={m.user_id} value={m.user_id} title={m.email}>{displayName(m.email)}</option>)}
+                            {r.owner && !ownerChoices.some((m) => m.user_id === r.owner) && (
+                              <option value={r.owner}>{emailOf(r.owner) || "Former member"}</option>
+                            )}
+                            {ownerChoices.map((m) => <option key={m.user_id} value={m.user_id}>{m.email}</option>)}
                           </select>
                         </td>
                         <td style={{ ...td, minWidth: 170, fontSize: 13 }}>
@@ -444,7 +448,7 @@ export default function PursuedTab({ onViewBrief, briefLoadingId, titleExtra = n
       {logFor && (
         <LogActivityModal
           item={logFor}
-          defaultWorkedBy={displayName(user?.email)}
+          defaultWorkedBy={user?.email || ""}
           onClose={() => setLogFor(null)}
           onSave={async (entry) => { const ok = await addActivity(logFor.id, entry); if (ok) setLogFor(null); return ok; }}
         />
