@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, Component } from 'react'
 import AwardIntel from './components/awards/AwardIntel'
 import B2BBusDevTab from './components/awards/B2BBusDevTab'
 import B2BBusDevReport from './components/awards/B2BBusDevReport'
+import PursuedTab from './components/pursued/PursuedTab'
 import { fetchAwardBySignal } from './hooks/useAwards'
 import { SignalSubawardsPanel } from './components/SignalSubawardsPanel'
 import ActivityLog from './components/audit/ActivityLog'
@@ -7618,198 +7619,6 @@ function KeywordPill({ k, stats, editing, onChangeTier, onRemove }) {
 // PURSUED PIPELINE
 // ────────────────────────────────────────────────────────────────────────────
 
-function PursuedCard({ it, sourceLabel, stages, onUpdateStage, onAddActivity, onViewBrief, briefLoadingId }) {
-  const [workedBy, setWorkedBy] = useState('')
-  const [actionTaken, setActionTaken] = useState('')
-  const [outcome, setOutcome] = useState('')
-  const [nextStep, setNextStep] = useState('')
-  const [nextActionDate, setNextActionDate] = useState('')
-  const [showDateField, setShowDateField] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [logOpen, setLogOpen] = useState(false)
-  const snap = it.snapshot || {}
-  // SAM-direct snapshots carry state/source_name/doc_url; Derived Demand
-  // snapshots carry agency/naics_code/agency_poc instead — neither field set
-  // exists on the other source's rows, so each half of this line degrades
-  // gracefully when its fields are absent instead of showing blanks.
-  const metaLeft = snap.state || snap.agency || null
-  const metaRight = snap.source_name || (snap.naics_code ? `NAICS ${snap.naics_code}` : null)
-  const title = snap.title || snap.incumbent_name || 'Untitled'
-  const activities = it.activities || []
-
-  const handleAdd = async () => {
-    if (!actionTaken.trim() && !outcome.trim() && !nextStep.trim()) return
-    setSaving(true)
-    const ok = await onAddActivity(it.id, { workedBy, actionTaken, outcome, nextStep, nextActionDate: nextActionDate || null })
-    setSaving(false)
-    if (ok) {
-      setActionTaken('')
-      setOutcome('')
-      setNextStep('')
-      setNextActionDate('')
-      setShowDateField(false)
-      setLogOpen(false)
-      // workedBy left as-is — usually the same person logging several in a row
-    }
-  }
-
-  return (
-    <div className="signal-card" style={{ marginBottom: 8 }}>
-      <div style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--ink-fade)', marginBottom: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{
-          padding: '1px 6px', borderRadius: 3, fontWeight: 600,
-          background: sourceLabel === 'Derived Demand' ? '#eef2ff' : '#f3f4f6',
-          color: sourceLabel === 'Derived Demand' ? '#4338ca' : '#4b5563',
-        }}>
-          {sourceLabel}
-        </span>
-        {metaLeft && <span>{metaLeft}</span>}
-        {metaLeft && metaRight && <span>·</span>}
-        {metaRight && <span>{metaRight}</span>}
-        <span>· pursued {new Date(it.pursued_at).toLocaleDateString()}</span>
-      </div>
-      <div style={{ fontFamily: "'Spectral', serif", fontSize: 16, marginBottom: 8 }} className="blurable">{title}</div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
-        {stages.map(s => (
-          <button key={s} onClick={() => onUpdateStage(it.id, s)}
-            style={{
-              padding: '4px 10px',
-              border: '1px solid ' + (it.pipeline_stage === s ? 'var(--primary)' : 'var(--rule-strong)'),
-              background: it.pipeline_stage === s ? 'var(--primary-soft)' : 'var(--paper)',
-              color: it.pipeline_stage === s ? 'var(--primary-dark)' : 'var(--ink-fade)',
-              borderRadius: 3, cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", fontSize: 11,
-            }}>
-            {s}
-          </button>
-        ))}
-        {snap.doc_url && (
-          <a href={snap.doc_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 'auto', fontSize: 13 }}>
-            Source ↗
-          </a>
-        )}
-      </div>
-
-      <div style={{ marginBottom: 10, display: 'flex', gap: 8 }}>
-        <button
-          type="button"
-          onClick={() => setLogOpen(true)}
-          style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--primary)', background: 'var(--paper)', color: 'var(--primary)', cursor: 'pointer' }}
-        >
-          + Log activity
-        </button>
-        {onViewBrief && (
-          <button
-            type="button"
-            onClick={() => onViewBrief(it, sourceLabel)}
-            disabled={briefLoadingId === it.id}
-            style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--rule-strong)', background: 'var(--paper)', color: 'var(--ink)', cursor: 'pointer' }}
-          >
-            {briefLoadingId === it.id ? 'Loading…' : 'View Brief'}
-          </button>
-        )}
-      </div>
-
-      {logOpen && (
-        <div
-          onClick={() => setLogOpen(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: 'min(560px, 92vw)', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 6, padding: 20, boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}
-          >
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-              <input
-                type="text" value={workedBy} onChange={(e) => setWorkedBy(e.target.value)}
-                placeholder="Worked by"
-                style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-              />
-              {showDateField || nextActionDate ? (
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input
-                    type="date" value={nextActionDate} onChange={(e) => setNextActionDate(e.target.value)}
-                    style={{ flex: 1, fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => { setNextActionDate(''); setShowDateField(false) }}
-                    title="Clear date"
-                    style={{ padding: '4px 8px', fontSize: 12, border: '1px solid var(--rule)', borderRadius: 4, background: 'var(--paper)', cursor: 'pointer' }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowDateField(true)}
-                  style={{ padding: '6px 8px', fontSize: 12, border: '1px dashed var(--rule)', borderRadius: 4, background: 'var(--paper)', color: 'var(--ink-fade)', cursor: 'pointer', textAlign: 'left' }}
-                >
-                  + Set next action date
-                </button>
-              )}
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-              <input
-                type="text" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)}
-                placeholder="What did you do"
-                style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-              />
-              <input
-                type="text" value={outcome} onChange={(e) => setOutcome(e.target.value)}
-                placeholder="Result"
-                style={{ fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-              />
-            </div>
-
-            <input
-              type="text" value={nextStep} onChange={(e) => setNextStep(e.target.value)}
-              placeholder="Next step"
-              style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: '6px 8px', marginBottom: 14, border: '1px solid var(--rule)', borderRadius: 4, boxSizing: 'border-box' }}
-            />
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setLogOpen(false)}
-                style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--rule)', background: 'var(--paper)', color: 'var(--ink-fade)', cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAdd}
-                disabled={saving}
-                style={{ padding: '5px 12px', fontSize: 12, borderRadius: 4, border: '1px solid var(--primary)', background: 'var(--primary)', color: '#fff', cursor: 'pointer' }}
-              >
-                {saving ? 'Saving…' : 'Add entry'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activities.length > 0 && (
-        <div>
-          {activities.map((a) => (
-            <div key={a.id} style={{ borderTop: '1px solid var(--rule)', padding: '8px 0', fontSize: 13 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-fade)', marginBottom: 4, fontFamily: "'IBM Plex Mono', monospace" }}>
-                <span>{a.worked_by || 'Unattributed'}</span>
-                <span>{new Date(a.created_at).toLocaleString()}</span>
-              </div>
-              {a.action_taken && <div><strong>Did:</strong> {a.action_taken}</div>}
-              {a.outcome && <div><strong>Result:</strong> {a.outcome}</div>}
-              {a.next_step && (
-                <div><strong>Next:</strong> {a.next_step}{a.next_action_date ? ` — due ${new Date(a.next_action_date + 'T00:00:00').toLocaleDateString()}` : ''}</div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // Canonical oip_signals+signals select for a SAM Direct row -- mirrors the
 // MarketReviewPage list query exactly so SignalDrawer gets the shape it expects.
 const SAM_DIRECT_SIGNAL_SELECT = `
@@ -7824,30 +7633,26 @@ const SAM_DIRECT_SIGNAL_SELECT = `
                       vertical_data)
 `
 
+// Unified Pursued table (SAM + Derived Demand + SLED, one per tenant) lives in
+// components/pursued/PursuedTab.jsx. This wrapper keeps only the brief drawer,
+// because SignalDrawer is defined in this file.
 function PursuedPage() {
-  const { selectedOip } = useOip()
-  const { user } = useAuth()
-  const [items, setItems] = useState([])
-  const [oipLabels, setOipLabels] = useState({}) // oip_id -> "SAM Direct" | "Derived Demand"
-  const [loading, setLoading] = useState(true)
-
-  // Brief viewer -- "View Brief" on a Pursued card re-fetches the full,
-  // still-live record (Derived Demand: oip_signals.b2b_busdev via
-  // fetchAwardBySignal; SAM Direct: oip_signals+signals) so the same
-  // drawer content shown from Market Review is available from Pursued too,
-  // rather than the trimmed pursued_signals.snapshot the card itself renders from.
   const [brief, setBrief] = useState(null) // { kind: 'derived', award, oipId } | { kind: 'sam', os } | { kind: 'unavailable', title }
   const [briefLoadingId, setBriefLoadingId] = useState(null)
   const [briefSubscriberName, setBriefSubscriberName] = useState(null)
   const briefKeywordTierMap = useKeywordTierMap(brief?.kind === 'sam' ? brief.os.oip_id : null)
 
+  // "Brief" re-fetches the full, still-live record (Derived Demand:
+  // oip_signals.b2b_busdev via fetchAwardBySignal; SAM and SLED: oip_signals +
+  // signals) so the same drawer shown from Market Review opens from Pursued.
   const viewBrief = async (it, sourceLabel) => {
     setBriefLoadingId(it.id)
+    const fallbackTitle = (it.snapshot || {}).title || (it.snapshot || {}).incumbent_name || 'this opportunity'
     try {
       if (sourceLabel === 'Derived Demand') {
         const { award, error } = await fetchAwardBySignal(it.oip_id, it.signal_id)
         if (error || !award) {
-          setBrief({ kind: 'unavailable', title: (it.snapshot || {}).title || (it.snapshot || {}).incumbent_name || 'this opportunity' })
+          setBrief({ kind: 'unavailable', title: fallbackTitle })
         } else {
           const { data: prof } = await supabase.rpc('get_canonical_profile', { p_oip_id: it.oip_id })
           const p = Array.isArray(prof) ? prof[0] : prof
@@ -7861,11 +7666,8 @@ function PursuedPage() {
           .eq('oip_id', it.oip_id)
           .eq('signal_id', it.signal_id)
           .maybeSingle()
-        if (error || !data) {
-          setBrief({ kind: 'unavailable', title: (it.snapshot || {}).title || 'this opportunity' })
-        } else {
-          setBrief({ kind: 'sam', os: data })
-        }
+        if (error || !data) setBrief({ kind: 'unavailable', title: fallbackTitle })
+        else setBrief({ kind: 'sam', os: data })
       }
     } finally {
       setBriefLoadingId(null)
@@ -7874,9 +7676,6 @@ function PursuedPage() {
 
   const closeBrief = () => setBrief(null)
 
-  // Re-used for the SAM Direct brief's Status buttons -- same pattern as
-  // MarketReviewPage.updateStatus, scoped to whichever oip_id/signal_id the
-  // open brief carries rather than selectedOip (Pursued spans sibling OIPs).
   const updateBriefSignalStatus = async (oipId, signalId, newStatus) => {
     const { error } = await supabase
       .from('oip_signals')
@@ -7887,124 +7686,9 @@ function PursuedPage() {
     setBrief((prev) => (prev && prev.kind === 'sam' ? { ...prev, os: { ...prev.os, status: newStatus } } : prev))
   }
 
-  useEffect(() => {
-    if (!selectedOip?.tenant_id || !selectedOip?.vertical_id) return
-    let cancelled = false
-    setLoading(true)
-    ;(async () => {
-      // Both SAM Direct and Derived Demand pursuits live under sibling OIPs
-      // (same tenant + vertical, e.g. "seenthis-sam" and "seenthis-sam-derived").
-      // Merge both into one list here, badged by source, rather than making
-      // the user switch the OIP selector to see one or the other.
-      const { data: siblings } = await supabase
-        .from('oips')
-        .select('id, slug')
-        .eq('tenant_id', selectedOip.tenant_id)
-        .eq('vertical_id', selectedOip.vertical_id)
-      const oipIds = (siblings || []).map((o) => o.id)
-      const labels = {}
-      for (const o of siblings || []) {
-        labels[o.id] = o.slug?.endsWith('-derived') ? 'Derived Demand' : 'SAM Direct'
-      }
-      if (cancelled) return
-      setOipLabels(labels)
-
-      if (oipIds.length === 0) {
-        setItems([])
-        setLoading(false)
-        return
-      }
-      const { data } = await supabase
-        .from('pursued_signals')
-        .select('id, oip_id, signal_id, snapshot, pipeline_stage, notes, pursued_at, last_updated_at')
-        .in('oip_id', oipIds)
-        .order('pursued_at', { ascending: false })
-      if (cancelled) return
-      const pursuedIds = (data || []).map((d) => d.id)
-      let activitiesById = {}
-      if (pursuedIds.length > 0) {
-        const { data: acts } = await supabase
-          .from('pursued_signal_activities')
-          .select('id, pursued_signal_id, worked_by, action_taken, outcome, next_step, next_action_date, created_at')
-          .in('pursued_signal_id', pursuedIds)
-          .order('created_at', { ascending: false })
-        for (const a of acts || []) {
-          (activitiesById[a.pursued_signal_id] = activitiesById[a.pursued_signal_id] || []).push(a)
-        }
-      }
-      if (cancelled) return
-      setItems((data || []).map((it) => ({ ...it, activities: activitiesById[it.id] || [] })))
-      setLoading(false)
-    })()
-    return () => { cancelled = true }
-  }, [selectedOip])
-
-  const updateStage = async (id, stage) => {
-    const { error } = await supabase.from('pursued_signals').update({ pipeline_stage: stage }).eq('id', id)
-    if (error) alert(error.message)
-    else setItems(prev => prev.map(it => it.id === id ? { ...it, pipeline_stage: stage } : it))
-  }
-
-  const addActivity = async (pursuedSignalId, entry) => {
-    const { data, error } = await supabase
-      .from('pursued_signal_activities')
-      .insert({
-        pursued_signal_id: pursuedSignalId,
-        worked_by: entry.workedBy || null,
-        action_taken: entry.actionTaken || null,
-        outcome: entry.outcome || null,
-        next_step: entry.nextStep || null,
-        next_action_date: entry.nextActionDate || null,
-      })
-      .select('id, pursued_signal_id, worked_by, action_taken, outcome, next_step, next_action_date, created_at')
-      .single()
-    if (error) {
-      alert('Save failed: ' + error.message)
-      return false
-    }
-    await supabase
-      .from('pursued_signals')
-      .update({ last_updated_at: new Date().toISOString(), last_updated_by: user?.id || null })
-      .eq('id', pursuedSignalId)
-    setItems(prev => prev.map(it => it.id === pursuedSignalId
-      ? { ...it, activities: [data, ...(it.activities || [])], last_updated_at: new Date().toISOString() }
-      : it))
-    return true
-  }
-
-  if (loading) return <SectionLoader />
-  if (items.length === 0) {
-    return <EmptyMessage title="No pursued items yet" message="Move a signal into the pursued pipeline from Market Review or Derived Demand to track it here." />
-  }
-
-  const stages = ['CO Contact', 'Prospect Contact', 'Meeting set', 'Meeting held', 'Hand to Customer']
-  const grouped = {}
-  stages.forEach(s => grouped[s] = [])
-  items.forEach(it => { grouped[it.pipeline_stage]?.push(it) || (grouped['CO Contact'] = grouped['CO Contact'] || []).push(it) })
-
   return (
-    <div className="detail-section">
-      <div className="detail-eyebrow">Pursued Pipeline · {items.length} active</div>
-      <h2 className="detail-title">Your pursued opportunities<HelpIcon topic="pursued" /></h2>
-      {stages.map(stage => grouped[stage].length === 0 ? null : (
-        <div key={stage} style={{ marginTop: 24 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--ink-light)', marginBottom: 12 }}>
-            {stage} · {grouped[stage].length}
-          </div>
-          {grouped[stage].map(it => (
-            <PursuedCard
-              key={it.id}
-              it={it}
-              sourceLabel={oipLabels[it.oip_id] || 'SAM Direct'}
-              stages={stages}
-              onUpdateStage={updateStage}
-              onAddActivity={addActivity}
-              onViewBrief={viewBrief}
-              briefLoadingId={briefLoadingId}
-            />
-          ))}
-        </div>
-      ))}
+    <>
+      <PursuedTab onViewBrief={viewBrief} briefLoadingId={briefLoadingId} titleExtra={<HelpIcon topic="pursued" />} />
 
       {brief && (
         <div className="wq-awards">
@@ -8029,7 +7713,7 @@ function PursuedPage() {
               <div style={{ padding: 24 }}>
                 <p>
                   The original signal for <strong>{brief.title}</strong> is no longer available
-                  (likely purged from the source feed). The saved summary on the Pursued card is
+                  (likely purged from the source feed). The saved summary in the Pursued table is
                   all that remains for this item.
                 </p>
               </div>
@@ -8038,7 +7722,7 @@ function PursuedPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 
