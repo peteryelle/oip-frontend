@@ -16,6 +16,7 @@ import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
 import { useKeywordTierMap } from './hooks/useKeywordTierMap'
 import { DemoGateProvider } from './hooks/useDemoGate'
 import DemoIndicator from './components/demo/DemoIndicator'
+import ModuleBanner from './components/ModuleBanner'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
 import PrimeAccountPage from './pages/PrimeAccountPage'
 import CoLandscapePage from './pages/CoLandscapePage'
@@ -222,6 +223,8 @@ function Layout() {
           </>
         )}
       </nav>
+
+      <ModuleBanner section={activeSection} selectedOip={selectedOip} />
 
       <Outlet />
 
