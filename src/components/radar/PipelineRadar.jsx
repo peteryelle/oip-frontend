@@ -67,7 +67,7 @@ export default function PipelineRadar({ supabase, oipId }) {
       {/* Page header */}
       <div className="hero" style={{ marginBottom: 28 }}>
         <div className="hero-eyebrow">Federal Recompete Intelligence</div>
-        <h1 className="hero-title">Pipeline Radar</h1>
+        <h1 className="hero-title">Recompete Direct</h1>
         <p className="hero-sub">
           Federal contracts expiring within {config?.pop_horizon_months ?? 36} months — scored by incumbent health
         </p>

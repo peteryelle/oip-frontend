@@ -1,6 +1,6 @@
 // src/components/OipDescription.jsx
 // Customer-facing description of the selected OIP, shown in the blue hero
-// on the Market Review page. SAM, Derived Demand and Pipeline Radar copy
+// on the Market Review page. SAM, Derived Demand and Recompete Direct copy
 // approved 2026-10-31; SLED two-lane copy approved 2026-10-31.
 
 const DESCRIPTIONS = {
