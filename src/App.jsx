@@ -16,7 +16,7 @@ import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
 import { useKeywordTierMap } from './hooks/useKeywordTierMap'
 import { DemoGateProvider } from './hooks/useDemoGate'
 import DemoIndicator from './components/demo/DemoIndicator'
-import ModuleBanner from './components/ModuleBanner'
+import OipDescription from './components/OipDescription'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Link, useParams, Outlet } from 'react-router-dom'
 import PrimeAccountPage from './pages/PrimeAccountPage'
 import CoLandscapePage from './pages/CoLandscapePage'
@@ -223,8 +223,6 @@ function Layout() {
           </>
         )}
       </nav>
-
-      <ModuleBanner section={activeSection} selectedOip={selectedOip} />
 
       <Outlet />
 
@@ -1640,6 +1638,12 @@ function MarketReviewPage() {
             : isBidReview ? 'Bid Packages'
             : (entityFilter ? displaySource(entityFilter) : (sledOppsView ? 'Opportunities' : 'Entity Board'))}
         </h1>
+        {!entityFilter && (
+          <OipDescription
+            selectedOip={selectedOip}
+            isSled={sledTabsApply && !(signals.length > 0 && signals.every(x => x.signals?.source === 'puc'))}
+          />
+        )}
         {entityFilter && !isSam && !isBidReview && (
           <Link to="/market" style={{ fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
             ← Clear entity filter
