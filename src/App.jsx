@@ -204,8 +204,8 @@ function Layout() {
           <Link to="/demand" className={`sec-nav-btn ${activeSection === 'demand' ? 'active' : ''}`}>Derived Demand</Link>
         )}
         <Link to="/pursued"    className={`sec-nav-btn ${activeSection === 'pursued' ? 'active' : ''}`}>Pursued</Link>
-        {selectedOip?.verticals?.slug === 'sam' && (
-          <Link to="/radar" className={`sec-nav-btn ${activeSection === 'radar' ? 'active' : ''}`}>Pipeline Radar</Link>
+        {selectedOip?.slug?.endsWith('-recompete') && (
+          <Link to="/radar" className={`sec-nav-btn ${activeSection === 'radar' ? 'active' : ''}`}>Recompete Direct</Link>
         )}
         <Link to="/help"       className={`sec-nav-btn ${path.startsWith('/help') ? 'active' : ''}`}>User Guide</Link>
         <DemoIndicator />
@@ -390,7 +390,7 @@ function viewLabel(section) {
     sentinel: 'Sentinel',
     demand: 'Derived Demand',
     pursued: 'Pursued Pipeline',
-    radar: 'Pipeline Radar',
+    radar: 'Recompete Direct',
     settings: 'Settings',
     help: 'User Guide',
   }
@@ -411,7 +411,7 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
   // On OIP change, drop the user on that lane's results landing page.
   const landingFor = (oip) => {
     const slug = oip?.slug || ''
-    if (slug.endsWith('-recompete')) return '/radar'      // Recompete → Pipeline Radar
+    if (slug.endsWith('-recompete')) return '/radar'      // Recompete → Recompete Direct
     if (slug.endsWith('-derived'))   return '/demand'     // Derived  → Derived Demand
     if (oip?.verticals?.slug === 'sam') return '/market'  // Direct SAM → B2G Opportunities
     return '/'                                             // SLED / other → Dashboard
