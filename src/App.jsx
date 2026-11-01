@@ -180,6 +180,7 @@ function Layout() {
     path.startsWith('/pursued') ? 'pursued' :
     path.startsWith('/radar') ? 'radar' :
     path.startsWith('/settings') ? 'settings' : ''
+  const isSetupSection = ['profile', 'sentinel', 'demand'].includes(activeSection)
 
   return (
     <DemoGateProvider supabase={supabase} tenantId={selectedOip?.tenant_id}>
@@ -198,18 +199,23 @@ function Layout() {
         <Link to="/"           className={`sec-nav-btn ${activeSection === 'home' ? 'active' : ''}`}>Dashboard</Link>
         <Link to="/weekly"     className={`sec-nav-btn ${activeSection === 'weekly' ? 'active' : ''}`}>Weekly Update</Link>
         <Link to="/market"     className={`sec-nav-btn ${activeSection === 'market' ? 'active' : ''}`}>Market Review</Link>
-        <Link to="/profile"    className={`sec-nav-btn ${activeSection === 'profile' ? 'active' : ''}`}>Profile</Link>
-        <Link to="/sentinel"   className={`sec-nav-btn ${activeSection === 'sentinel' ? 'active' : ''}`}>Sentinel</Link>
-        {selectedOip?.verticals?.slug === 'sam' && (
-          <Link to="/demand" className={`sec-nav-btn ${activeSection === 'demand' ? 'active' : ''}`}>Derived Demand</Link>
-        )}
         <Link to="/pursued"    className={`sec-nav-btn ${activeSection === 'pursued' ? 'active' : ''}`}>Pursued</Link>
-        {selectedOip?.slug?.endsWith('-recompete') && (
+        {(selectedOip?.slug?.endsWith('-recompete') || activeSection === 'radar') && (
           <Link to="/radar" className={`sec-nav-btn ${activeSection === 'radar' ? 'active' : ''}`}>Recompete Direct</Link>
         )}
+        <Link to="/profile"    className={`sec-nav-btn ${isSetupSection ? 'active' : ''}`}>Setup</Link>
         <Link to="/help"       className={`sec-nav-btn ${path.startsWith('/help') ? 'active' : ''}`}>User Guide</Link>
         <DemoIndicator />
       </nav>
+
+      {/* Setup sub-nav: Profile, Sentinel, Derived Demand (always shown) */}
+      {isSetupSection && (
+        <nav className="sec-nav setup-subnav" style={{ marginTop: -8, borderTop: 'none', paddingTop: 0 }}>
+          <Link to="/profile"  className={`sec-nav-btn ${activeSection === 'profile' ? 'active' : ''}`}>Profile</Link>
+          <Link to="/sentinel" className={`sec-nav-btn ${activeSection === 'sentinel' ? 'active' : ''}`}>Sentinel</Link>
+          <Link to="/demand"   className={`sec-nav-btn ${activeSection === 'demand' ? 'active' : ''}`}>Derived Demand</Link>
+        </nav>
+      )}
 
       {/* Breadcrumb */}
       <nav className="breadcrumb">
@@ -219,6 +225,12 @@ function Layout() {
           <>
             <button onClick={() => navigate('/')}>OIP dashboard</button>
             <span className="sep">/</span>
+            {isSetupSection && (
+              <>
+                <button onClick={() => navigate('/profile')}>Setup</button>
+                <span className="sep">/</span>
+              </>
+            )}
             <span className="current">{viewLabel(activeSection)}</span>
           </>
         )}
@@ -237,14 +249,52 @@ function Layout() {
 }
 
 function PipelineRadarPage() {
-  const { selectedOipId } = useOip()
+  const { selectedOipId, selectedOip } = useOip()
+  if (selectedOip && !selectedOip.slug?.endsWith('-recompete')) {
+    // Placeholder: tenant has no Recompete Direct OIP yet.
+    return (
+      <div className="hero" style={{ marginBottom: 16 }}>
+        <h1 className="hero-title" style={{ fontSize: 26 }}>Recompete Direct</h1>
+        <p style={{ margin: '10px 0 0', maxWidth: 760, fontSize: 15, lineHeight: 1.55 }}>
+          Federal contracts in your space coming up for recompete, months before the RFP posts, with a read on how the incumbent is performing so you can position your own bid early.
+        </p>
+        <p style={{ margin: '14px 0 0', fontSize: 14, fontWeight: 600 }}>
+          Talk to your WinQuest contact to add Recompete Direct.
+        </p>
+      </div>
+    )
+  }
   return <PipelineRadar supabase={supabase} oipId={selectedOipId} />
 }
 
 function DerivedDemandPage() {
-  const { selectedOip } = useOip()
+  const { selectedOip, oips, selectOip } = useOip()
   if (!selectedOip) return null
-  return <DerivedDemandSetup oipId={selectedOip.id} verticalId={selectedOip.vertical_id} />
+  if (selectedOip?.verticals?.slug === 'sam' || selectedOip?.slug?.endsWith('-derived')) {
+    return <DerivedDemandSetup oipId={selectedOip.id} verticalId={selectedOip.vertical_id} />
+  }
+  // Non-SAM OIP selected: Derived Demand settings live on the tenant's SAM OIP.
+  const samOip = (oips || []).find(o => o.tenant_id === selectedOip.tenant_id && o.verticals?.slug === 'sam' && !o.slug?.endsWith('-derived') && !o.slug?.endsWith('-recompete'))
+  return (
+    <div className="hero" style={{ marginBottom: 16 }}>
+      <h1 className="hero-title" style={{ fontSize: 26 }}>Derived Demand</h1>
+      <p style={{ margin: '10px 0 0', maxWidth: 760, fontSize: 15, lineHeight: 1.55 }}>
+        Sell to the winner, not the government. Federal contracts recently awarded, and those heading toward recompete, where the prime will need help delivering or a partner to win again, each with a brief on how you fill the gap.
+      </p>
+      {samOip ? (
+        <button onClick={() => selectOip && selectOip(samOip.id)} style={{
+          marginTop: 14, background: 'var(--primary)', color: '#fff', border: 'none',
+          borderRadius: 4, padding: '9px 20px', fontWeight: 600, cursor: 'pointer', fontSize: 13,
+        }}>
+          Open Derived Demand settings
+        </button>
+      ) : (
+        <p style={{ margin: '14px 0 0', fontSize: 14, fontWeight: 600 }}>
+          Talk to your WinQuest contact to add Derived Demand.
+        </p>
+      )}
+    </div>
+  )
 }
 
 function FloatingHelpButton() {
@@ -416,7 +466,16 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
     if (oip?.verticals?.slug === 'sam') return '/market'  // Direct SAM → B2G Opportunities
     return '/'                                             // SLED / other → Dashboard
   }
+  // Recompete Direct placeholder: shown in the selector when the tenant has
+  // no -recompete OIP, so every customer sees the service.
+  const location = useLocation()
+  const RECOMPETE_PLACEHOLDER = '__recompete_direct__'
+  const hasRecompete = oips.some(o =>
+    o.slug?.endsWith('-recompete') && o.tenant_id === selectedOip?.tenant_id)
+  const showRecompetePlaceholder = !!selectedOip && !hasRecompete
+  const onRecompetePlaceholder = showRecompetePlaceholder && location.pathname.startsWith('/radar')
   const handleSelectOip = (id) => {
+    if (id === RECOMPETE_PLACEHOLDER) { navigate('/radar'); return }
     onSelectOip(id)
     navigate(landingFor(oips.find(o => o.id === id)))
   }
@@ -436,9 +495,9 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
           </Link>
           <div className="brand-customer">
             <span className="blurable">{tenantName}</span>
-            {oips.length > 1 ? (
+            {(oips.length > 1 || showRecompetePlaceholder) ? (
               <select
-                value={selectedOipId || ''}
+                value={onRecompetePlaceholder ? RECOMPETE_PLACEHOLDER : (selectedOipId || '')}
                 onChange={e => handleSelectOip(e.target.value)}
                 style={{
                   marginLeft: 12,
@@ -476,6 +535,9 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
                             <option key={o.id} value={o.id}>{o.name}</option>
                           ))}
                         </optgroup>
+                      )}
+                      {showRecompetePlaceholder && (
+                        <option value={RECOMPETE_PLACEHOLDER}>Recompete Direct</option>
                       )}
                     </>
                   )
