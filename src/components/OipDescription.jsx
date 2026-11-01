@@ -1,7 +1,8 @@
 // src/components/OipDescription.jsx
 // Customer-facing description of the selected OIP, shown in the blue hero
 // on the Market Review page. SAM, Derived Demand and Recompete Direct copy
-// approved 2026-10-31; SLED two-lane copy approved 2026-10-31.
+// approved 2026-10-31; SLED two-lane copy updated 2026-11-01
+// (Structured Procurement / Emerging Horizons).
 
 const DESCRIPTIONS = {
   sam:
@@ -11,7 +12,7 @@ const DESCRIPTIONS = {
   recompete:
     'Federal contracts in your space coming up for recompete, months before the RFP posts, with a read on how the incumbent is performing so you can position your own bid early.',
   sled:
-    'State and local opportunities matched to what you sell, in two lanes. Early emerging: projects still taking shape, before an RFP is written, so you can get in front of the buyer. Procurement: open bids you can pursue now. Each comes with a brief on why it fits.',
+    'State and local opportunities matched to what you sell, in two lanes. Structured Procurement: open solicitations you can bid now. Emerging Horizons: projects surfacing in board meeting notes, before an RFP is written, so you can get in front of the buyer. Each comes with a brief on why it fits.',
 }
 
 export function oipDescriptionKey(selectedOip, { isSled = false } = {}) {
