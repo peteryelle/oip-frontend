@@ -1,22 +1,21 @@
 // src/components/bidreview/BidPackageUploadForm.jsx
 //
-// Standalone Bid/No-Bid package submission: customer types a title + agency
-// (this is NOT a signal WinQuest already tracks — no linked-signal path yet,
-// see App.jsx MarketReviewPage for the isBidReview scope note) and uploads
-// the solicitation document set. On submit:
-//   1. Insert a `signals` row (metadata.signal_type='document_upload',
-//      standalone=true) under the given OIP's vertical.
-//   2. Upload each file directly to Storage bucket `bid-documents-raw` at
-//      {tenant_id}/{oip_id}/{signal_id}/{filename} — this is the exact path
-//      convention the RLS policy and the worker handler both expect.
-//   3. Write the real storage paths back into signals.metadata.uploaded_documents.
-//   4. Queue a `document_review` worker_jobs row.
+// "Upload opportunity": the customer adds a solicitation they received outside
+// WinQuest (title + agency + documents). Used on SAM and SLED Market Review
+// boards (and the legacy Bid/No-Bid board).
 //
-// The result itself is NOT rendered here — MarketReviewPage's Realtime
-// subscription picks up the oip_signals INSERT once the worker finishes
-// (~20-30s for a single-document package, longer for digest+synthesize on a
-// large set) and the card appears in the board automatically. This form's
-// job ends at "successfully queued."
+// The browser does NOT write to `signals` (shared pool; no browser insert
+// policy, by design). On submit:
+//   1. Pick a new signal id in the browser.
+//   2. Upload each file to Storage bucket `bid-documents-raw` at
+//      {tenant_id}/{oip_id}/{signal_id}/{filename} (the path the storage RLS
+//      policy and the worker both expect).
+//   3. Queue one `document_review` job, mode="new", with {signal_id, title,
+//      agency, documents}. max_attempts=1: it is a paid analysis, so a
+//      failure is never silently retried.
+// The worker creates the signal (tagged document_upload + owner_oip_id),
+// reads the package and writes the oip_signals row. MarketReviewPage's
+// Realtime subscription shows the card when it lands (~1-3 min).
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
@@ -28,7 +27,7 @@ function sanitizeFilename(name) {
   return (name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_')
 }
 
-export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, verticalId, onUploaded, onClose }) {
+export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, verticalId, family = 'federal', onUploaded, onClose }) {
   const [title, setTitle] = useState('')
   const [agency, setAgency] = useState('')
   const [files, setFiles] = useState([])
@@ -56,27 +55,8 @@ export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, vertica
     setError('')
 
     try {
-      // 1. Create the signal
-      setStatusMsg('Creating package…')
-      const { data: signal, error: sigErr } = await supabase
-        .from('signals')
-        .insert({
-          vertical_id: verticalId,
-          source_id: `upload-${crypto.randomUUID()}`,
-          source_name: 'Customer Upload',
-          state: null,
-          title: title.trim(),
-          metadata: {
-            signal_type: 'document_upload',
-            standalone: true,
-            agency: agency.trim(),
-            uploaded_documents: [],
-          },
-        })
-        .select('id')
-        .single()
-      if (sigErr) throw new Error(`Could not create package: ${sigErr.message}`)
-      const signalId = signal.id
+      // 1. New id, chosen here; the worker creates the signal with it.
+      const signalId = crypto.randomUUID()
 
       // 2. Upload each file to Storage
       const uploadedDocs = []
@@ -89,25 +69,11 @@ export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, vertica
           .from(BUCKET)
           .upload(path, file, { upsert: false })
         if (upErr) throw new Error(`Upload failed for ${file.name}: ${upErr.message}`)
-        uploadedDocs.push({ filename, storage_path: path })
+        uploadedDocs.push({ filename: file.name, storage_path: path })
       }
 
-      // 3. Write the real paths back into the signal's metadata
-      setStatusMsg('Finalizing…')
-      const { error: metaErr } = await supabase
-        .from('signals')
-        .update({
-          metadata: {
-            signal_type: 'document_upload',
-            standalone: true,
-            agency: agency.trim(),
-            uploaded_documents: uploadedDocs,
-          },
-        })
-        .eq('id', signalId)
-      if (metaErr) throw new Error(`Could not attach documents: ${metaErr.message}`)
-
-      // 4. Queue the review job
+      // 3. Queue the analysis (worker creates the signal, then reads it)
+      setStatusMsg('Starting the analysis…')
       const { error: jobErr } = await supabase
         .from('worker_jobs')
         .insert({
@@ -115,9 +81,18 @@ export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, vertica
           oip_id: oipId,
           vertical_id: verticalId,
           status: 'queued',
-          payload: { signal_id: signalId, oip_slug: oipSlug },
+          max_attempts: 1,
+          payload: {
+            mode: 'new',
+            signal_id: signalId,
+            title: title.trim(),
+            agency: agency.trim(),
+            documents: uploadedDocs,
+            oip_slug: oipSlug,
+            triggered_by: 'upload_form',
+          },
         })
-      if (jobErr) throw new Error(`Could not queue analysis: ${jobErr.message}`)
+      if (jobErr) throw new Error(`Could not start the analysis: ${jobErr.message}`)
 
       setStatusMsg('')
       onUploaded && onUploaded(signalId)
@@ -148,13 +123,17 @@ export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, vertica
           textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink-fade)',
           marginBottom: 4,
         }}>
-          New Bid Package
+          Upload opportunity
         </div>
         <div style={{
           fontFamily: "'Spectral', Georgia, serif", fontSize: 22, fontWeight: 600,
           color: 'var(--ink)', marginBottom: 20,
         }}>
-          Upload for Bid/No-Bid review
+          Add a solicitation to this board
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--ink-fade)', lineHeight: 1.5, margin: '-12px 0 18px' }}>
+          For bids you received outside WinQuest. We read the documents against your profile and add the
+          opportunity here with a Pursue / Consider / No Bid read, usually within three minutes.
         </div>
 
         <label style={{ display: 'block', fontSize: 12, fontFamily: "'IBM Plex Mono', monospace",
@@ -165,7 +144,7 @@ export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, vertica
           type="text"
           value={title}
           onChange={e => setTitle(e.target.value)}
-          placeholder="e.g. City of Austin — Fiber Backbone Expansion"
+          placeholder={family === 'sled' ? 'e.g. Lowell Public Schools — HVAC Replacement' : 'e.g. VA Boston — Fiber Backbone Expansion'}
           style={{ width: '100%', marginBottom: 16, boxSizing: 'border-box' }}
           required
         />
@@ -178,7 +157,7 @@ export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, vertica
           type="text"
           value={agency}
           onChange={e => setAgency(e.target.value)}
-          placeholder="e.g. Austin Energy"
+          placeholder={family === 'sled' ? 'e.g. City of Lowell' : 'e.g. Department of Veterans Affairs'}
           style={{ width: '100%', marginBottom: 16, boxSizing: 'border-box' }}
         />
 
@@ -226,7 +205,7 @@ export default function BidPackageUploadForm({ oipId, tenantId, oipSlug, vertica
               border: 'none', borderRadius: 4, padding: '8px 18px',
               cursor: canSubmit ? 'pointer' : 'default', fontWeight: 600,
             }}>
-            {submitting ? 'Uploading…' : 'Submit for Review'}
+            {submitting ? 'Uploading…' : 'Upload and analyze'}
           </button>
         </div>
       </form>

@@ -12,6 +12,7 @@ import DerivedDemandSetup from './components/demand/DerivedDemandSetup'
 import MultiVerticalSignalList from './components/signals/MultiVerticalSignalList'
 import ScoreExplainBadge from './components/signals/ScoreExplainBadge'
 import BidPackageUploadForm from './components/bidreview/BidPackageUploadForm'
+import YourDocumentsPanel, { uploadsChangedSinceRead } from './components/uploads/YourDocumentsPanel'
 import { useMultiVerticalSignals } from './hooks/useMultiVerticalSignals'
 import { useKeywordTierMap } from './hooks/useKeywordTierMap'
 import { DemoGateProvider } from './hooks/useDemoGate'
@@ -1460,7 +1461,10 @@ function MarketReviewPage() {
         .eq('oip_id', selectedOip.id)
       if (cancelled) return
       const map = {}
-      for (const r of intel || []) if (r.facts?.doc_review) map[r.signal_id] = r.facts.doc_review
+      for (const r of intel || []) {
+        const ups = r.facts?.uploaded_documents || []
+        if (r.facts?.doc_review || ups.length) map[r.signal_id] = { ...(r.facts?.doc_review || {}), _uploads: ups }
+      }
       setDocReviews(map)
     })()
     return () => { cancelled = true }
@@ -1573,7 +1577,7 @@ function MarketReviewPage() {
 
   // Split SAM signals into opportunities vs DIB prospects
   const samBusdev        = isSam ? signals.filter(s => s.signals?.signal_kind === 'award') : []
-  const samOpportunities = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && (s.signals?.metadata?.signal_type || 'opportunity') === 'opportunity') : signals
+  const samOpportunities = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && ['opportunity', 'document_upload'].includes(s.signals?.metadata?.signal_type || 'opportunity')) : signals
   const samDib           = isSam ? signals.filter(s => s.signals?.signal_kind !== 'award' && s.signals?.metadata?.signal_type === 'award') : []
   useEffect(() => { setSamTab(isDibOip ? 'dib' : isDerivedOip ? 'busdev' : 'opportunities') }, [selectedOip?.id])
   const [naicsFilter, setNaicsFilter] = useState('')
@@ -1627,12 +1631,15 @@ function MarketReviewPage() {
   const colFiltersActive = colFiltersApply && !isDefaultColFilters(colFilters)
 
   const filtered = activeSignals.filter(s => {
+    // Customer uploads are the tenant's own: no due-date / type / agency
+    // filtering (they rarely carry those fields).
+    const isUpload = s.signals?.metadata?.signal_type === 'document_upload'
     if (statusFilter && s.status !== statusFilter) return false
-    if (colFiltersApply && !(isSam ? passesB2gColFilters(s, colFilters) : passesSledColFilters(s, colFilters))) return false
+    if (colFiltersApply && !isUpload && !(isSam ? passesB2gColFilters(s, colFilters) : passesSledColFilters(s, colFilters))) return false
     if (tierFilter && s.signal_tier !== tierFilter) return false
     // Agency allowlist — Direct SAM opportunities only. Hide signals whose awarding
     // department isn't in the profile's target_agencies. Empty allowlist => show all.
-    if (isSam && samTab === 'opportunities' && agencyAllowlist.length) {
+    if (isSam && samTab === 'opportunities' && agencyAllowlist.length && !isUpload) {
       const m = s.signals?.metadata || {}
       const dept = `${m.department_full || ''} ${m.department_name || ''}`.toUpperCase()
       const ok = agencyAllowlist.some(a => (a.match || []).some(tok => dept.includes(String(tok).toUpperCase())))
@@ -1711,13 +1718,13 @@ function MarketReviewPage() {
             ← Clear entity filter
           </Link>
         )}
-        {isBidReview && (
+        {(isBidReview || (isSam && !isDerivedOip && samTab === 'opportunities') || (sledTabsApply && !entityFilter)) && (
           <button onClick={() => setShowUploadForm(true)} style={{
             marginTop: 10, background: 'var(--primary)', color: '#fff', border: 'none',
             borderRadius: 4, padding: '9px 20px', fontWeight: 600, cursor: 'pointer',
             fontFamily: "'IBM Plex Mono', monospace", fontSize: 13,
           }}>
-            + New Bid Package
+            {isBidReview ? '+ New Bid Package' : '+ Upload opportunity'}
           </button>
         )}
       </div>
@@ -1728,6 +1735,7 @@ function MarketReviewPage() {
           tenantId={selectedOip.tenant_id}
           oipSlug={selectedOip.slug}
           verticalId={selectedOip.vertical_id}
+          family={sledTabsApply ? 'sled' : 'federal'}
           onUploaded={() => {}}
           onClose={() => setShowUploadForm(false)}
         />
@@ -2364,6 +2372,13 @@ function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_
                         UPDATED
                       </span>
                     )}
+                    {meta.signal_type === 'document_upload' && (
+                      <span style={{ fontSize: 10, fontWeight: 700, background: '#e8f0fb',
+                        color: '#174a7c', border: '1px solid #b3cdee', padding: '2px 5px',
+                        borderRadius: 3, flexShrink: 0, marginTop: 2 }}>
+                        UPLOADED
+                      </span>
+                    )}
                     <div>
                       <div className="blurable" style={{ fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3, marginBottom: 3 }}>
                         {(sig.title || '').length > 60 ? sig.title.slice(0, 60) + '…' : sig.title}
@@ -2372,12 +2387,13 @@ function SamOpportunityTable({ signals, onRowClick, colFilters = B2G_COL_FILTER_
                         color: 'var(--ink-fade)', display: 'flex', gap: 8 }}>
                         {meta.solicitation_number && <span>{meta.solicitation_number.slice(0, 20)}</span>}
                         {dept && <span>{dept.slice(0, 35)}</span>}
+                        {!dept && meta.agency && <span>{String(meta.agency).slice(0, 35)}</span>}
                       </div>
                       {(() => {
                         const dr = docReviews[s.signal_id]
                         const top = samTopDocFlag(dr)
                         const files = sig.vertical_data?.sam_documents?.files?.length || 0
-                        const newDocs = samNewDocsSinceRead(dr, meta)
+                        const newDocs = samNewDocsSinceRead(dr, meta) || (!!dr?._uploads && uploadsChangedSinceRead(dr._uploads, dr))
                         if (!top && !files && !newDocs) return null
                         return (
                           <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
@@ -3041,6 +3057,18 @@ function sledRow(s) {
   const sig  = s.signals || {}
   const meta = sig.metadata || {}
   const vd   = sig.vertical_data || {}
+  if (meta.signal_type === 'document_upload') {
+    const sv = s.signal_value
+    return {
+      title: sig.title || 'Uploaded opportunity',
+      agency: meta.agency || 'Customer upload', agencyLabel: meta.agency || 'Customer upload',
+      noticeId: '', feed: 'Uploaded', type: 'Uploaded',
+      deadline: _validDate(meta.response_deadline) || null, deadlineLabel: null,
+      fit: s.signal_score ?? s.scores?.llm_relevance ?? (/^\d+(\.\d+)?$/.test(String(sv ?? '')) ? Number(sv) : null),
+      posted: null,
+      key: `upload|${s.signal_id || sig.id}`,
+    }
+  }
   const raw    = sig.title || ''
   const agency = sig.source_name || ''
   // Titles are stored as "<Agency> — <title>"; drop the agency prefix since it
@@ -4714,11 +4742,10 @@ ${projectsHtml}
 // sam_doc_analyze_handler.py, sam_notice_status.py.
 //   signals.vertical_data.sam_documents  -> attachment list (filenames resolved, free)
 //   signals.vertical_data.sam_status     -> live open/closed check via GovCon (free)
-//   opportunity_intel.facts.doc_review   -> on-demand document read (metered),
-//                                           read here through enrich-opportunity
-//                                           cache_only (never spends)
-// The document read sits BESIDE the notice score. "Use document score" is the
-// only path that copies it into the ranking, and it keeps the original.
+// The document read and Rescore moved to YourDocumentsPanel (2026-11-01):
+// "Analyze documents" / "Read again" / "Use document score" are retired so the
+// same files are never paid for twice. Rescore reads the notice, the SAM.gov
+// attachments and the customer's uploads together and replaces the score.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SAM_CLOSED = ['closed_pending_award', 'awarded', 'cancelled', 'archived', 'not_found']
@@ -4782,28 +4809,10 @@ function SamDocumentsPanel({ os, sig, meta, onPatch }) {
   const attachmentCount = (meta.attachment_urls || []).length
   const samUrl = meta.ui_link || sig.doc_url
 
-  const [review, setReview] = useState({ loading: true, data: null })
-  const [busy, setBusy] = useState(null)        // 'analyze' | 'resolve' | 'promote'
+  const [busy, setBusy] = useState(null)        // 'resolve' | 'handoff'
   const [note, setNote] = useState('')
-  const pollRef = useRef(null)
 
-  const loadReview = async () => {
-    try {
-      const d = await callEnrich({ signal_id: os.signal_id, oip_id: os.oip_id, cache_only: true })
-      const dr = d?.status === 'none' ? null : (d?.facts?.doc_review || null)
-      setReview({ loading: false, data: dr })
-      return dr
-    } catch {
-      setReview({ loading: false, data: null })
-      return null
-    }
-  }
-
-  useEffect(() => {
-    setReview({ loading: true, data: null }); setNote(''); setBusy(null)
-    loadReview()
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [os.signal_id, os.oip_id])
+  useEffect(() => { setNote(''); setBusy(null) }, [os.signal_id, os.oip_id])
 
   const queueJob = async (jobType, payload, maxAttempts) => {
     const { data: oip, error: oipErr } = await supabase.from('oips').select('vertical_id, slug').eq('id', os.oip_id).single()
@@ -4813,32 +4822,6 @@ function SamDocumentsPanel({ os, sig, meta, onPatch }) {
     if (maxAttempts) row.max_attempts = maxAttempts
     const { error } = await supabase.from('worker_jobs').insert(row)
     if (error) throw new Error(error.message)
-  }
-
-  const analyze = async ({ allowClosed = false } = {}) => {
-    if (allowClosed && !confirm('This notice is no longer open for bids. Read its documents anyway? Useful before pitching the awardee as a subcontractor.')) return
-    setBusy('analyze'); setNote('Reading the documents. This usually takes one to three minutes.')
-    const stampOf = (d) => `${d?.analyzed_at || ''}|${d?.status_rechecked_at || ''}`
-    const before = stampOf(review.data)
-    const beforeAnalyzed = review.data?.analyzed_at || ''
-    try {
-      await queueJob('sam_doc_analyze', allowClosed ? { allow_closed: true } : {}, 1)
-    } catch (e) {
-      setBusy(null); setNote(`Could not start the read: ${e.message}`); return
-    }
-    const started = Date.now()
-    if (pollRef.current) clearInterval(pollRef.current)
-    pollRef.current = setInterval(async () => {
-      const dr = await loadReview()
-      if (dr && stampOf(dr) !== before) {
-        clearInterval(pollRef.current); setBusy(null)
-        const skipped = dr.skipped === 'closed' || (dr.analyzed_at || '') === beforeAnalyzed
-        setNote(skipped ? 'Not read: the notice is closed. Use "Read anyway" if you still need the documents.' : '')
-      } else if (Date.now() - started > 6 * 60 * 1000) {
-        clearInterval(pollRef.current); setBusy(null)
-        setNote('Still working. Reopen this opportunity in a few minutes to see the result.')
-      }
-    }, 8000)
   }
 
   const sendToDerivedDemand = async () => {
@@ -4864,38 +4847,6 @@ function SamDocumentsPanel({ os, sig, meta, onPatch }) {
     setBusy(null)
   }
 
-  const scores = os.scores || {}
-  const usingDocScore = scores.score_source === 'documents'
-  const docScore = review.data?.relevance_score
-
-  const promote = async (revert = false) => {
-    setBusy('promote')
-    const nextScores = { ...scores }
-    let nextValue
-    if (revert) {
-      nextValue = scores.notice_score_original ?? scores.llm_relevance
-      nextScores.llm_relevance = nextValue
-      delete nextScores.score_source; delete nextScores.notice_score_original
-    } else {
-      nextScores.notice_score_original = scores.llm_relevance ?? (Number(os.signal_value) || null)
-      nextScores.llm_relevance = docScore
-      nextScores.score_source = 'documents'
-      nextValue = docScore
-    }
-    const { error } = await supabase.from('oip_signals')
-      .update({ scores: nextScores, signal_value: nextValue })
-      .eq('oip_id', os.oip_id).eq('signal_id', os.signal_id)
-    setBusy(null)
-    if (error) { setNote(`Could not update the score: ${error.message}`); return }
-    onPatch && onPatch({ scores: nextScores, signal_value: nextValue })
-    setNote(revert ? 'Back to the notice score.' : 'The document score is now this opportunity\'s fit score.')
-  }
-
-  const closed = SAM_CLOSED.includes(status?.status)
-  const dr = review.data
-  const hasRead = dr && dr.relevance_score != null
-  const newDocs = samNewDocsSinceRead(dr, meta)
-  const flags = dr?.flags || []
   const h = { fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: '0 0 8px' }
   const muted = { fontSize: 13, color: 'var(--ink-fade)' }
   const btn = (primary) => ({
@@ -4974,84 +4925,7 @@ function SamDocumentsPanel({ os, sig, meta, onPatch }) {
           style={{ fontSize: 13, color: 'var(--ink-fade)', textDecoration: 'underline' }}>Open on SAM.gov</a>
       )}
 
-      {/* Document read */}
-      {(files.length > 0 || attachmentCount > 0) && (
-        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--rule)' }}>
-          <div style={h}>Document read</div>
-          {review.loading ? (
-            <div style={muted}>Loading…</div>
-          ) : hasRead ? (
-            <>
-              <div style={{ display: 'flex', gap: 18, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 10 }}>
-                <span style={{ fontSize: 13 }}>Notice score <strong>{usingDocScore ? (scores.notice_score_original ?? '—') : (scores.llm_relevance ?? os.signal_value ?? '—')}</strong></span>
-                <span style={{ fontSize: 13 }}>Document score <strong>{dr.relevance_score}</strong></span>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{dr.recommendation}</span>
-              </div>
-              {dr.reason && <p style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--ink)', margin: '0 0 10px' }}>{dr.reason}</p>}
-              {flags.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-                  {flags.map((f, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                      <SamPill text={f.label} tone={f.severity === 'block' ? 'block' : f.severity === 'warn' ? 'warn' : 'info'} />
-                      <span style={{ fontSize: 12, color: 'var(--ink-fade)', lineHeight: 1.45 }}>{f.detail}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {['opportunity', 'concerns', 'gaps'].map(k => {
-                const sec = dr.analysis?.[k]
-                if (!sec?.summary) return null
-                const title = { opportunity: 'Why it fits', concerns: 'Concerns', gaps: 'Verify before bidding' }[k]
-                return (
-                  <div key={k} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
-                    <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--ink-light)' }}>{sec.summary}</div>
-                  </div>
-                )
-              })}
-              <details style={{ fontSize: 12, color: 'var(--ink-fade)', margin: '6px 0 12px' }}>
-                <summary style={{ cursor: 'pointer' }}>
-                  Read {dr.files_analyzed?.length || 0} file{(dr.files_analyzed?.length || 0) === 1 ? '' : 's'}, skipped {dr.files_skipped?.length || 0}
-                  {dr.analyzed_at ? `, ${new Date(dr.analyzed_at).toLocaleDateString()}` : ''}
-                </summary>
-                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-                  {(dr.files_analyzed || []).map(f => <li key={f.filename}>{f.filename}</li>)}
-                  {(dr.files_skipped || []).map(f => <li key={f.filename} style={{ opacity: 0.7 }}>{f.filename}: skipped, {f.why}</li>)}
-                </ul>
-              </details>
-              {newDocs && (
-                <div style={{ marginBottom: 10 }}>
-                  <SamPill text="New documents since this read" tone="warn" />
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {usingDocScore ? (
-                  <button style={btn(false)} disabled={!!busy} onClick={() => promote(true)}>Use notice score</button>
-                ) : (
-                  <button style={btn(false)} disabled={!!busy} onClick={() => promote(false)}>Use document score</button>
-                )}
-                {closed ? (
-                  <button style={btn(false)} disabled={!!busy} onClick={() => analyze({ allowClosed: true })}>Read again anyway</button>
-                ) : (
-                  <button style={btn(newDocs)} disabled={!!busy} onClick={() => analyze()}>{newDocs ? 'Read new documents' : 'Read again'}</button>
-                )}
-              </div>
-            </>
-          ) : closed ? (
-            <div>
-              <div style={{ ...muted, marginBottom: 8 }}>This notice is closed, so the documents haven't been read.</div>
-              <button style={btn(false)} disabled={!!busy} onClick={() => analyze({ allowClosed: true })}>Read anyway</button>
-            </div>
-          ) : (
-            <div>
-              <div style={{ ...muted, marginBottom: 8 }}>Read the full package against your profile: scope fit, eligibility, teaming path, certifications and deadlines.</div>
-              <button style={btn(true)} disabled={!!busy || files.length === 0} onClick={() => analyze()}>Analyze documents</button>
-              {files.length === 0 && <div style={{ ...muted, fontSize: 12, marginTop: 6 }}>Get the documents first.</div>}
-            </div>
-          )}
-          {note && <div style={{ fontSize: 12, color: 'var(--ink-fade)', marginTop: 8 }}>{note}</div>}
-        </div>
-      )}
+      {note && <div style={{ fontSize: 12, color: 'var(--ink-fade)', marginTop: 8 }}>{note}</div>}
     </div>
   )
 }
@@ -6141,6 +6015,30 @@ ${analysisHtml}
             )
           }
           return null
+        })()}
+
+        {/* Your documents: add / remove files, Rescore on the full set, What
+            changed. SAM and SLED opportunity boards only (not Derived Demand,
+            recompete, DIB/award rows or regulatory proceedings). */}
+        {(() => {
+          const vslug = selectedOip?.verticals?.slug
+          const oslug = selectedOip?.slug || ''
+          const derived = oslug.endsWith('-derived') || oslug.endsWith('-recompete')
+          const eligible = (vslug === 'sam' || vslug === 'sled') && !derived && !isDib && !isPuc
+            && sig.signal_kind !== 'award' && selectedOip?.id === os.oip_id
+          if (!eligible) return null
+          return (
+            <YourDocumentsPanel
+              os={os} sig={sig} meta={meta} selectedOip={selectedOip}
+              closed={isSam && SAM_CLOSED.includes(sig.vertical_data?.sam_status?.status)}
+              samNewDocsFn={isSam ? (d) => samNewDocsSinceRead(d, meta) : null}
+              loadFacts={async () => {
+                const d = await callEnrich({ signal_id: os.signal_id, oip_id: os.oip_id, cache_only: true })
+                return d?.status === 'none' ? {} : (d?.facts || {})
+              }}
+              onPatch={onPatchSignal}
+            />
+          )
         })()}
 
         {/* Bid/No-Bid: links to the customer's originally uploaded documents.
