@@ -2550,3 +2550,48 @@ footer {
     background: var(--primary);
   }
 }
+
+
+/* === DASHBOARD TOP OPPORTUNITIES (2026-11) ============================== */
+.top-opps-table .opp-agency {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink-faint);
+  line-height: 1.35;
+}
+.top-opps-table .td-entity { min-width: 260px; }
+.top-opps-table .td-due {
+  white-space: nowrap;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 14px;
+  vertical-align: middle;
+}
+.top-opps-table .td-due.is-soon { color: #b45309; font-weight: 600; }
+.top-opps-table .td-due.is-closed { color: #c62828; font-weight: 600; }
+.top-opps-table .opp-days { font-size: 12px; font-weight: 500; }
+.top-opps-table .td-quality { vertical-align: middle; }
+.top-opps-table tr:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+@media (max-width: 768px) {
+  .top-opps-table tr {
+    display: grid !important;
+    grid-template-columns: 28px 1fr auto;
+    grid-template-areas:
+      "rank title title"
+      ". meta badge";
+    column-gap: 10px;
+    row-gap: 6px;
+    padding: 14px 4px !important;
+  }
+  .top-opps-table td.td-rank {
+    grid-area: rank;
+    font-size: 17px !important;
+    text-align: left;
+  }
+  .top-opps-table td.td-entity { grid-area: title; min-width: 0; }
+  .top-opps-table .entity-name { font-size: 17px; }
+  .top-opps-table td.td-rationale { display: none !important; }
+  .top-opps-table td.td-due { grid-area: meta; font-size: 13.5px; }
+  .top-opps-table td.td-quality { grid-area: badge; justify-self: end; }
+  .top-opps-table .opp-days { display: inline; margin-left: 6px; }
+}

@@ -1071,7 +1071,7 @@ function PasswordRequirements({ value }) {
 function HomePage() {
   const { selectedOip } = useOip()
   const [stats, setStats] = useState(null)
-  const [top10, setTop10] = useState([])
+  const [topOpps, setTopOpps] = useState([])
   const [loading, setLoading] = useState(true)
   const [stateFilter, setStateFilter] = useState('')
   const [tierFilter, setTierFilter] = useState('')
@@ -1093,14 +1093,22 @@ function HomePage() {
         .eq('oip_id', selectedOip.id)
         .eq('is_active', true)
 
-      // Aggregate top-10 entities (entity_key, falling back to source_name) by tier1_strong then tier1
-      const { data: scoredSignals } = await supabase
+      // Top opportunities — the same rows Market Review lists (one per notice,
+      // real titles), instead of grouping by entity. 2026-11: the entity
+      // grouping fell back to the feed name ("COMMBUYS Open Bids") for most
+      // SLED notices, so every row looked the same.
+      const { data: scored } = await supabase
         .from('oip_signals')
         .select(`
-          signal_id, signal_tier, matched_keywords, matched_groups,
-          signals:signal_id (id, source, source_name, entity_key, state, portal_id, scraped_at, metadata)
+          oip_id, signal_id, signal_tier, signal_value, signal_score, scores,
+          status, relevance_status, deadline_recency_note, match_reason, matched_groups,
+          signals:signal_id (id, title, source_name, source, state, meeting_date, scraped_at,
+                              metadata, signal_kind, entity_key, signal_id_external, vertical_data)
         `)
         .eq('oip_id', selectedOip.id)
+        .eq('relevance_status', 'active')
+        .order('scored_at', { ascending: false })
+        .limit(2500)
 
       if (cancelled) return
 
@@ -1108,64 +1116,41 @@ function HomePage() {
       const strongHits = (tierCounts || []).filter(r => r.signal_tier === 'tier1_strong').length
       const states = subs?.length || 0
 
-      // Build entity ranking
-      const entityMap = new Map()
-      ;(scoredSignals || []).forEach(os => {
-        const sig = os.signals
-        if (!sig) return
-        const eKey  = entityKey(sig)
-        const eName = entityName(sig)
-        if (!entityMap.has(eKey)) {
-          entityMap.set(eKey, {
-            name: eName,
-            state: sig.state,
-            signals: 0,
-            strongHits: 0,
-            allKws: new Set(),
-            allGroups: new Set(),
-            latestAt: sig.scraped_at,
-          })
-        }
-        const e = entityMap.get(eKey)
-        e.signals++
-        if (os.signal_tier === 'tier1_strong') e.strongHits++
-        ;(os.matched_keywords || []).forEach(k => e.allKws.add(k))
-        ;(os.matched_groups || []).forEach(g => e.allGroups.add(g))
-        if (sig.scraped_at > e.latestAt) e.latestAt = sig.scraped_at
-      })
-      const allEntities = Array.from(entityMap.values()).filter(e => e.signals > 0)
-      allEntities.forEach(e => {
-        const tier1 = e.signals - e.strongHits
-        const strongPts = Math.min(e.strongHits, 5) * 12
-        const tier1Pts  = Math.min(tier1, 3) * 8
-        const groupPts  = Math.min(e.allGroups.size, 5) * 3
-        e.score = Math.min(strongPts + tier1Pts + groupPts, 100)
-      })
-      const ranked = allEntities.sort((a, b) => b.score - a.score)
-        .slice(0, 20)
-        .map((e, i) => {
-          const allKws = Array.from(e.allKws)
-          const allGroups = Array.from(e.allGroups)
+      const working = (scored || []).filter(os =>
+        os.signals
+        && os.status !== 'dismissed'
+        && os.signals.signal_kind !== 'award'
+        && !isBeyondClosedWindow(os))
+      const today = new Date(); today.setHours(0, 0, 0, 0)
+      const ranked = dedupeSledSignals(working)
+        .map(({ s, row }) => {
+          const meta = s.signals?.metadata || {}
+          const due = row.deadline ? parseLocalDate(row.deadline) : null
+          const closed = !!due && !isNaN(due) && due < today
+          const daysLeft = due && !closed ? Math.round((due - today) / 86400000) : null
           return {
-            ...e,
-            rank: i + 1,
-            allKws,
-            allGroups,
-            quality: e.strongHits >= 3 ? 'strong' : e.signals >= 4 ? 'active' : 'emerging',
-            timeline: e.strongHits >= 2 ? 'immediate' : e.signals >= 3 ? 'soon' : 'plan',
-            rationale: makeRationale({ ...e, allGroups }),
+            s, row,
+            id: s.signal_id,
+            state: s.signals?.state || '',
+            agency: meta.department_name || row.agencyLabel || '',
+            due, closed, daysLeft,
+            quality: s.signal_tier === 'tier1_strong' ? 'strong' : s.signal_tier === 'tier1' ? 'active' : 'emerging',
           }
         })
+        // Open notices first, then highest fit, then soonest due date.
+        .sort((a, b) =>
+          (a.closed - b.closed)
+          || ((b.row.fit ?? -1) - (a.row.fit ?? -1))
+          || ((a.due ? a.due.getTime() : Infinity) - (b.due ? b.due.getTime() : Infinity)))
 
-      const distinctEntities = ranked.length
-      setStats({ totalActive, strongHits, states, distinctEntities })
-      setTop10(ranked)
+      setStats({ totalActive, strongHits, states })
+      setTopOpps(ranked)
       setLoading(false)
     })()
     return () => { cancelled = true }
   }, [selectedOip])
 
-  // Realtime: subscribe to changes on oip_signals so the dashboard updates live
+  // Realtime: subscribe to changes on oip_signals so the dashboard counts update live
   useEffect(() => {
     if (!selectedOip) return
     const channel = supabase
@@ -1176,8 +1161,6 @@ function HomePage() {
         table: 'oip_signals',
         filter: `oip_id=eq.${selectedOip.id}`,
       }, () => {
-        // Bump a refetch by toggling a key — simplest is to re-run the effect above
-        // by forcing a state set; cheap approach: refetch counts
         ;(async () => {
           const { data: tierCounts } = await supabase
             .from('oip_signals')
@@ -1197,12 +1180,13 @@ function HomePage() {
   if (loading) return <SectionLoader />
   if (!stats) return null
 
-  const allStates = [...new Set(top10.map(r => r.state))].sort()
-  const filtered = top10.filter(r => {
+  const allStates = [...new Set(topOpps.map(r => r.state).filter(Boolean))].sort()
+  const filtered = topOpps.filter(r => {
     if (stateFilter && r.state !== stateFilter) return false
     if (tierFilter && r.quality !== tierFilter) return false
     return true
   })
+  const shown = filtered.slice(0, 10)
 
   return (
     <>
@@ -1213,7 +1197,7 @@ function HomePage() {
         <h1 className="hero-title" style={{ fontSize: 34 }}>Where to act this week.<HelpIcon topic="home" /></h1>
       </div>
 
-      <div className="status-strip">
+      <div className="status-strip" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
         <div className="ss-item">
           <div className="ss-num">{stats.totalActive}</div>
           <div className="ss-label">Active signals · {stats.states} states</div>
@@ -1222,115 +1206,87 @@ function HomePage() {
           <div className="ss-num">{stats.strongHits}</div>
           <div className="ss-label">Strong-tier hits</div>
         </div>
-        <div className="ss-item">
-          <div className="ss-num">{stats.distinctEntities}</div>
-          <div className="ss-label">Entities tracked</div>
-        </div>
-        <div className="ss-item">
-          <div className="ss-num">1× / wk</div>
-          <div className="ss-label">Run cadence · Sat</div>
-        </div>
-        <div className="ss-item">
-          <div className="ss-num">Sat 2am</div>
-          <div className="ss-label">Next scheduled run</div>
-        </div>
       </div>
 
       <div className="top10-header">
-        <div className="top10-title">Top {filtered.length < top10.length ? `${filtered.length} of ` : ''}{Math.min(top10.length, 10)} Pursuit Targets</div>
+        <div className="top10-title">Top {shown.length} opportunities</div>
         <div className="top10-controls">
-          <select value={stateFilter} onChange={e => setStateFilter(e.target.value)}>
-            <option value="">All states</option>
-            {allStates.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
+          {allStates.length > 1 && (
+            <select value={stateFilter} onChange={e => setStateFilter(e.target.value)}>
+              <option value="">All states</option>
+              {allStates.map(st => <option key={st} value={st}>{st}</option>)}
+            </select>
+          )}
           <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
-            <option value="">All signal quality</option>
+            <option value="">All matches</option>
             <option value="strong">Strong</option>
-            <option value="active">Active</option>
-            <option value="emerging">Emerging</option>
+            <option value="active">Good</option>
+            <option value="emerging">Possible</option>
           </select>
         </div>
       </div>
 
-      <table className="top10-table">
+      <table className="top10-table top-opps-table">
         <thead>
           <tr>
             <th>#</th>
-            <th>Entity</th>
+            <th>Opportunity</th>
             <th>Why it fits</th>
-            <th>Signal</th>
-            <th>Timeline</th>
-            <th></th>
+            <th>Due</th>
+            <th>Match</th>
           </tr>
         </thead>
         <tbody>
-          {filtered.slice(0, 10).map(r => <Top10Row key={r.rank} r={r} onView={() => navigate(`/market?entity=${encodeURIComponent(r.name)}`)} />)}
-          {filtered.length === 0 && (
-            <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center', color: 'var(--ink-faint)' }}>No matches yet — wait for the next scrape cycle.</td></tr>
+          {shown.map((r, i) => (
+            <TopOppRow key={r.id} r={r} rank={i + 1}
+              onOpen={() => navigate(`/market?signal=${encodeURIComponent(r.id)}`)} />
+          ))}
+          {shown.length === 0 && (
+            <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: 'var(--ink-faint)' }}>No matches yet — wait for the next scrape cycle.</td></tr>
           )}
         </tbody>
       </table>
+      {topOpps.length > 10 && (
+        <div style={{ marginTop: -16, marginBottom: 24 }}>
+          <Link to="/market">See all {topOpps.length} in Market Review</Link>
+        </div>
+      )}
     </>
   )
 }
 
-// Display-only label for dashboard entities; underlying source_name is unchanged
-// (still used as the View-signals filter key).
-function entityLabel(name) {
-  if (name === 'SAM.gov') return 'B2G'
-  if (name === 'USASpending') return 'B2B'
-  return displaySource(name)
-}
-
-function Top10Row({ r, onView }) {
+function TopOppRow({ r, rank, onOpen }) {
   const qualityClass = { strong: 'sq-strong', active: 'sq-active', emerging: 'sq-emerging' }[r.quality]
-  const qualityLabel = { strong: 'Strong', active: 'Active', emerging: 'Emerging' }[r.quality]
-  const timelineClass = { immediate: 'tl-immediate', soon: 'tl-soon', plan: 'tl-plan' }[r.timeline]
-  const timelineLabel = { immediate: 'Immediate', soon: 'Soon', plan: 'Put plan in place' }[r.timeline]
-
+  const qualityLabel = { strong: 'Strong', active: 'Good', emerging: 'Possible' }[r.quality]
+  const title = r.row.title || '(untitled)'
+  const dueLabel = r.closed
+    ? 'Closed'
+    : r.due
+      ? r.due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : '—'
+  const soon = r.daysLeft != null && r.daysLeft <= 14
   return (
-    <tr>
-      <td className={`td-rank ${r.rank <= 3 ? 'top3' : ''}`}>{r.rank}</td>
+    <tr onClick={onOpen} style={{ cursor: 'pointer' }}
+      onKeyDown={e => { if (e.key === 'Enter') onOpen() }} tabIndex={0}>
+      <td className={`td-rank ${rank <= 3 ? 'top3' : ''}`}>{rank}</td>
       <td className="td-entity">
-        <div className="entity-name">{entityLabel(r.name)}</div>
-        <div className="entity-state">{r.state}</div>
+        <div className="entity-name blurable">{title.length > 110 ? title.slice(0, 110) + '…' : title}</div>
+        <div className="opp-agency blurable">
+          {[r.agency, r.state].filter(Boolean).join(', ')}
+        </div>
       </td>
-      <td className="td-rationale">{r.rationale}</td>
+      <td className="td-rationale">{r.s.match_reason || ''}</td>
+      <td className={`td-due${r.closed ? ' is-closed' : soon ? ' is-soon' : ''}`}>
+        {dueLabel}
+        {soon && <div className="opp-days">{r.daysLeft === 0 ? 'today' : `${r.daysLeft} day${r.daysLeft === 1 ? '' : 's'} left`}</div>}
+      </td>
       <td className="td-quality">
         <span className={`sq-badge ${qualityClass}`}>
           <span className="sq-dot"></span>{qualityLabel}
         </span>
       </td>
-      <td className="td-timeline">
-        <span className={`tl-badge ${timelineClass}`}>{timelineLabel}</span>
-      </td>
-      <td className="td-action">
-        <button className="view-link" onClick={onView}
-          style={{ border: 'none', background: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', padding: 0 }}>
-          View signals →
-        </button>
-      </td>
     </tr>
   )
-}
-
-function makeRationale(e) {
-  const groups = e.allGroups
-  const groupLabels = {
-    civil_infrastructure: 'civil infrastructure',
-    broadband_infra: 'broadband',
-    broadband_programs: 'broadband programs',
-    delivery_methods: 'procurement',
-    facilities: 'facilities',
-    planning_funding: 'capital planning',
-    federal_compliance: 'federal compliance',
-    hyperscale_dc: 'hyperscale',
-    smart_infra: 'smart infrastructure',
-  }
-  const labeled = groups.map(g => groupLabels[g] || g).slice(0, 3)
-  if (labeled.length === 0) return `${e.signals} active signals`
-  if (labeled.length === 1) return `${e.signals} signals across ${labeled[0]}`
-  return `${e.signals} signals (${e.strongHits} strong) cross-cutting ${labeled.join(', ')}.`
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1533,6 +1489,13 @@ function MarketReviewPage() {
   // Read entity filter from URL
   const params = new URLSearchParams(useLocation().search)
   const entityFilter = params.get('entity')
+  const signalParam = params.get('signal')
+  const openedSignalParam = useRef(null)
+  useEffect(() => {
+    if (!signalParam || openedSignalParam.current === signalParam || signals.length === 0) return
+    const hit = signals.find(x => x.signal_id === signalParam)
+    if (hit) { openedSignalParam.current = signalParam; setOpenSignal(hit) }
+  }, [signalParam, signals])
 
   // Multi-vertical auto-merge — REMOVED 2026-08-09. This used to decide
   // whether to render the flat MultiVerticalSignalList (combining signals
