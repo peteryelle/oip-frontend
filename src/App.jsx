@@ -159,6 +159,7 @@ function Layout() {
     return (
       <div className="app">
         <Topbar onSignOut={signOut} userEmail={user.email} />
+        <MobileTopbar onSignOut={signOut} userEmail={user.email} />
         <div className="empty-state">
           <h2>No OIP available</h2>
           <p style={{ marginTop: 12 }}>
@@ -194,8 +195,17 @@ function Layout() {
         onSelectOip={selectOip}
         latestRun={latestRun}
       />
+      {/* Phone header (<=768px). Desktop Topbar above is hidden by CSS there. */}
+      <MobileTopbar
+        onSignOut={signOut}
+        userEmail={user.email}
+        oips={oips}
+        selectedOipId={selectedOipId}
+        onSelectOip={selectOip}
+        latestRun={latestRun}
+      />
 
-      {/* Persistent section nav — visible on every page */}
+      {/* Persistent section nav — visible on every page (hidden on phones; MobileTabBar replaces it) */}
       <nav className="sec-nav persistent-nav">
         <Link to="/"           className={`sec-nav-btn ${activeSection === 'home' ? 'active' : ''}`}>Dashboard</Link>
         <Link to="/weekly"     className={`sec-nav-btn ${activeSection === 'weekly' ? 'active' : ''}`}>Weekly Update</Link>
@@ -243,6 +253,7 @@ function Layout() {
         Confidential — for <span className="blurable">{selectedOip?.tenants?.name || 'tenant'}</span> use only
       </footer>
 
+      <MobileTabBar activeSection={activeSection} selectedOip={selectedOip} />
       <FloatingHelpButton />
     </div>
     </DemoGateProvider>
@@ -317,6 +328,7 @@ function FloatingHelpButton() {
     <>
       <button onClick={() => { setPrefill(''); setOpen(true) }}
         title="Help & Request"
+        className="help-fab"
         style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 50,
           width: 52, height: 52, borderRadius: '50%',
@@ -452,21 +464,23 @@ function viewLabel(section) {
 // TOPBAR — brand, OIP switcher, run stamp, user menu
 // ────────────────────────────────────────────────────────────────────────────
 
+// On OIP change, drop the user on that lane's results landing page.
+// Shared by the desktop Topbar and the phone MobileTopbar.
+function oipLandingPath(oip) {
+  const slug = oip?.slug || ''
+  if (slug.endsWith('-recompete')) return '/radar'      // Recompete → Recompete Direct
+  if (slug.endsWith('-derived'))   return '/demand'     // Derived  → Derived Demand
+  if (oip?.verticals?.slug === 'sam') return '/market'  // Direct SAM → B2G Opportunities
+  return '/'                                             // SLED / other → Dashboard
+}
+
 function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, latestRun }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const navigate = useNavigate()
   const selectedOip = oips.find(o => o.id === selectedOipId)
   const tenantName = selectedOip?.tenants?.name || ''
   const oipName = selectedOip?.name || ''
-
-  // On OIP change, drop the user on that lane's results landing page.
-  const landingFor = (oip) => {
-    const slug = oip?.slug || ''
-    if (slug.endsWith('-recompete')) return '/radar'      // Recompete → Recompete Direct
-    if (slug.endsWith('-derived'))   return '/demand'     // Derived  → Derived Demand
-    if (oip?.verticals?.slug === 'sam') return '/market'  // Direct SAM → B2G Opportunities
-    return '/'                                             // SLED / other → Dashboard
-  }
+  const landingFor = oipLandingPath
   // Recompete Direct placeholder: shown in the selector when the tenant has
   // no -recompete OIP, so every customer sees the service.
   const location = useLocation()
@@ -603,6 +617,135 @@ function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, l
         </div>
       </div>
     </header>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// PHONE CHROME (<=768px) — compact header + menu sheet, bottom tab bar.
+// Both render on every screen size; global.css shows them only on phones and
+// hides the desktop Topbar, section nav, breadcrumb and floating ? there.
+// ────────────────────────────────────────────────────────────────────────────
+
+function MobileTopbar({ onSignOut, userEmail = '', oips = [], selectedOipId, onSelectOip, latestRun }) {
+  const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const selectedOip = oips.find(o => o.id === selectedOipId)
+  const tenantName = selectedOip?.tenants?.name || 'WinQuest'
+  const hasChoice = oips.length > 1
+
+  // Close the menu on navigation and on Escape.
+  useEffect(() => { setOpen(false) }, [location.pathname])
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  const go = (to) => { setOpen(false); navigate(to) }
+  const openHelp = () => {
+    setOpen(false)
+    window.dispatchEvent(new CustomEvent('open-help', { detail: { prefill: '' } }))
+  }
+  const lastRunStr = latestRun?.finished_at
+    ? new Date(latestRun.finished_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : null
+
+  return (
+    <>
+      <header className="mobile-topbar">
+        <Link to="/" className="mt-brand" aria-label="Home">
+          <span className="mt-dot" aria-hidden="true"></span>
+          <span className="mt-names">
+            <span className="mt-tenant blurable">{tenantName}</span>
+            {hasChoice && selectedOip?.name && (
+              <span className="mt-oip blurable">{selectedOip.name}</span>
+            )}
+          </span>
+        </Link>
+        <button type="button" className="mt-menu-btn"
+          aria-label={open ? 'Close menu' : 'Open menu'} aria-expanded={open}
+          onClick={() => setOpen(o => !o)}>
+          {open ? (
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+          )}
+        </button>
+      </header>
+
+      {open && (
+        <div className="mt-sheet-backdrop" onClick={() => setOpen(false)}>
+          <div className="mt-sheet" role="dialog" aria-label="Menu" onClick={e => e.stopPropagation()}>
+            {hasChoice && onSelectOip && (
+              <label className="mt-field">
+                <span className="mt-field-label">Viewing</span>
+                <select value={selectedOipId || ''}
+                  onChange={e => {
+                    const id = e.target.value
+                    onSelectOip(id)
+                    go(oipLandingPath(oips.find(o => o.id === id)))
+                  }}>
+                  {oips.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </label>
+            )}
+            <nav className="mt-links">
+              <button type="button" onClick={() => go('/profile')}>Setup</button>
+              <button type="button" onClick={() => go('/radar')}>Recompete Direct</button>
+              <button type="button" onClick={() => go('/help')}>User Guide</button>
+              <button type="button" onClick={openHelp}>Help &amp; requests</button>
+              <button type="button" onClick={() => go('/account')}>Account &amp; password</button>
+              <button type="button" onClick={() => go('/settings')}>Settings</button>
+              {onSignOut && (
+                <button type="button" onClick={() => { setOpen(false); onSignOut() }}>Sign out</button>
+              )}
+            </nav>
+            <div className="mt-sheet-foot">
+              <span>{userEmail}</span>
+              {lastRunStr && <span>Updated {lastRunStr}</span>}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+const TAB_ICONS = {
+  home:    <path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z" />,
+  market:  <><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></>,
+  pursued: <path d="M7 4h10v16l-5-4-5 4z" />,
+  weekly:  <><rect x="4" y="5" width="16" height="15" rx="1.5" /><path d="M4 10h16M9 3v4M15 3v4" /></>,
+}
+
+function MobileTabBar({ activeSection, selectedOip }) {
+  const slug = selectedOip?.slug || ''
+  // Second tab follows the selected lane's results page (same rule as oipLandingPath).
+  const results = slug.endsWith('-derived')   ? { to: '/demand', key: 'demand', label: 'Derived' }
+                : slug.endsWith('-recompete') ? { to: '/radar',  key: 'radar',  label: 'Recompete' }
+                : { to: '/market', key: 'market', label: 'Market' }
+  const tabs = [
+    { to: '/',        key: 'home',    label: 'Dashboard', icon: 'home' },
+    { ...results,                                          icon: 'market' },
+    { to: '/pursued', key: 'pursued', label: 'Pursued',   icon: 'pursued' },
+    { to: '/weekly',  key: 'weekly',  label: 'Weekly',    icon: 'weekly' },
+  ]
+  return (
+    <nav className="mobile-tabbar" aria-label="Sections">
+      {tabs.map(t => (
+        <Link key={t.key} to={t.to}
+          className={`mtb-item${activeSection === t.key ? ' active' : ''}`}
+          aria-current={activeSection === t.key ? 'page' : undefined}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {TAB_ICONS[t.icon]}
+          </svg>
+          <span>{t.label}</span>
+        </Link>
+      ))}
+    </nav>
   )
 }
 
