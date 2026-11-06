@@ -255,6 +255,55 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
       peripheral: "Peripheral — a minor element",
     }[scores.deliverable_band] || null;
 
+    // GAP FIT (stage 2, dd_v2_brief_handler.py) — present only when the
+    // tenant's sentinel has dd_v2_gap_fit on. Then b2b_score is the gap-fit
+    // score: the BAND sets the range, size/urgency/timing place it inside.
+    // The legacy S40/U30/T30 composite is kept as legacy_b2b_score. Briefs
+    // without gap_fit render exactly as before.
+    const gf = !isCapitalBuild && bd.gap_fit && bd.gap_fit.band ? bd.gap_fit : null;
+    const gapBandLabel = {
+      evidenced: "Evidenced gap",
+      plausible: "Plausible gap",
+      unknown: "Gap unknown",
+      no_gap: "No gap",
+    };
+    const gapBandRange = { evidenced: "75–95", plausible: "50–70", unknown: "40–55", no_gap: "15–35" };
+    const gapPlayLabel = {
+      displace_competitor: "Displace or second-source a competitor",
+      sub_into_gap: "Sub into the gap",
+      sub_for_credit: "Sub for small-business credit",
+      research_first: "Research before pitching",
+      compete_at_recompete: "Compete at recompete",
+    };
+    const techHeadline = (g) => {
+      const v = g.vendor_named;
+      return {
+        competitor_in_use: `Uses ${v || "a competitor"}`,
+        other_vendor_in_use: `Buys from ${v || "another vendor"}`,
+        relationship_only: `Known relationship with ${v || "a competitor"}`,
+        own_platform: "Builds its own",
+        none_found: "No public evidence of how they get this",
+      }[g.tech_evidence] || "No public evidence of how they get this";
+    };
+    const relLabel = {
+      campaign_case_study: "campaign case study",
+      partner_listing: "partner listing",
+      job_posting: "job posting",
+      interview_or_comarketing: "interview / co-marketing — not proof of purchase",
+    };
+    const coreLabel = {
+      core: "Core business — they do this themselves",
+      adjacent: "Adjacent — works in the field, nothing shows this capability",
+      outside: "Outside — different work",
+      unknown: "Unknown — not enough evidence",
+    };
+    const accessLabel = {
+      small_business_credit: "Small-business credit toward the prime's subcontracting goals",
+      set_aside_match: "Set-aside matches your certification",
+      none: "None beyond capability",
+      unknown: "Not assessed — small-business status not on your profile",
+    };
+
     const daysOut = bd.pop_end_date
       ? Math.round((new Date(bd.pop_end_date) - new Date()) / 86400000)
       : null;
@@ -276,7 +325,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
 
         <div className="wq-rep-header">
           <div className="wq-rep-score">
-            {gated || !compositeScore ? (
+            {gated || !compositeScore || gf ? (
               <span className="wq-rep-score-num">{gated ? "—" : (scores.b2b_score ?? "—")}</span>
             ) : (
               <ScoreExplainBadge
@@ -294,7 +343,13 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
                 {award.disposition}
               </span>
             )}
-            {!gated && bandLabel && (
+            {!gated && gf && (
+              <span className={`wq-chip wq-gap-${gf.band}`}>{gapBandLabel[gf.band] || gf.band}</span>
+            )}
+            {!gated && gf && gf.play && (
+              <span className="wq-chip wq-chip-soft">{gapPlayLabel[gf.play] || gf.play}</span>
+            )}
+            {!gated && !gf && bandLabel && (
               <span className="wq-chip">{scores.deliverable_band}</span>
             )}
             {bd.origin?.type === "sam_award" && (
@@ -329,7 +384,9 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
           <Section title="Executive summary">
             <ul className="wq-rep-bullets">
               <li><strong>{scores.b2b_score}/100</strong> · {award.disposition || "—"}
-                {bandLabel ? ` · ${scores.deliverable_band}` : ""}</li>
+                {gf
+                  ? ` · ${gapBandLabel[gf.band] || gf.band} · ${gapPlayLabel[gf.play] || gf.play}`
+                  : bandLabel ? ` · ${scores.deliverable_band}` : ""}</li>
               {actionBrief && (
                 <li>
                   <strong>{actionBrief.badge}</strong>
@@ -373,6 +430,56 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
                 Scope confidence: <span className={`badge-${bd.scope_confidence}`}>{bd.scope_confidence.toUpperCase()}</span>
               </div>
             )}
+          </Section>
+        )}
+
+        {/* WHY THIS BAND — the prime-level gap read. How the prime gets the
+            tenant's kind of capability, judged from public evidence; absence
+            of evidence is stated as absence, never as "they don't buy it". */}
+        {!gated && gf && (
+          <Section title="Why this band">
+            <div className={`wq-gap-ev wq-gap-ev-${gf.tech_evidence || "none_found"}`}>
+              <strong className="blurable">{techHeadline(gf)}</strong>
+              {relLabel[gf.relationship_type] && (
+                <span className="wq-rep-muted"> · {relLabel[gf.relationship_type]}</span>
+              )}
+            </div>
+            {gf.evidence_line && (
+              <p className="wq-rep-p blurable" style={{ marginTop: "0.5rem" }}>
+                {gf.evidence_line}
+                {gf.evidence_url && (
+                  <> {" "}<a href={gf.evidence_url} target="_blank" rel="noopener noreferrer"
+                    style={{ color: "#2563eb", textDecoration: "none" }}>source</a></>
+                )}
+              </p>
+            )}
+            <div className="wq-rep-grid" style={{ marginTop: "0.6rem" }}>
+              <span>Their own core</span>
+              <span className="blurable">{coreLabel[gf.prime_core] || gf.prime_core || "—"}</span>
+              {gf.prime_core_evidence && (
+                <>
+                  <span className="wq-rep-muted" style={{ paddingLeft: "1rem" }}>· basis</span>
+                  <span className="wq-rep-muted blurable">{gf.prime_core_evidence}</span>
+                </>
+              )}
+              {gf.gap_slice && (
+                <>
+                  <span>What you would supply</span>
+                  <span className="blurable">{gf.gap_slice}</span>
+                </>
+              )}
+              <span>Access route</span>
+              <span>{accessLabel[gf.access_route] || gf.access_route || "—"}</span>
+            </div>
+            {Array.isArray(gf.notes) && gf.notes.length > 0 && <Bullets items={gf.notes} />}
+            <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
+              Public evidence about this prime in general, not this contract specifically. Re-checked monthly.
+              No evidence does not mean they don't buy it.
+              {gf.prime_page !== false && bd.incumbent_uei && (
+                <> {" "}<a href={`/prime/${bd.incumbent_uei}`} style={{ color: "#2563eb", textDecoration: "none" }}>
+                  Prime page →</a></>
+              )}
+            </p>
           </Section>
         )}
 
@@ -660,7 +767,41 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             capital-build is S25/U25/T50 (dd_v2_capital_brief_handler.py).
             SIZE's own internal decomposition (35% deliverable / 65% value)
             is motion-agnostic -- both handlers reuse it unchanged. */}
-        {!gated && (
+        {!gated && gf && (
+          <Section title="Scoring breakdown">
+            <div className="wq-rep-grid">
+              <span>Gap band</span>
+              <span>{gapBandLabel[gf.band] || gf.band} — range {gapBandRange[gf.band] || "—"}</span>
+              <span>Play</span>
+              <span>{gapPlayLabel[gf.play] || gf.play || "—"}</span>
+              <span>Placement within the band</span>
+              <span>{gf.position != null ? `${Math.round(gf.position * 100)}%` : "—"}</span>
+              <span style={{ paddingLeft: "1rem" }}>· size</span>
+              <span>{scores.size != null ? `${Math.round(scores.size)}/100` : "—"}{scores.value_note ? ` — ${scores.value_note}` : ""}</span>
+              <span style={{ paddingLeft: "1rem" }}>· urgency</span>
+              <span>{scores.urgency != null ? `${Math.round(scores.urgency)}/100` : "—"}</span>
+              <span style={{ paddingLeft: "1rem" }}>· timing</span>
+              <span>{scores.timing != null ? `${Math.round(scores.timing)}/100` : "—"}</span>
+              <span style={{ paddingLeft: "1rem" }}>· your strength on this</span>
+              <span>{gf.tenant_strength || "—"}</span>
+              <span><strong>B2B score</strong></span>
+              <span><strong>{scores.b2b_score ?? "—"}</strong></span>
+              {scores.legacy_b2b_score != null && (
+                <>
+                  <span className="wq-rep-muted">Previous score (size/urgency/timing only)</span>
+                  <span className="wq-rep-muted">{scores.legacy_b2b_score}</span>
+                </>
+              )}
+            </div>
+            <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
+              The gap band sets the range. Size (40%), urgency (30%) and timing (30%), adjusted for how
+              directly your record covers this work, place the score within it — so a large, urgent
+              contract cannot outrank a prime that has a real gap.
+            </p>
+          </Section>
+        )}
+
+        {!gated && !gf && (
           <Section title="Scoring breakdown">
             <div className="wq-rep-grid">
               <span>Size ({isCapitalBuild ? "25" : "40"}%)</span>
@@ -856,6 +997,8 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
               ? " Rejected at the entailment gate — the work does not require what you supply."
               : isCapitalBuild
               ? " Passed the entailment gate, then scored on size, urgency and construction-elapsed timing."
+              : gf
+              ? " Passed the entailment gate, banded by how the prime gets this capability, then placed on size, urgency and recompete timing."
               : " Passed the entailment gate, then scored on size, urgency and recompete timing."}
           </p>
         </Section>
@@ -1195,6 +1338,16 @@ const badgeStyles = `
     font-weight: 600;
     font-size: 0.75rem;
   }
+
+  /* Gap fit (stage 2) */
+  .wq-gap-evidenced { background: #ecfdf5; color: #065f46; }
+  .wq-gap-plausible { background: #eff6ff; color: #1e40af; }
+  .wq-gap-unknown { background: #f3f4f6; color: #374151; }
+  .wq-gap-no_gap { background: #fef2f2; color: #991b1b; }
+  .wq-gap-ev { padding: 0.45rem 0.7rem; border-radius: 6px; border-left: 3px solid #d1d5db; background: #f9fafb; font-size: 0.9rem; }
+  .wq-gap-ev-competitor_in_use, .wq-gap-ev-other_vendor_in_use { background: #ecfdf5; border-color: #059669; }
+  .wq-gap-ev-relationship_only { background: #fffbeb; border-color: #d97706; }
+  .wq-gap-ev-own_platform { background: #f3f4f6; border-color: #6b7280; }
 `;
 
 // Inject styles
