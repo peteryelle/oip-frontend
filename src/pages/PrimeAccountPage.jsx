@@ -18,6 +18,12 @@
 //   addressable   contracts live since FY2025 start — the sellable surface
 //   momentum      awarded FY2025 to date — new business won
 //   fpds_window   GovCon's own federal obligation total for its window
+//
+// "How they buy" card (Nov 2026): a second RPC, dd_prime_tech_evidence, returns
+// the public technology evidence the DD v2 brief handler gathered for THIS
+// tenant — reverse lookup on the tenant's competitors' sites plus a footprint
+// search — and the prime-level gap read. Shown as found, with its source link;
+// absence of evidence is stated as absence, never as "they don't buy it".
 import React, { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -63,18 +69,110 @@ function Card({ title, children, note }) {
   )
 }
 
+const EVIDENCE_HEADLINE = {
+  competitor_in_use: (v) => `Uses ${v || 'a competitor'}`,
+  other_vendor_in_use: (v) => `Buys from ${v || 'another vendor'}`,
+  relationship_only: (v) => `Known relationship with ${v || 'a competitor'}`,
+  own_platform: () => 'Builds its own',
+  none_found: () => 'No public evidence found',
+}
+
+const RELATIONSHIP_LABEL = {
+  campaign_case_study: 'campaign case study',
+  partner_listing: 'partner listing',
+  job_posting: 'job posting',
+  interview_or_comarketing: 'interview / co-marketing — not proof of purchase',
+}
+
+const CORE_LABEL = {
+  core: 'Core business',
+  adjacent: 'Adjacent — works in the field, nothing names this capability',
+  outside: 'Outside — different work',
+  unknown: 'Unknown — not enough evidence',
+}
+
+function TechEvidenceCard({ data }) {
+  const ev = data?.evidence
+  if (!ev) return null
+  const verdict = ev.tech_evidence || 'none_found'
+  const headline = (EVIDENCE_HEADLINE[verdict] || EVIDENCE_HEADLINE.none_found)(ev.vendor_named)
+  const rel = RELATIONSHIP_LABEL[ev.relationship_type]
+  const gap = data.prime_gap || null
+  const terms = (data.capability_terms || []).slice(0, 3).join(', ')
+  const supporting = (ev.supporting || []).filter(s => s?.url)
+  const checked = ev.fetched_at ? new Date(ev.fetched_at).toLocaleDateString() : null
+  const tone = verdict === 'competitor_in_use' || verdict === 'other_vendor_in_use'
+    ? 'wq-acct-ev-strong'
+    : verdict === 'relationship_only' ? 'wq-acct-ev-mid'
+    : verdict === 'own_platform' ? 'wq-acct-ev-closed' : 'wq-acct-ev-none'
+
+  return (
+    <Card
+      title={terms ? `How they buy ${terms}` : 'How they buy this capability'}
+      note={`Public evidence from competitor sites and the prime's own footprint${checked ? `, checked ${checked}` : ''}. Re-checked monthly. No evidence does not mean they don't buy it.`}
+    >
+      <div className={`wq-acct-ev ${tone}`}>
+        <span className="wq-acct-ev-head blurable">{headline}</span>
+        {rel && <span className="wq-acct-dim"> · {rel}</span>}
+      </div>
+      {ev.evidence_line && (
+        <p className="wq-acct-ev-line blurable">
+          {ev.evidence_line}
+          {ev.evidence_url && (
+            <> {' '}<a href={ev.evidence_url} target="_blank" rel="noreferrer">source</a></>
+          )}
+        </p>
+      )}
+      {gap?.prime_core && (
+        <table className="wq-acct-table" style={{ marginTop: '0.5rem' }}>
+          <tbody>
+            <tr>
+              <td>Their own core</td>
+              <td className="wq-acct-num">{CORE_LABEL[gap.prime_core] || gap.prime_core}</td>
+            </tr>
+            {gap.prime_core_evidence && (
+              <tr>
+                <td colSpan={2} className="wq-acct-dim blurable">{gap.prime_core_evidence}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      )}
+      {supporting.length > 0 && (
+        <>
+          <p className="wq-acct-note" style={{ marginTop: '0.6rem' }}>Mentions on competitor sites:</p>
+          <ul className="wq-acct-list">
+            {supporting.map((s, i) => (
+              <li key={i}>
+                <a href={s.url} target="_blank" rel="noreferrer" className="blurable">
+                  {s.title || s.url.replace(/^https?:\/\//, '')}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {ev.competitors?.length > 0 && (
+        <p className="wq-acct-note">Checked against: {ev.competitors.join(', ')} — edit in Profile.</p>
+      )}
+    </Card>
+  )
+}
+
 export default function PrimeAccountPage() {
   const { uei } = useParams()
   const { selectedOip } = useOip()
   const [brief, setBrief] = useState(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
+  const [techEv, setTechEv] = useState(null)
 
   useEffect(() => {
     if (!selectedOip?.tenant_id || !uei) return
     let cancelled = false
     setLoading(true)
     setErr(null)
+    setTechEv(null)
     ;(async () => {
       const { data, error } = await supabase.rpc('dd_account_brief', {
         p_tenant_id: selectedOip.tenant_id,
@@ -86,6 +184,15 @@ export default function PrimeAccountPage() {
       // functions in an array. Handle both so the shape is not a deploy risk.
       else setBrief(Array.isArray(data) ? (data[0] ?? null) : data)
       setLoading(false)
+
+      // Evidence is optional — a missing function or empty result must never
+      // break the account view, so errors are swallowed here.
+      const ev = await supabase.rpc('dd_prime_tech_evidence', {
+        p_tenant_id: selectedOip.tenant_id,
+        p_uei: uei,
+      })
+      if (cancelled) return
+      if (!ev.error) setTechEv(Array.isArray(ev.data) ? (ev.data[0] ?? null) : ev.data)
     })()
     return () => { cancelled = true }
   }, [selectedOip?.tenant_id, uei])
@@ -163,6 +270,8 @@ export default function PrimeAccountPage() {
           sub={`${moneyShort(cal18)} combined`}
         />
       </div>
+
+      <TechEvidenceCard data={techEv} />
 
       {byCode.length > 0 && (
         <Card title="Addressable book by code">
@@ -396,6 +505,15 @@ export default function PrimeAccountPage() {
         .wq-acct-bar-track { flex: 1; height: 18px; background: #f3f4f6; border-radius: 3px; }
         .wq-acct-bar { height: 18px; background: #93c5fd; border-radius: 3px; }
         .wq-acct-bar-val { font-size: 0.8rem; white-space: nowrap; width: 6.5rem; text-align: right; }
+        .wq-acct-ev { font-size: 0.95rem; padding: 0.45rem 0.7rem; border-radius: 6px; border-left: 3px solid; }
+        .wq-acct-ev-head { font-weight: 600; }
+        .wq-acct-ev-strong { background: #ecfdf5; border-color: #059669; }
+        .wq-acct-ev-mid { background: #fffbeb; border-color: #d97706; }
+        .wq-acct-ev-closed { background: #f3f4f6; border-color: #6b7280; }
+        .wq-acct-ev-none { background: #f9fafb; border-color: #d1d5db; color: #4b5563; }
+        .wq-acct-ev-line { font-size: 0.85rem; color: #374151; margin: 0.55rem 0 0; }
+        .wq-acct-ev-line a { color: #2563eb; text-decoration: none; }
+        .wq-acct-list a { color: #2563eb; text-decoration: none; }
       `}</style>
     </div>
   )
