@@ -297,6 +297,16 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
       outside: "Outside — different work",
       unknown: "Unknown — not enough evidence",
     };
+    // Customer-facing meaning of each band: WHAT it means and WHY it matters,
+    // not how it was computed. Mirrored in lib/awardsBrief.js.
+    const gapMeaning = {
+      evidenced: "This prime already buys what you sell, from a competitor or another vendor. With the need and budget proven, they are a strong candidate to consider you as an alternative or a second source.",
+      plausible: "This prime works in this field but shows no sign of doing this themselves, so they likely buy it from someone — worth learning who.",
+      unknown: "There is not enough public information to tell. A good first step is learning how they handle this today.",
+      no_gap: "This prime does this work themselves. A sale to them now is unlikely; position for the next recompete instead.",
+    };
+    const gapAbout = "The gap rating answers one question: does this prime need what you sell from someone outside? Primes with a proven need rank highest; contract size and timing then order opportunities within each rating.";
+
     const accessLabel = {
       small_business_credit: "Small-business credit toward the prime's subcontracting goals",
       set_aside_match: "Set-aside matches your certification",
@@ -437,7 +447,14 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             tenant's kind of capability, judged from public evidence; absence
             of evidence is stated as absence, never as "they don't buy it". */}
         {!gated && gf && (
-          <Section title="Why this band">
+          <Section title={
+            ["evidenced", "plausible"].includes(gf.band)
+              ? `Gap analysis — why ${subscriberName || "you"} ${subscriberName ? "has" : "have"} an opening`
+              : "Gap analysis"
+          }>
+            <p className="wq-rep-p" style={{ marginBottom: "0.6rem" }}>
+              <strong>{gapBandLabel[gf.band] || gf.band}.</strong> {gapMeaning[gf.band]}
+            </p>
             <div className={`wq-gap-ev wq-gap-ev-${gf.tech_evidence || "none_found"}`}>
               <strong className="blurable">{techHeadline(gf)}</strong>
               {relLabel[gf.relationship_type] && (
@@ -473,6 +490,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
             </div>
             {Array.isArray(gf.notes) && gf.notes.length > 0 && <Bullets items={gf.notes} />}
             <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
+              {gapAbout}{" "}
               Public evidence about this prime in general, not this contract specifically. Re-checked monthly.
               No evidence does not mean they don't buy it.
               {gf.prime_page !== false && bd.incumbent_uei && (
@@ -775,7 +793,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
         {!gated && gf && (
           <Section title="Scoring breakdown">
             <div className="wq-rep-grid">
-              <span>Gap band</span>
+              <span>Gap rating</span>
               <span>{gapBandLabel[gf.band] || gf.band} — range {gapBandRange[gf.band] || "—"}</span>
               <span>Play</span>
               <span>{gapPlayLabel[gf.play] || gf.play || "—"}</span>
@@ -798,11 +816,30 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
                 </>
               )}
             </div>
-            <p className="wq-rep-muted" style={{ marginTop: "0.5rem" }}>
-              The gap band sets the range. Size (40%), urgency (30%) and timing (30%), adjusted for how
-              directly your record covers this work, place the score within it — so a large, urgent
-              contract cannot outrank a prime that has a real gap.
-            </p>
+            <div className="wq-fit-def">
+              <p><strong>What Fit means.</strong> Fit (0–100) ranks how worth pursuing this opportunity is.
+                The gap rating sets the range; three things place the score within it:</p>
+              <ul>
+                <li><strong>Size — 40%.</strong> How large the contract is and how central your kind of work is to it.</li>
+                <li><strong>Urgency — 30%.</strong> Signs the account is in motion, such as funding changes or contract actions.</li>
+                <li><strong>Timing — 30%.</strong> How close the contract is to renewal or recompete — the window to get in.</li>
+              </ul>
+              <p>How directly your own track record covers this work adjusts the result. A large, urgent
+                contract cannot outrank a prime with a proven need.</p>
+              <p style={{ marginTop: "0.6rem" }}><strong>The four gap ratings.</strong></p>
+              <ul>
+                {[
+                  ["evidenced", "Evidenced gap", "Fit 75–95", "The prime already buys what you sell, from a competitor or another vendor."],
+                  ["plausible", "Plausible gap", "Fit 50–70", "The prime works in this field but shows no sign of doing this themselves."],
+                  ["unknown", "Gap unknown", "Fit 40–55", "Not enough public information to tell."],
+                  ["no_gap", "No gap", "not briefed", "The prime does this work themselves, so no sales brief is written."],
+                ].map(([key, label, range, text]) => (
+                  <li key={key} style={key === gf.band ? { fontWeight: 600, color: "#111827" } : undefined}>
+                    <strong>{label}</strong> ({range}) — {text}{key === gf.band ? " ← this contract" : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </Section>
         )}
 
@@ -1003,7 +1040,7 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
               : isCapitalBuild
               ? " Passed the entailment gate, then scored on size, urgency and construction-elapsed timing."
               : gf
-              ? " Passed the entailment gate, banded by how the prime gets this capability, then placed on size, urgency and recompete timing."
+              ? " Passed the entailment gate, rated by how the prime gets this capability, then placed on size, urgency and recompete timing."
               : " Passed the entailment gate, then scored on size, urgency and recompete timing."}
           </p>
         </Section>
@@ -1343,6 +1380,12 @@ const badgeStyles = `
     font-weight: 600;
     font-size: 0.75rem;
   }
+
+  /* Fit definition */
+  .wq-fit-def { margin-top: 0.7rem; font-size: 0.85rem; color: #4b5563; background: #f9fafb; border-radius: 6px; padding: 0.6rem 0.8rem; }
+  .wq-fit-def p { margin: 0.2rem 0; }
+  .wq-fit-def ul { margin: 0.3rem 0 0.3rem 1.1rem; padding: 0; }
+  .wq-fit-def li { margin: 0.15rem 0; }
 
   /* Gap fit (stage 2) */
   .wq-gap-evidenced { background: #ecfdf5; color: #065f46; }

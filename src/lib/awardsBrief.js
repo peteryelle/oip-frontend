@@ -200,6 +200,13 @@ export function buildAwardBriefHtml(a, opts = {}) {
     outside: "Outside — different work",
     unknown: "Unknown — not enough evidence",
   };
+  const gapMeaning = {
+    evidenced: "This prime already buys what you sell, from a competitor or another vendor. With the need and budget proven, they are a strong candidate to consider you as an alternative or a second source.",
+    plausible: "This prime works in this field but shows no sign of doing this themselves, so they likely buy it from someone — worth learning who.",
+    unknown: "There is not enough public information to tell. A good first step is learning how they handle this today.",
+    no_gap: "This prime does this work themselves. A sale to them now is unlikely; position for the next recompete instead.",
+  };
+  const gapAbout = "The gap rating answers one question: does this prime need what you sell from someone outside? Primes with a proven need rank highest; contract size and timing then order opportunities within each rating.";
   const accessLabel = {
     small_business_credit: "Small-business credit toward the prime's subcontracting goals",
     set_aside_match: "Set-aside matches your certification",
@@ -241,7 +248,10 @@ export function buildAwardBriefHtml(a, opts = {}) {
 
   const dd2GapHtml = !dd2Gated && gf
     ? section(
-        "Why this band",
+        ["evidenced", "plausible"].includes(gf.band)
+          ? `Gap analysis — why ${subscriberName || "you"} ${subscriberName ? "has" : "have"} an opening`
+          : "Gap analysis",
+        `<p><strong>${esc(gapBandLabel[gf.band] || gf.band)}.</strong> ${esc(gapMeaning[gf.band] || "")}</p>` +
         `<div class="avoid" style="background:#f0fdf4;border-left-color:#059669;"><strong>${esc(techHeadline(gf))}</strong>${
           relLabel[gf.relationship_type] ? ` <span class="muted">· ${esc(relLabel[gf.relationship_type])}</span>` : ""
         }</div>` +
@@ -255,7 +265,7 @@ export function buildAwardBriefHtml(a, opts = {}) {
             ["Access route", accessLabel[gf.access_route] || gf.access_route || "—"],
           ]) +
           (Array.isArray(gf.notes) && gf.notes.length ? list(gf.notes) : "") +
-          mutedP("Public evidence about this prime in general, not this contract specifically. Re-checked monthly. No evidence does not mean they don't buy it.")
+          mutedP(gapAbout + " Public evidence about this prime in general, not this contract specifically. Re-checked monthly. No evidence does not mean they don't buy it.")
       )
     : "";
 
@@ -346,7 +356,7 @@ export function buildAwardBriefHtml(a, opts = {}) {
     ? section(
         "Scoring breakdown",
         grid([
-          ["Gap band", `${gapBandLabel[gf.band] || gf.band} — range ${gapBandRange[gf.band] || "—"}`],
+          ["Gap rating", `${gapBandLabel[gf.band] || gf.band} — range ${gapBandRange[gf.band] || "—"}`],
           ["Play", gapPlayLabel[gf.play] || gf.play || "—"],
           ["Placement within the band", gf.position != null ? `${Math.round(gf.position * 100)}%` : "—"],
           ["· size", scores.size != null ? `${Math.round(scores.size)}/100${scores.value_note ? ` — ${scores.value_note}` : ""}` : "—"],
@@ -358,9 +368,24 @@ export function buildAwardBriefHtml(a, opts = {}) {
             ? [["Previous score (size/urgency/timing only)", String(scores.legacy_b2b_score)]]
             : []),
         ]) +
-          mutedP(
-            "The gap band sets the range. Size (40%), urgency (30%) and timing (30%), adjusted for how directly your record covers this work, place the score within it — so a large, urgent contract cannot outrank a prime that has a real gap."
-          )
+          `<div class="muted" style="margin-top:8px;">
+             <p><strong>What Fit means.</strong> Fit (0–100) ranks how worth pursuing this opportunity is. The gap rating sets the range; three things place the score within it:</p>
+             <ul>
+               <li><strong>Size — 40%.</strong> How large the contract is and how central your kind of work is to it.</li>
+               <li><strong>Urgency — 30%.</strong> Signs the account is in motion, such as funding changes or contract actions.</li>
+               <li><strong>Timing — 30%.</strong> How close the contract is to renewal or recompete — the window to get in.</li>
+             </ul>
+             <p>How directly your own track record covers this work adjusts the result. A large, urgent contract cannot outrank a prime with a proven need.</p>
+             <p style="margin-top:8px;"><strong>The four gap ratings.</strong></p>
+             <ul>${[
+               ["evidenced", "Evidenced gap", "Fit 75–95", "The prime already buys what you sell, from a competitor or another vendor."],
+               ["plausible", "Plausible gap", "Fit 50–70", "The prime works in this field but shows no sign of doing this themselves."],
+               ["unknown", "Gap unknown", "Fit 40–55", "Not enough public information to tell."],
+               ["no_gap", "No gap", "not briefed", "The prime does this work themselves, so no sales brief is written."],
+             ].map(([key, label, range, text]) =>
+               `<li${key === gf.band ? ' style="font-weight:600;color:#111827;"' : ""}><strong>${label}</strong> (${range}) — ${text}${key === gf.band ? " ← this contract" : ""}</li>`
+             ).join("")}</ul>
+           </div>`
       )
     : !dd2Gated
     ? section(
@@ -439,7 +464,7 @@ export function buildAwardBriefHtml(a, opts = {}) {
       dd2Gated
         ? " Rejected at the entailment gate — the work does not require what you supply."
         : gf
-        ? " Passed the entailment gate, banded by how the prime gets this capability, then placed on size, urgency and recompete timing."
+        ? " Passed the entailment gate, rated by how the prime gets this capability, then placed on size, urgency and recompete timing."
         : " Passed the entailment gate, then scored on size, urgency and recompete timing."
     }</p>`
   );
