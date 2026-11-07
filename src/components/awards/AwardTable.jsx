@@ -33,6 +33,30 @@ const DELIVERY_LABEL = {
   unknown: "Unknown",
 };
 
+// Gap-fit labels (dd_v2_brief_handler stage 2). Present on rows whose tenant
+// has gap fit on; then b2b_score IS the gap-fit score.
+const GAP_LABEL = {
+  evidenced: "Evidenced gap",
+  plausible: "Plausible gap",
+  unknown: "Gap unknown",
+  no_gap: "No gap",
+};
+
+const FIT_DEFINITION =
+  "Fit (0–100): how worth pursuing this opportunity is. The gap rating sets the range — " +
+  "Evidenced gap 75–95 (the prime already buys what you sell), Plausible gap 50–70 (likely buys it, vendor unknown), " +
+  "Gap unknown 40–55 (not enough public information), No gap (the prime does it themselves; not briefed). " +
+  "Within the range: size 40%, urgency 30%, timing 30%.";
+
+function vendorLine(gf) {
+  if (!gf) return null;
+  if (gf.tech_evidence === "competitor_in_use" || gf.tech_evidence === "other_vendor_in_use")
+    return gf.vendor_named ? `Works with ${gf.vendor_named}` : null;
+  if (gf.tech_evidence === "relationship_only")
+    return gf.vendor_named ? `Relationship with ${gf.vendor_named}` : null;
+  return null;
+}
+
 function scoreBand(score) {
   if (score == null) return "wq-score-na";
   if (score >= 75) return "wq-score-high";
@@ -163,12 +187,23 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
     }
   };
 
-  const SortTh = ({ label, k, right }) => (
+  const SortTh = ({ label, k, right, info }) => (
     <th
       className={`wq-atable-th${right ? " wq-atable-r" : ""}${sortKey === k ? " is-sorted" : ""}`}
       onClick={() => toggleSort(k)}
     >
-      {label} {sortKey === k ? (sortDir === "asc" ? "↑" : "↓") : ""}
+      {label}
+      {info && (
+        <span
+          title={info}
+          aria-label={info}
+          onClick={(e) => e.stopPropagation()}
+          style={{ marginLeft: 4, cursor: "help", fontWeight: 400, opacity: 0.7 }}
+        >
+          ⓘ
+        </span>
+      )}{" "}
+      {sortKey === k ? (sortDir === "asc" ? "↑" : "↓") : ""}
     </th>
   );
 
@@ -182,7 +217,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
             <SortTh label="Amount" k="amount" right />
             <SortTh label="Prime Total" k="primeTotal" right />
             <SortTh label="Recompete" k="recompete" />
-            <SortTh label="B2B" k="score" />
+            <SortTh label="Fit" k="score" info={FIT_DEFINITION} />
             <SortTh label="Disposition" k="disposition" />
             <th className="wq-atable-th">Delivery</th>
           </tr>
@@ -243,8 +278,21 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                 </td>
                 <td className="wq-atable-td">
                   {a.gated ? (
-                    <span className="wq-chip wq-score-na" title="Rejected at the entailment gate">
+                    <span
+                      className="wq-chip wq-score-na"
+                      title={a.busdev?.scores?.gap_gated ? "No gap — the prime does this work itself" : "Rejected at the entailment gate"}
+                    >
                       —
+                    </span>
+                  ) : a.busdev?.gap_fit?.band ? (
+                    // Gap-fit rows: the stored score is the gap-fit score. The
+                    // size/urgency/timing hover badge would recompute the old
+                    // composite, so show the score with the rating instead.
+                    <span
+                      className={`wq-chip ${scoreBand(a.score)}`}
+                      title={`${GAP_LABEL[a.busdev.gap_fit.band] || a.busdev.gap_fit.band} · Fit ${a.score ?? "—"}`}
+                    >
+                      {a.score ?? "—"}
                     </span>
                   ) : (() => {
                     const isCapitalBuild = a.motion === "capital_build";
@@ -273,8 +321,18 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
                   )}
                 </td>
                 <td className="wq-atable-td wq-atable-motion">
-                  {DELIVERY_LABEL[a.difficulty] ||
-                    (a.motion ? MOTION_LABEL[a.motion] || a.motion : "—")}
+                  {vendorLine(a.busdev?.gap_fit) ? (
+                    <span
+                      className="blurable"
+                      style={{ fontWeight: 600 }}
+                      title="Public evidence about this prime in general, not this contract specifically"
+                    >
+                      {vendorLine(a.busdev.gap_fit)}
+                    </span>
+                  ) : (
+                    DELIVERY_LABEL[a.difficulty] ||
+                    (a.motion ? MOTION_LABEL[a.motion] || a.motion : "—")
+                  )}
                 </td>
               </tr>
             );
