@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth'
 import { useOip } from '../lib/oip'
 import { exportElementPdf } from '../lib/briefPdf'
 import { Block, SectionLoader, HelpIcon } from '../components/ui/shared'
+import CompetitorsBlock from '../components/profile/CompetitorsBlock'
 
 // ────────────────────────────────────────────────────────────────────────────
 // PROFILE — view + edit
@@ -24,6 +25,9 @@ export default function ProfilePage() {
   const { memberships } = useAuth()
   const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
   const canEdit = ['owner', 'admin'].includes(myRole) && !borrowed
+  // Competitors write straight to the tenant-canonical row, so owners/admins
+  // can edit them even where the rest of the profile is borrowed (read-only).
+  const canEditCompetitors = ['owner', 'admin'].includes(myRole)
   const isSam = selectedOip?.verticals?.slug === 'sam'
   const profileRef = useRef(null)
   const [exportingPdf, setExportingPdf] = useState(false)
@@ -163,6 +167,8 @@ export default function ProfilePage() {
       )}
 
       {/* ── KEY STRENGTHS ── */}
+      {!editing && <CompetitorsBlock oipId={selectedOip.id} canEdit={canEditCompetitors} />}
+
       <ProfileFieldList label="Key strengths" arr={data.key_strengths || []} editing={editing} onChange={a => setDraft({ ...draft, key_strengths: a })} />
 
       {/* ── CERTIFICATIONS & STANDARDS ── */}
