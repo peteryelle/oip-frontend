@@ -369,13 +369,13 @@ export function buildAwardBriefHtml(a, opts = {}) {
             : []),
         ]) +
           `<div class="muted" style="margin-top:8px;">
-             <p><strong>What Fit means.</strong> Fit (0–100) ranks how worth pursuing this opportunity is. The gap rating sets the range; three things place the score within it:</p>
+             <p><strong>What Fit means.</strong> Fit (0–100) combines two questions into one score. <strong>First, does this prime need what you sell?</strong> The gap rating answers that and sets the range (below). <strong>Second, how attractive is the contract?</strong> Three things place the score within that range:</p>
              <ul>
                <li><strong>Size — 40%.</strong> How large the contract is and how central your kind of work is to it.</li>
                <li><strong>Urgency — 30%.</strong> Signs the account is in motion, such as funding changes or contract actions.</li>
                <li><strong>Timing — 30%.</strong> How close the contract is to renewal or recompete — the window to get in.</li>
              </ul>
-             <p>How directly your own track record covers this work adjusts the result. A large, urgent contract cannot outrank a prime with a proven need.</p>
+             <p>How directly your own track record covers this work adjusts the placement. For example, two evidenced-gap contracts both land in 75–95; a smaller one with a distant recompete might score about 80, a large one recompeting soon about 90. Because the gap comes first, even the smallest evidenced-gap contract (75+) outranks the largest plausible-gap one (70 or below).</p>
              <p style="margin-top:8px;"><strong>The four gap ratings.</strong></p>
              <ul>${[
                ["evidenced", "Evidenced gap", "Fit 75–95", "The prime already buys what you sell, from a competitor or another vendor."],

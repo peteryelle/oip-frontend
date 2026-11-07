@@ -89,16 +89,17 @@ function FitDefinitionModal({ onClose }) {
         </div>
 
         <p style={{ marginTop: 14 }}>
-          <strong>Fit (0–100)</strong> ranks how worth pursuing each opportunity is. It answers one
-          question first: <em>does this prime need what you sell from someone outside?</em> That
-          answer — the gap rating — sets the score range.
+          <strong>Fit (0–100)</strong> combines two questions into one score.
         </p>
 
-        <h3 style={{ fontSize: 18, margin: "22px 0 8px" }}>The four gap ratings</h3>
+        <h3 style={{ fontSize: 18, margin: "20px 0 8px" }}>
+          Step 1 — Does this prime need what you sell? <span style={{ fontWeight: 400 }}>(the gap rating)</span>
+        </h3>
+        <p style={{ margin: "0 0 8px" }}>The answer sets the range the score can fall in:</p>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 15 }}>
           <thead>
             <tr>
-              <th style={{ ...cell, fontWeight: 600 }}>Rating</th>
+              <th style={{ ...cell, fontWeight: 600 }}>Gap rating</th>
               <th style={{ ...cell, fontWeight: 600, whiteSpace: "nowrap" }}>Fit range</th>
               <th style={{ ...cell, fontWeight: 600 }}>What it means</th>
             </tr>
@@ -114,16 +115,28 @@ function FitDefinitionModal({ onClose }) {
           </tbody>
         </table>
 
-        <h3 style={{ fontSize: 18, margin: "22px 0 8px" }}>What places the score within the range</h3>
+        <h3 style={{ fontSize: 18, margin: "22px 0 8px" }}>
+          Step 2 — How attractive is the contract?
+        </h3>
+        <p style={{ margin: "0 0 8px" }}>Three things place the score within that range:</p>
         <ul style={{ margin: 0, paddingLeft: 22 }}>
           <li><strong>Size — 40%.</strong> How large the contract is and how central your kind of work is to it.</li>
           <li><strong>Urgency — 30%.</strong> Signs the account is in motion, such as funding changes or contract actions.</li>
           <li><strong>Timing — 30%.</strong> How close the contract is to renewal or recompete — the window to get in.</li>
         </ul>
-        <p style={{ marginTop: 12 }}>
-          How directly your own track record covers this work adjusts the result. A large, urgent
-          contract cannot outrank a prime with a proven need.
-        </p>
+        <p style={{ marginTop: 10 }}>How directly your own track record covers this work adjusts the placement.</p>
+
+        <div style={{ marginTop: 16, padding: "12px 16px", background: "#f3f4f6", borderRadius: 6 }}>
+          <p style={{ margin: "0 0 6px" }}><strong>Example.</strong> Two primes both already buy what you sell, so both have an
+            <strong> evidenced gap</strong> and both land in the 75–95 range:</p>
+          <ul style={{ margin: "0 0 8px", paddingLeft: 22 }}>
+            <li>Opportunity A is a smaller contract with its recompete far off → <strong>Fit ~80</strong></li>
+            <li>Opportunity B is a large contract with its recompete soon → <strong>Fit ~90</strong></li>
+          </ul>
+          <p style={{ margin: 0 }}>Both are proven-need primes; B ranks higher because it is the bigger, more
+            urgent opportunity. And because the gap comes first, even the smallest evidenced-gap contract
+            (75 or above) outranks the largest, most urgent plausible-gap contract (70 or below).</p>
+        </div>
         <p style={{ marginTop: 12, color: "#6b7280", fontSize: 14 }}>
           The gap rating uses public evidence about each prime in general, not a specific contract,
           and is re-checked monthly. No evidence does not mean they don't buy it.
