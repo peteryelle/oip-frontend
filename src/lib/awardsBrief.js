@@ -81,6 +81,12 @@ export function buildAwardBriefHtml(a, opts = {}) {
     a.motion ? `<span class="badge chip">${esc(a.motion)}</span>` : "",
     a.difficulty ? `<span class="badge chip">displace: ${esc(a.difficulty)}</span>` : "",
     pos.positioning_angle ? `<span class="badge chip">${esc(pos.positioning_angle)}</span>` : "",
+    !dd2Gated && bd.gap_fit && bd.gap_fit.band
+      ? `<span class="badge chip">${esc({ evidenced: "Evidenced gap", plausible: "Plausible gap", unknown: "Gap unknown", no_gap: "No gap" }[bd.gap_fit.band] || bd.gap_fit.band)}</span>`
+      : "",
+    !dd2Gated && bd.gap_fit && bd.gap_fit.play
+      ? `<span class="badge chip">${esc({ displace_competitor: "Displace or second-source a competitor", sub_into_gap: "Sub into the gap", sub_for_credit: "Sub for small-business credit", research_first: "Research before pitching", compete_at_recompete: "Compete at recompete" }[bd.gap_fit.play] || bd.gap_fit.play)}</span>`
+      : "",
   ].join("");
 
   // ── Core narrative ──
@@ -159,6 +165,48 @@ export function buildAwardBriefHtml(a, opts = {}) {
     peripheral: "Peripheral — a minor element",
   }[scores.deliverable_band] || null;
 
+  // GAP FIT — mirrors the gf block in B2BBusDevReport.jsx. Present only when
+  // the tenant has dd_v2_gap_fit on; then b2b_score is the gap-fit score (band
+  // sets the range, size/urgency/timing place it inside).
+  const gf = bd.gap_fit && bd.gap_fit.band ? bd.gap_fit : null;
+  const gapBandLabel = { evidenced: "Evidenced gap", plausible: "Plausible gap", unknown: "Gap unknown", no_gap: "No gap" };
+  const gapBandRange = { evidenced: "75–95", plausible: "50–70", unknown: "40–55", no_gap: "15–35" };
+  const gapPlayLabel = {
+    displace_competitor: "Displace or second-source a competitor",
+    sub_into_gap: "Sub into the gap",
+    sub_for_credit: "Sub for small-business credit",
+    research_first: "Research before pitching",
+    compete_at_recompete: "Compete at recompete",
+  };
+  const techHeadline = (g) => {
+    const v = g.vendor_named;
+    return {
+      competitor_in_use: `Works with ${v || "a competitor"}`,
+      other_vendor_in_use: `Works with ${v || "another vendor"}`,
+      relationship_only: `Known relationship with ${v || "a competitor"}`,
+      own_platform: "Builds its own",
+      none_found: "No public evidence of how they get this",
+    }[g.tech_evidence] || "No public evidence of how they get this";
+  };
+  const relLabel = {
+    campaign_case_study: "campaign case study",
+    partner_listing: "partner listing",
+    job_posting: "job posting",
+    interview_or_comarketing: "interview / co-marketing — not proof of purchase",
+  };
+  const coreLabel = {
+    core: "Core business — they do this themselves",
+    adjacent: "Adjacent — works in the field, nothing shows this capability",
+    outside: "Outside — different work",
+    unknown: "Unknown — not enough evidence",
+  };
+  const accessLabel = {
+    small_business_credit: "Small-business credit toward the prime's subcontracting goals",
+    set_aside_match: "Set-aside matches your certification",
+    none: "None beyond capability",
+    unknown: "Not assessed — small-business status not on your profile",
+  };
+
   const daysOut = bd.pop_end_date
     ? Math.round((new Date(bd.pop_end_date) - new Date()) / 86400000)
     : null;
@@ -191,6 +239,26 @@ export function buildAwardBriefHtml(a, opts = {}) {
       )
     : "";
 
+  const dd2GapHtml = !dd2Gated && gf
+    ? section(
+        "Why this band",
+        `<div class="avoid" style="background:#f0fdf4;border-left-color:#059669;"><strong>${esc(techHeadline(gf))}</strong>${
+          relLabel[gf.relationship_type] ? ` <span class="muted">· ${esc(relLabel[gf.relationship_type])}</span>` : ""
+        }</div>` +
+          (gf.evidence_line
+            ? `<p>${esc(gf.evidence_line)}${gf.evidence_url ? ` <a href="${esc(gf.evidence_url)}">source</a>` : ""}</p>`
+            : "") +
+          grid([
+            ["Their own core", coreLabel[gf.prime_core] || gf.prime_core || "—"],
+            ...(gf.prime_core_evidence ? [["· basis", gf.prime_core_evidence]] : []),
+            ...(gf.gap_slice ? [["What you would supply", gf.gap_slice]] : []),
+            ["Access route", accessLabel[gf.access_route] || gf.access_route || "—"],
+          ]) +
+          (Array.isArray(gf.notes) && gf.notes.length ? list(gf.notes) : "") +
+          mutedP("Public evidence about this prime in general, not this contract specifically. Re-checked monthly. No evidence does not mean they don't buy it.")
+      )
+    : "";
+
   const dd2DeliveryHtml = !dd2Gated && (inefficiency || entail.incumbent_method)
     ? section(
         "How the incumbent delivers this today",
@@ -208,6 +276,11 @@ export function buildAwardBriefHtml(a, opts = {}) {
     ? section(
         "Suggested sales play",
         para(play.opening) +
+          (play.withheld
+            ? `<div class="avoid" style="background:#fffbeb;border-left-color:#d97706;">${esc(
+                play.withheld_reason || "The drafted opening was withheld because it made claims your profile does not support."
+              )}</div>`
+            : "") +
           (play.anchor ? `<p class="muted">What makes it credible:</p>${para(play.anchor)}` : "") +
           (play.timing_rationale ? `<p class="muted">Why this moment:</p>${para(play.timing_rationale)}` : "") +
           (Array.isArray(play.their_language) && play.their_language.length
@@ -269,7 +342,27 @@ export function buildAwardBriefHtml(a, opts = {}) {
     ])
   );
 
-  const dd2ScoreHtml = !dd2Gated
+  const dd2ScoreHtml = !dd2Gated && gf
+    ? section(
+        "Scoring breakdown",
+        grid([
+          ["Gap band", `${gapBandLabel[gf.band] || gf.band} — range ${gapBandRange[gf.band] || "—"}`],
+          ["Play", gapPlayLabel[gf.play] || gf.play || "—"],
+          ["Placement within the band", gf.position != null ? `${Math.round(gf.position * 100)}%` : "—"],
+          ["· size", scores.size != null ? `${Math.round(scores.size)}/100${scores.value_note ? ` — ${scores.value_note}` : ""}` : "—"],
+          ["· urgency", scores.urgency != null ? `${Math.round(scores.urgency)}/100` : "—"],
+          ["· timing", scores.timing != null ? `${Math.round(scores.timing)}/100` : "—"],
+          ["· your strength on this", gf.tenant_strength || "—"],
+          ["B2B score", scores.b2b_score != null ? `${scores.b2b_score}/100` : "—"],
+          ...(scores.legacy_b2b_score != null
+            ? [["Previous score (size/urgency/timing only)", String(scores.legacy_b2b_score)]]
+            : []),
+        ]) +
+          mutedP(
+            "The gap band sets the range. Size (40%), urgency (30%) and timing (30%), adjusted for how directly your record covers this work, place the score within it — so a large, urgent contract cannot outrank a prime that has a real gap."
+          )
+      )
+    : !dd2Gated
     ? section(
         "Scoring breakdown",
         grid([
@@ -345,6 +438,8 @@ export function buildAwardBriefHtml(a, opts = {}) {
     `<p class="muted">Surfaced from federal recompete intelligence (PIID ${esc(bd.piid || a.piid || "—")}).${
       dd2Gated
         ? " Rejected at the entailment gate — the work does not require what you supply."
+        : gf
+        ? " Passed the entailment gate, banded by how the prime gets this capability, then placed on size, urgency and recompete timing."
         : " Passed the entailment gate, then scored on size, urgency and recompete timing."
     }</p>`
   );
@@ -352,6 +447,7 @@ export function buildAwardBriefHtml(a, opts = {}) {
   const dd2Html = [
     dd2GatedHtml,
     dd2ScopeHtml,
+    dd2GapHtml,
     dd2DeliveryHtml,
     dd2WhyNowHtml,
     dd2PlayHtml,
