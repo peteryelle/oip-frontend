@@ -43,7 +43,7 @@ export default function ProfilePage() {
   const loadProfile = async () => {
     const { data } = await supabase
       .from('profiles')
-      .select('id, version, is_active, data, created_at')
+      .select('id, version, is_active, is_tenant_canonical, data, created_at')
       .eq('oip_id', selectedOip.id)
       .order('version', { ascending: false })
     if (data && data.length) {
@@ -79,23 +79,50 @@ export default function ProfilePage() {
   const saveAsNewVersion = async () => {
     setSaving(true)
     const newVersion = (profile.version || 0) + 1
+    // The worker reads the TENANT-CANONICAL row (get_canonical_profile_row),
+    // not the active one. If the row being replaced is canonical, the flag
+    // must move to the new version — otherwise the worker keeps reading the
+    // old, now-inactive row and never sees this edit. Clear first, then
+    // insert, so there is never more than one canonical row per tenant.
+    const wasCanonical = !!profile.is_tenant_canonical
+    if (wasCanonical) {
+      const { error: canonErr } = await supabase
+        .from('profiles')
+        .update({ is_tenant_canonical: false })
+        .eq('id', profile.id)
+      if (canonErr) { alert(canonErr.message); setSaving(false); return }
+    }
     // Deactivate all profiles for this OIP, then insert+activate the new one
     const { error: deactErr } = await supabase
       .from('profiles')
       .update({ is_active: false })
       .eq('oip_id', selectedOip.id)
-    if (deactErr) { alert(deactErr.message); setSaving(false); return }
+    if (deactErr) {
+      if (wasCanonical) {
+        await supabase.from('profiles').update({ is_tenant_canonical: true }).eq('id', profile.id)
+      }
+      alert(deactErr.message); setSaving(false); return
+    }
 
     const { error: insErr } = await supabase
       .from('profiles')
       .insert({
         oip_id: selectedOip.id,
+        tenant_id: selectedOip.tenant_id,
         version: newVersion,
         is_active: true,
+        is_tenant_canonical: wasCanonical,
         data: draft,
       })
     setSaving(false)
-    if (insErr) { alert(insErr.message); return }
+    if (insErr) {
+      // Put the canonical flag back on the old row so the worker still has one.
+      if (wasCanonical) {
+        await supabase.from('profiles').update({ is_tenant_canonical: true }).eq('id', profile.id)
+      }
+      alert(insErr.message)
+      return
+    }
     await loadProfile()
     setEditing(false)
   }
