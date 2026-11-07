@@ -42,6 +42,9 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
 
   // Timing windows (duration days) configured on the Derived Demand page.
   const [windows, setWindows] = useState({ recompeteDays: 180, awardDays: 120 });
+  // Optional display cap (sentinel pull_config.busdev_display_limit). Set for
+  // non-paying tenants: the list shows only the top N by Fit. Unset = no cap.
+  const [displayLimit, setDisplayLimit] = useState(null);
   useEffect(() => {
     if (!oipId) return;
     let live = true;
@@ -58,6 +61,8 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
         recompeteDays: w.recompete_days ?? 180,
         awardDays: w.award_recency_days ?? 120,
       });
+      const lim = Number(data?.pull_config?.busdev_display_limit);
+      setDisplayLimit(Number.isFinite(lim) && lim > 0 ? lim : null);
     })();
     return () => {
       live = false;
@@ -94,6 +99,20 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
     includeStale: showStale,
     pocket,
   });
+
+  // Display cap: keep the top N by Fit, then show them in the user's chosen
+  // sort order. Applied after filters, so the cap means "top N of what you
+  // are currently looking at".
+  const shownAwards = React.useMemo(() => {
+    if (!displayLimit || awards.length <= displayLimit) return awards;
+    const top = new Set(
+      [...awards]
+        .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+        .slice(0, displayLimit)
+    );
+    return awards.filter((a) => top.has(a));
+  }, [awards, displayLimit]);
+  const capped = displayLimit && awards.length > displayLimit;
 
   // Status + pursue -- mirrors the existing SAM-direct pattern in App.jsx
   // (updateStatus/moveToPursued on oip_signals + pursued_signals), but with a
@@ -242,6 +261,8 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
       <div className="wq-awards-count">
         {loading
           ? "Loading…"
+          : capped
+          ? `Top ${shownAwards.length} by Fit`
           : `${awards.length}${awards.length !== total ? ` of ${total}` : ""} award${
               awards.length === 1 ? "" : "s"
             }`}
@@ -274,7 +295,7 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
 
       {!loading && !error && awards.length > 0 && (
         <AwardTable
-          awards={awards}
+          awards={shownAwards}
           onRowClick={setOpenAward}
           recompeteDays={windows.recompeteDays}
           awardDays={windows.awardDays}
