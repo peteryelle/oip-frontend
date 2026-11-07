@@ -42,11 +42,96 @@ const GAP_LABEL = {
   no_gap: "No gap",
 };
 
-const FIT_DEFINITION =
-  "Fit (0–100): how worth pursuing this opportunity is. The gap rating sets the range — " +
-  "Evidenced gap 75–95 (the prime already buys what you sell), Plausible gap 50–70 (likely buys it, vendor unknown), " +
-  "Gap unknown 40–55 (not enough public information), No gap (the prime does it themselves; not briefed). " +
-  "Within the range: size 40%, urgency 30%, timing 30%.";
+// Fit definition — opened by clicking the ⓘ on the Fit column. A large modal
+// (not a hover tooltip): readable, and stays open until the user closes it.
+function FitDefinitionModal({ onClose }) {
+  React.useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const rows = [
+    ["Evidenced gap", "75–95", "The prime already buys what you sell, from a competitor or another vendor. The need and budget are proven."],
+    ["Plausible gap", "50–70", "The prime works in this field but shows no sign of doing this themselves, so they likely buy it from someone."],
+    ["Gap unknown", "40–55", "There is not enough public information to tell."],
+    ["No gap", "not briefed", "The prime does this work themselves, so no sales brief is written."],
+  ];
+  const cell = { padding: "10px 12px", borderBottom: "1px solid #e5e7eb", verticalAlign: "top", textAlign: "left" };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.45)", zIndex: 1000,
+               display: "flex", alignItems: "center", justifyContent: "center" }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="What Fit means"
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "min(66vw, 980px)", maxWidth: "94vw", maxHeight: "80vh", overflowY: "auto",
+                 background: "#fff", borderRadius: 10, padding: "28px 32px",
+                 boxShadow: "0 20px 50px rgba(0,0,0,0.25)", fontSize: 16, lineHeight: 1.55,
+                 color: "#1f2937", textTransform: "none", letterSpacing: "normal", fontWeight: 400,
+                 fontFamily: "inherit", cursor: "default" }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 24 }}>What Fit means</h2>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{ border: "1px solid #d1d5db", background: "#fff", borderRadius: 6,
+                     padding: "6px 14px", fontSize: 15, cursor: "pointer" }}
+          >
+            Close ✕
+          </button>
+        </div>
+
+        <p style={{ marginTop: 14 }}>
+          <strong>Fit (0–100)</strong> ranks how worth pursuing each opportunity is. It answers one
+          question first: <em>does this prime need what you sell from someone outside?</em> That
+          answer — the gap rating — sets the score range.
+        </p>
+
+        <h3 style={{ fontSize: 18, margin: "22px 0 8px" }}>The four gap ratings</h3>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 15 }}>
+          <thead>
+            <tr>
+              <th style={{ ...cell, fontWeight: 600 }}>Rating</th>
+              <th style={{ ...cell, fontWeight: 600, whiteSpace: "nowrap" }}>Fit range</th>
+              <th style={{ ...cell, fontWeight: 600 }}>What it means</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([label, range, text]) => (
+              <tr key={label}>
+                <td style={{ ...cell, fontWeight: 600, whiteSpace: "nowrap" }}>{label}</td>
+                <td style={{ ...cell, whiteSpace: "nowrap" }}>{range}</td>
+                <td style={cell}>{text}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <h3 style={{ fontSize: 18, margin: "22px 0 8px" }}>What places the score within the range</h3>
+        <ul style={{ margin: 0, paddingLeft: 22 }}>
+          <li><strong>Size — 40%.</strong> How large the contract is and how central your kind of work is to it.</li>
+          <li><strong>Urgency — 30%.</strong> Signs the account is in motion, such as funding changes or contract actions.</li>
+          <li><strong>Timing — 30%.</strong> How close the contract is to renewal or recompete — the window to get in.</li>
+        </ul>
+        <p style={{ marginTop: 12 }}>
+          How directly your own track record covers this work adjusts the result. A large, urgent
+          contract cannot outrank a prime with a proven need.
+        </p>
+        <p style={{ marginTop: 12, color: "#6b7280", fontSize: 14 }}>
+          The gap rating uses public evidence about each prime in general, not a specific contract,
+          and is re-checked monthly. No evidence does not mean they don't buy it.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function vendorLine(gf) {
   if (!gf) return null;
@@ -153,6 +238,7 @@ function scopeFromTitle(title, piid) {
 export default function AwardTable({ awards, onRowClick, recompeteDays = 180, awardDays = 120 }) {
   const [sortKey, setSortKey] = useState("score");
   const [sortDir, setSortDir] = useState("desc");
+  const [showFitDef, setShowFitDef] = useState(false);
 
   const getVal = (a, key) => {
     switch (key) {
@@ -194,14 +280,17 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
     >
       {label}
       {info && (
-        <span
-          title={info}
-          aria-label={info}
-          onClick={(e) => e.stopPropagation()}
-          style={{ marginLeft: 4, cursor: "help", fontWeight: 400, opacity: 0.7 }}
+        <button
+          type="button"
+          aria-label="What Fit means"
+          onClick={(e) => { e.stopPropagation(); info(); }}
+          style={{ marginLeft: 6, border: "1px solid currentColor", borderRadius: "50%",
+                   width: 20, height: 20, lineHeight: "18px", padding: 0, fontSize: 12,
+                   background: "transparent", color: "inherit", cursor: "pointer",
+                   verticalAlign: "middle", fontWeight: 600 }}
         >
-          ⓘ
-        </span>
+          ?
+        </button>
       )}{" "}
       {sortKey === k ? (sortDir === "asc" ? "↑" : "↓") : ""}
     </th>
@@ -209,6 +298,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
 
   return (
     <div className="wq-atable-wrap">
+      {showFitDef && <FitDefinitionModal onClose={() => setShowFitDef(false)} />}
       <table className="wq-atable">
         <thead>
           <tr>
@@ -217,7 +307,7 @@ export default function AwardTable({ awards, onRowClick, recompeteDays = 180, aw
             <SortTh label="Amount" k="amount" right />
             <SortTh label="Prime Total" k="primeTotal" right />
             <SortTh label="Recompete" k="recompete" />
-            <SortTh label="Fit" k="score" info={FIT_DEFINITION} />
+            <SortTh label="Fit" k="score" info={() => setShowFitDef(true)} />
             <SortTh label="Disposition" k="disposition" />
             <th className="wq-atable-th">Delivery</th>
           </tr>
