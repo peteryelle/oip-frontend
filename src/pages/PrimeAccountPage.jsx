@@ -70,8 +70,8 @@ function Card({ title, children, note }) {
 }
 
 const EVIDENCE_HEADLINE = {
-  competitor_in_use: (v) => `Uses ${v || 'a competitor'}`,
-  other_vendor_in_use: (v) => `Buys from ${v || 'another vendor'}`,
+  competitor_in_use: (v) => `Works with ${v || 'a competitor'}`,
+  other_vendor_in_use: (v) => `Works with ${v || 'another vendor'}`,
   relationship_only: (v) => `Known relationship with ${v || 'a competitor'}`,
   own_platform: () => 'Builds its own',
   none_found: () => 'No public evidence found',

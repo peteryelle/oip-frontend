@@ -278,8 +278,8 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
     const techHeadline = (g) => {
       const v = g.vendor_named;
       return {
-        competitor_in_use: `Uses ${v || "a competitor"}`,
-        other_vendor_in_use: `Buys from ${v || "another vendor"}`,
+        competitor_in_use: `Works with ${v || "a competitor"}`,
+        other_vendor_in_use: `Works with ${v || "another vendor"}`,
         relationship_only: `Known relationship with ${v || "a competitor"}`,
         own_platform: "Builds its own",
         none_found: "No public evidence of how they get this",
@@ -655,6 +655,11 @@ export default function B2BBusDevReport({ award, recompeteDays = 180, subscriber
         {!gated && play && (
           <Section title="Suggested sales play">
             {play.opening && <p className="wq-rep-p blurable">{play.opening}</p>}
+            {play.withheld && (
+              <p className="wq-rep-p" style={{ background: "#fffbeb", borderLeft: "3px solid #d97706", padding: "0.45rem 0.7rem", borderRadius: 6 }}>
+                {play.withheld_reason || "The drafted opening was withheld because it made claims your profile does not support."}
+              </p>
+            )}
 
             {play.anchor && (
               <>
