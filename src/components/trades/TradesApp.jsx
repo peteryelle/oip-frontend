@@ -214,7 +214,7 @@ export default function TradesApp() {
 
 // ─── swipeable card ─────────────────────────────────────────────────────────
 
-function SwipeCard({ onSwipeLeft, onSwipeRight, onTap, outlined, leftLabel = 'Pass', rightLabel = 'Save', rightOnLabel = 'Saved', rightOn = false, children }) {
+function SwipeCard({ onSwipeLeft, onSwipeRight, onTap, outlined, leftLabel = 'Pass', rightLabel = 'Save', rightOnLabel = 'Saved', rightOn = false, showActions = false, children }) {
   const start = useRef(null)
   const moved = useRef(false)
   const [dx, setDx] = useState(0)
@@ -255,12 +255,12 @@ function SwipeCard({ onSwipeLeft, onSwipeRight, onTap, outlined, leftLabel = 'Pa
         role="button" tabIndex={0}
       >
         {children}
-        <div className="tq-card-actions">
+        {showActions && <div className="tq-card-actions">
           <button type="button" onPointerDown={e => e.stopPropagation()}
             onClick={e => { e.stopPropagation(); onSwipeLeft?.() }}>{leftLabel}</button>
           <button type="button" className={rightOn ? 'is-on' : ''} onPointerDown={e => e.stopPropagation()}
             onClick={e => { e.stopPropagation(); onSwipeRight?.() }}>{rightOn ? rightOnLabel : rightLabel}</button>
-        </div>
+        </div>}
       </div>
     </div>
   )
@@ -304,7 +304,7 @@ function BidsScreen({ items, loading, error, tenantName, onOpen, onPass, onSave 
       </div>
       <p className="tq-hint">
         <span className="tq-touch-only">Swipe right to save, left to pass</span>
-        <span className="tq-mouse-only">Use the buttons, or select a card and press ← to pass, → to save</span>
+        <span className="tq-mouse-only">Open a bid to pass, save or bid on it</span>
       </p>
       <main className="tq-list">
         {loading && <p className="tq-empty">Loading bids…</p>}
@@ -408,7 +408,7 @@ function ComingUpScreen({ items, loading, onWatch, onHide }) {
       </header>
       <p className="tq-hint">
         <span className="tq-touch-only">Swipe right to watch, left to hide</span>
-        <span className="tq-mouse-only">Use the buttons, or select a card and press ← to hide, → to watch</span>
+        <span className="tq-mouse-only">Use the buttons to watch or hide a project</span>
       </p>
       <main className="tq-list">
         {loading && <p className="tq-empty">Loading…</p>}
@@ -417,7 +417,7 @@ function ComingUpScreen({ items, loading, onWatch, onHide }) {
         )}
         {list.map(i => (
           <SwipeCard key={`${i.oipId}:${i.signalId}`} outlined={i.status === 'reviewed'}
-            leftLabel="Hide" rightLabel="Watch" rightOnLabel="Watching" rightOn={i.status === 'reviewed'}
+            showActions leftLabel="Hide" rightLabel="Watch" rightOnLabel="Watching" rightOn={i.status === 'reviewed'}
             onSwipeRight={() => onWatch(i)} onSwipeLeft={() => onHide(i)}
             onTap={() => i.docUrl && window.open(i.docUrl, '_blank', 'noopener')}>
             <div className="tq-card-top">
