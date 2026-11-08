@@ -34,6 +34,7 @@ import UtilityActivity from './components/signals/UtilityActivity'
 import { loadUtilityLinks, CROSS_LANE, relatedTitle } from './lib/utilityLinks'
 import { exportDrawerPdf } from './lib/briefPdf'
 import ProfilePage from './pages/ProfilePage'
+import TradesGate from './components/trades/TradesGate'
 import { Block, SectionLoader, HelpIcon } from './components/ui/shared'
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
-            <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
+            <Route path="/" element={<RequireAuth><TradesGate><Layout /></TradesGate></RequireAuth>}>
               <Route index element={<HomePage />} />
               <Route path="weekly" element={<WeeklyUpdatePage />} />
               <Route path="market" element={<MarketReviewPage />} />
