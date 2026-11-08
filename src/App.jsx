@@ -3190,7 +3190,9 @@ function sledRow(s) {
   const noticeId = meta.solicitation_number || (ext.match(/-([A-Za-z0-9]+)$/) || [])[1] || ''
   const feedSlug = ext.replace(/^SLED-/, '').replace(/-[A-Za-z0-9]+$/, '')
   const feedHit  = SLED_FEED_LABELS.find(([k]) => feedSlug.startsWith(k))
-  const feed     = feedHit ? feedHit[1] : feedSlug
+  // Hide the scraping platform from the label: civicplus-methuen-town-agenda -> methuen-town-agenda
+  const feed     = feedHit ? feedHit[1]
+    : feedSlug.replace(/^(civicplus|boarddocs|legistar|granicus|novusagenda|primegov|municode|iqm2|ecode360)-/i, '')
 
   const rule = SLED_TYPE_RULES.find(([re]) => re.test(title))
   const metaType = meta.ad_type && /sole|single source|exempt from advertising/i.test(meta.ad_type)
