@@ -74,6 +74,7 @@ function toItem(row) {
     fit: fitOf(row.signal_tier),
     status: row.status || 'new',
     excerpt: row.text_excerpt || null,
+    reason: row.match_reason ? String(row.match_reason).replace(/\s*\[[^\]]*\]\s*$/, '') : null,
     board: isBoardSource(s),
     kind: bidKind(s.title),
   }
@@ -393,9 +394,14 @@ function JobDetail({ item, onBack, onPass, onSave, onBid }) {
 // ─── Coming up ──────────────────────────────────────────────────────────────
 
 function ComingUpScreen({ items, loading, onWatch, onHide }) {
-  const list = useMemo(() => items
-    .filter(i => !i.due && i.board && i.fit && i.status !== 'dismissed')
-    .sort((a, b) => (b.meetingDate || 0) - (a.meetingDate || 0)), [items])
+  // Board items are meetings, not deadlines. Keep upcoming meetings and ones held in
+  // the last 60 days (recent approvals); drop older or undated ones.
+  const list = useMemo(() => {
+    const cutoff = new Date(startOfToday().getTime() - 60 * 86400000)
+    return items
+      .filter(i => !i.due && i.board && i.fit && i.status !== 'dismissed' && i.meetingDate && i.meetingDate >= cutoff)
+      .sort((a, b) => b.meetingDate - a.meetingDate)
+  }, [items])
 
   return (
     <>
@@ -425,11 +431,12 @@ function ComingUpScreen({ items, loading, onWatch, onHide }) {
               <span className="tq-due">
                 {i.status === 'reviewed' ? 'Watching' : ''}
                 {i.status === 'reviewed' && i.meetingDate ? ' · ' : ''}
-                {i.meetingDate ? `Board ${fmtDue(i.meetingDate)}` : ''}
+                {i.meetingDate ? `${i.meetingDate < startOfToday() ? 'Board met' : 'Board meets'} ${fmtDue(i.meetingDate)}` : ''}
               </span>
             </div>
             <span className="tq-title">{i.title}</span>
             {i.org && <span className="tq-meta">{i.org}</span>}
+            {i.reason && <span className="tq-reason">{i.reason}</span>}
           </SwipeCard>
         ))}
       </main>
