@@ -39,6 +39,18 @@ function bidKind(title) {
   return /sub[\s-]?bids?/i.test(title || '') ? 'Filed sub-bid' : null
 }
 
+// COMMBUYS "excerpts" often just restate the title, bid number and organization.
+// Show the box only when real scope text is left after removing those.
+function usefulExcerpt(item) {
+  if (!item.excerpt) return null
+  let rest = item.excerpt
+  for (const part of [item.title, item.bidNumber, item.org]) {
+    if (part) rest = rest.split(part).join(' ')
+  }
+  rest = rest.replace(/bid solicitation\s*#?:?|organization:?/gi, ' ').replace(/[\s.,:;#-]+/g, ' ').trim()
+  return rest.length >= 40 ? item.excerpt : null
+}
+
 function isBoardSource(s) {
   const src = `${s?.source_name || ''} ${s?.source || ''} ${s?.metadata?.platform || ''}`.toLowerCase()
   return src.includes('boarddocs') || src.includes('legistar') || src.includes('board')
@@ -202,7 +214,7 @@ export default function TradesApp() {
 
 // ─── swipeable card ─────────────────────────────────────────────────────────
 
-function SwipeCard({ onSwipeLeft, onSwipeRight, onTap, outlined, children }) {
+function SwipeCard({ onSwipeLeft, onSwipeRight, onTap, outlined, leftLabel = 'Pass', rightLabel = 'Save', rightOnLabel = 'Saved', rightOn = false, children }) {
   const start = useRef(null)
   const moved = useRef(false)
   const [dx, setDx] = useState(0)
@@ -235,10 +247,20 @@ function SwipeCard({ onSwipeLeft, onSwipeRight, onTap, outlined, children }) {
         className={`tq-card${outlined ? ' is-outlined' : ''}`}
         style={{ transform: dx ? `translateX(${dx}px)` : undefined, transition: dx ? 'none' : undefined }}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-        onKeyDown={e => { if (e.key === 'Enter') onTap?.() }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') onTap?.()
+          else if (e.key === 'ArrowLeft') { e.preventDefault(); onSwipeLeft?.() }
+          else if (e.key === 'ArrowRight') { e.preventDefault(); onSwipeRight?.() }
+        }}
         role="button" tabIndex={0}
       >
         {children}
+        <div className="tq-card-actions">
+          <button type="button" onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onSwipeLeft?.() }}>{leftLabel}</button>
+          <button type="button" className={rightOn ? 'is-on' : ''} onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onSwipeRight?.() }}>{rightOn ? rightOnLabel : rightLabel}</button>
+        </div>
       </div>
     </div>
   )
@@ -280,7 +302,10 @@ function BidsScreen({ items, loading, error, tenantName, onOpen, onPass, onSave 
             aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>
         ))}
       </div>
-      <p className="tq-hint">Swipe right to save, left to pass</p>
+      <p className="tq-hint">
+        <span className="tq-touch-only">Swipe right to save, left to pass</span>
+        <span className="tq-mouse-only">Use the buttons, or select a card and press ← to pass, → to save</span>
+      </p>
       <main className="tq-list">
         {loading && <p className="tq-empty">Loading bids…</p>}
         {error && <p className="tq-empty">{error}</p>}
@@ -294,7 +319,7 @@ function BidsScreen({ items, loading, error, tenantName, onOpen, onPass, onSave 
         {shown.map(i => {
           const d = daysUntil(i.due)
           return (
-            <SwipeCard key={`${i.oipId}:${i.signalId}`} outlined={i.status === 'reviewed'}
+            <SwipeCard key={`${i.oipId}:${i.signalId}`} outlined={i.status === 'reviewed'} rightOn={i.status === 'reviewed'}
               onTap={() => onOpen(i)} onSwipeLeft={() => onPass(i)} onSwipeRight={() => onSave(i)}>
               <div className="tq-card-top">
                 <FitChip fit={i.fit} />
@@ -344,10 +369,10 @@ function JobDetail({ item, onBack, onPass, onSave, onBid }) {
             ))}
           </div>
         )}
-        {item.excerpt && (
+        {usefulExcerpt(item) && (
           <section className="tq-panel">
             <h2>The work</h2>
-            <p>{item.excerpt}</p>
+            <p>{usefulExcerpt(item)}</p>
           </section>
         )}
         {item.docUrl && (
@@ -381,7 +406,10 @@ function ComingUpScreen({ items, loading, onWatch, onHide }) {
         </div>
         <p className="tq-sub">Approved by a town or school board, not out to bid yet.</p>
       </header>
-      <p className="tq-hint">Swipe right to watch, left to hide</p>
+      <p className="tq-hint">
+        <span className="tq-touch-only">Swipe right to watch, left to hide</span>
+        <span className="tq-mouse-only">Use the buttons, or select a card and press ← to hide, → to watch</span>
+      </p>
       <main className="tq-list">
         {loading && <p className="tq-empty">Loading…</p>}
         {!loading && list.length === 0 && (
@@ -389,6 +417,7 @@ function ComingUpScreen({ items, loading, onWatch, onHide }) {
         )}
         {list.map(i => (
           <SwipeCard key={`${i.oipId}:${i.signalId}`} outlined={i.status === 'reviewed'}
+            leftLabel="Hide" rightLabel="Watch" rightOnLabel="Watching" rightOn={i.status === 'reviewed'}
             onSwipeRight={() => onWatch(i)} onSwipeLeft={() => onHide(i)}
             onTap={() => i.docUrl && window.open(i.docUrl, '_blank', 'noopener')}>
             <div className="tq-card-top">

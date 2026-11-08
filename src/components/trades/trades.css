@@ -121,8 +121,8 @@
 
 .tq-link-row {
   display: flex; align-items: center; min-height: 48px; padding: 0 16px; border-radius: 14px;
-  background: var(--tq-card); border: 1px solid var(--tq-line-soft); color: var(--tq-ink);
-  font-size: 15px; font-weight: 600; text-decoration: none;
+  background: var(--tq-card); border: 2px solid var(--tq-ink); color: var(--tq-ink);
+  font-size: 16px; font-weight: 700; text-decoration: none;
 }
 .tq-quiet-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .tq-quiet-actions button {
@@ -180,3 +180,19 @@
 @media (prefers-reduced-motion: reduce) {
   .tq-card { transition: none; }
 }
+
+/* laptop / mouse: buttons on cards, hint switches */
+.tq-card-actions { display: none; }
+.tq-mouse-only { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .tq-touch-only { display: none; }
+  .tq-mouse-only { display: inline; }
+  .tq-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .tq-card-actions button {
+    height: 36px; border-radius: 8px; border: 1px solid var(--tq-line); background: var(--tq-card);
+    font-size: 14px; font-weight: 600;
+  }
+  .tq-card-actions button:hover { border-color: var(--tq-ink); }
+  .tq-card-actions button.is-on { background: var(--tq-ink); border-color: var(--tq-ink); color: #FFFFFF; }
+}
+
