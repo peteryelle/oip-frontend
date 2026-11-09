@@ -43,11 +43,30 @@
 //   also_signal_ids -> other signal ids for the SAME notice (captured by more
 //                      than one feed); the record is copied to them.
 //
+// v3 (2026-11-09) procurement path — guardrails after the WMCHealth/SeenThis
+// review (wrong due date, reversed scope, invented compliance rules):
+//   * Facts are extracted ONCE per notice, tenant-blind, into notice_facts and
+//     shared by every OIP on the notice. No tenant profile and no listing due
+//     date in the extraction prompt.
+//   * Every fact carries a verbatim quote + page; code checks each quote
+//     against the PDF text layer (unpdf). Unverified facts are never shown.
+//   * The document outranks the listing; listing/document conflicts are kept.
+//   * Stage is computed from every milestone (due, award, contract start,
+//     tentative flags, award evidence). Restricted periods stay active until
+//     their stated condition (e.g. award approval) is evidenced.
+//   * Per-OIP synthesis must cite fact ids or mark a claim as inference; a
+//     code validator drops uncited facts, unsupported dates/dollars, open-bid
+//     wording after the due date, absence claims on partial coverage, and
+//     staff contact during an active restricted period.
+//   * Compliance is rendered by code from cited facts, never by the LLM.
+// Board-meeting and regulatory modes are unchanged.
+//
 // Secrets: TAVILY_API_KEY, ANTHROPIC_API_KEY (+ SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY provided by Supabase).
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
+import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 
 const SUPABASE_URL  = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -61,7 +80,11 @@ const MODEL         = "claude-haiku-4-5-20251001";
 // sentinel's pull_config.enrichment_min_version (per OIP, metered, opt-in).
 //   1 (implicit, rows written before 2026-10-28)
 //   2  computed stage, tenant sales plays, incumbent lookup
-const INTEL_VERSION = 2;
+//   3  shared tenant-blind notice_facts, quote verification, cited synthesis,
+//      code-rendered compliance, milestone stage
+const INTEL_VERSION = 3;
+// notice_facts.facts_version: bump when the extraction schema changes.
+const FACTS_VERSION = 3;
 const CROL_URL      = "https://data.cityofnewyork.us/resource/tfbu-zbd2.json";
 const MAX_PDF_BYTES = 12 * 1024 * 1024;
 const NO_WINNER_RETRY_DAYS = 14;
@@ -175,41 +198,6 @@ async function claudeJSON(content: unknown[], maxTokens = 2000): Promise<Record<
   const a = text.indexOf("{"), b = text.lastIndexOf("}");
   if (a === -1 || b <= a) return null;
   try { return JSON.parse(text.slice(a, b + 1)); } catch { return null; }
-}
-
-const EXTRACT_SPEC = `Return ONLY JSON, no preamble:
-{
- "same_procurement": {"match": false, "reason": ""},
- "contacts": [{"name":"","title":"","organization":"","email":"","phone":"","role":"designated|administrative|subject_matter|consultant|listed"}],
- "timeline": [{"event":"","date":"YYYY-MM-DD","time":""}],
- "gates": [""],
- "restricted_period": {"applies": false, "basis": "", "until": ""},
- "award_method": "",
- "criteria": [""],
- "commercials": {"term":"","budget":"","goals":"","subcontracting":""},
- "tenant_signals": [{"quote":"","why":""}],
- "summary": ""
-}
-Rules: FIRST decide same_procurement: match=true ONLY if the material is about THIS procurement — same issuing agency (or its parent) AND the same scope/title or solicitation number. A different organization's RFP on a similar topic is match=false. If match=false, leave every other field empty.
-Use only what the material states; leave fields empty rather than guessing.
-contacts: only people/offices named as contacts for THIS procurement.
-timeline: every dated event (intent to propose, questions due, answers, proposals due, finalists, presentations, award, contract start).
-gates: requirements to participate (letter of intent, NDA, mandatory meeting, registration, eligibility).
-restricted_period: lobbying / restricted-communication rules (e.g. NY State Finance Law 139-j/139-k), and when they end.
-tenant_signals: up to 5 short quotes (max 30 words each) that relate to the TENANT described below, with why each matters.
-summary: 2 sentences on what is being bought.`;
-
-async function extractFromPdf(pdfB64: string, notice: string, tenant: string) {
-  return await claudeJSON([
-    { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfB64 } },
-    { type: "text", text: `This is the solicitation document for: ${notice}\n\nTENANT: ${tenant}\n\n${EXTRACT_SPEC}` },
-  ], 2500);
-}
-
-async function extractFromText(material: string, notice: string, tenant: string) {
-  return await claudeJSON([
-    { type: "text", text: `Web search results about this procurement: ${notice}\n\n${material}\n\nTENANT: ${tenant}\n\n${EXTRACT_SPEC}` },
-  ], 2000);
 }
 
 // ── Winner (post-award) ───────────────────────────────────────────────────
@@ -335,6 +323,370 @@ Return ONLY JSON: {"vendor":"","confidence":"high|medium|low","evidence":"","sou
     vendor: ok ? String(out!.vendor) : "", confidence: ok ? String(out!.confidence ?? "") : "",
     evidence: ok ? String(out!.evidence ?? "") : "", source_url: ok ? String(out!.source_url) : "", queries,
   };
+}
+
+
+// ── v3 extraction: tenant-blind, every field carries a verbatim quote ──────
+// The model reads the document with NO tenant profile and NO listing due date
+// (both biased v2: the tenant pulled scope toward what the tenant sells, and
+// the listing's "due" primed the timeline). Quotes are checked in code
+// against the document's own text layer before anything is rendered.
+const EXTRACT_SPEC_V3 = `Return ONLY JSON, no preamble. Every field object has "quote" (copied VERBATIM from the document, max 40 words, no paraphrase, no added words) and "page" (1-based page number where the quote appears).
+{
+ "same_procurement": {"match": false, "reason": ""},
+ "identity": {"issuing_agency": {"value":"","quote":"","page":0}, "buyer": {"value":"","quote":"","page":0}, "solicitation_number": {"value":"","quote":"","page":0}, "title": {"value":"","quote":"","page":0}},
+ "dates": [{"event_type":"issued|intent_due|questions_due|answers_issued|proposal_due|finalists_notified|presentations|award|contract_start|other","label":"","date":"YYYY-MM-DD","time":"","tentative":false,"quote":"","page":0}],
+ "dates_tentative": {"value": false, "quote":"", "page":0},
+ "scope_included": [{"value":"","quote":"","page":0}],
+ "scope_excluded": [{"value":"","quote":"","page":0}],
+ "buyer_role": {"direct": [{"value":"","quote":"","page":0}], "via_partners": [{"value":"","quote":"","page":0}]},
+ "contract": {"term": {"value":"","quote":"","page":0}, "renewals": {"value":"","quote":"","page":0}, "value": {"value":"","quote":"","page":0}, "pricing": {"value":"","quote":"","page":0}},
+ "gates": [{"value":"","quote":"","page":0}],
+ "submission_requirements": [{"value":"","quote":"","page":0}],
+ "insurance": [{"value":"","quote":"","page":0}],
+ "restricted_period": {"applies": false, "end_event": "", "end_date": "", "condition": "", "designated_contacts": [""], "quote":"", "page":0},
+ "contacts": [{"name":"","title":"","organization":"","email":"","phone":"","role":"designated|administrative|subject_matter|consultant|listed","quote":"","page":0}],
+ "criteria": [{"value":"","quote":"","page":0}],
+ "award_method": {"value":"","quote":"","page":0},
+ "summary": ""
+}
+Rules:
+FIRST decide same_procurement: match=true ONLY if the document is about THIS procurement — same issuing agency (or its parent) AND the same scope/title or solicitation number. If match=false, leave every other field empty.
+Use only what the document states. If something is not in the document, leave the field empty ("" / [] / null) — never guess, never infer, never fill from general knowledge.
+quote: exact characters from the document so it can be found by text search. Never combine sentences. Never quote a sentence that does not exist.
+dates: EVERY dated event in the schedule, each with its own event_type. "proposal_due" is ONLY the deadline for submitting proposals/bids/responses — never the finalist notice, award or ad end. tentative=true if the document calls that date tentative/estimated/subject to change.
+dates_tentative: true if the document says the schedule as a whole is tentative or may change.
+scope_included: what the selected vendor will do. scope_excluded: work the document says is performed by OTHERS (other agencies, partner firms, in-house staff), or explicitly not part of this contract. Capture those statements carefully.
+buyer_role.direct: categories this buyer purchases under THIS contract. via_partners: categories the document says the buyer purchases through other partners/agencies.
+contract: term (base period), renewals/options, value (dollar amount or budget), pricing structure — only as stated.
+gates: requirements to participate (letter of intent, NDA, mandatory meeting, registration, eligibility).
+submission_requirements: every distinct item the proposal must contain or include (forms, statements, references, financials, fee proposal, staffing, case studies, certifications). One entry per item, no duplicates, max 30.
+insurance: each required coverage with its limit, max 12.
+restricted_period: lobbying / restricted-communication rules (e.g. NY State Finance Law 139-j/139-k). end_event: what ends it, in the document's words (e.g. "tentative award and approval of contract"). end_date: ONLY if the document gives a specific end date for the restriction itself; otherwise "". condition: the full ending condition. designated_contacts: the named persons vendors may contact.
+contacts: only people/offices named as contacts for THIS procurement. Max 8.
+criteria: evaluation criteria, max 12.
+summary: 2 plain sentences on what is being bought.`;
+
+type LLMOut = { json: Record<string, unknown> | null; truncated: boolean };
+
+async function claudeJSONx(content: unknown[], maxTokens: number): Promise<LLMOut> {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: MODEL, max_tokens: maxTokens, temperature: 0,
+      messages: [{ role: "user", content }],
+    }),
+  });
+  if (!r.ok) { console.error("anthropic", r.status, await r.text()); return { json: null, truncated: false }; }
+  const d = await r.json();
+  const truncated = d.stop_reason === "max_tokens";
+  const text = (d.content ?? []).map((c: { text?: string }) => c.text ?? "").join("");
+  const a = text.indexOf("{"), b = text.lastIndexOf("}");
+  if (a === -1 || b <= a) return { json: null, truncated };
+  try { return { json: JSON.parse(text.slice(a, b + 1)), truncated }; } catch { return { json: null, truncated }; }
+}
+
+async function extractV3FromPdf(pdfB64: string, identity: string): Promise<LLMOut> {
+  return await claudeJSONx([
+    { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfB64 } },
+    { type: "text", text: `This document is believed to be the solicitation for: ${identity}\n\n${EXTRACT_SPEC_V3}` },
+  ], 8000);
+}
+
+async function extractV3FromText(material: string, identity: string): Promise<LLMOut> {
+  return await claudeJSONx([
+    { type: "text", text: `Web search results about this procurement: ${identity}\nTreat the text between the markers as the "document"; page = the [n] result number.\n<<<\n${material}\n>>>\n\n${EXTRACT_SPEC_V3}` },
+  ], 6000);
+}
+
+// ── Text layer + quote verification (no LLM) ─────────────────────────────
+type TextLayer = { pages: string[]; status: "ok" | "scanned" | "none" };
+
+async function pdfTextLayer(buf: Uint8Array): Promise<TextLayer> {
+  try {
+    const pdf = await getDocumentProxy(new Uint8Array(buf));
+    const { text } = await extractText(pdf, { mergePages: false });
+    const pages = (Array.isArray(text) ? text : [String(text ?? "")]).map(t => String(t ?? ""));
+    const chars = pages.reduce((n, p) => n + p.replace(/\s/g, "").length, 0);
+    return { pages, status: pages.length && chars / pages.length >= 100 ? "ok" : "scanned" };
+  } catch (e) {
+    console.error("pdf text layer failed", e);
+    return { pages: [], status: "none" };
+  }
+}
+
+const normText = (s: string) => s.toLowerCase()
+  .replace(/[\u2018\u2019\u201a\u201b]/g, "'").replace(/[\u201c\u201d\u201e]/g, '"')
+  .replace(/[\u2013\u2014]/g, "-").replace(/-\s+/g, "-")
+  .replace(/[^a-z0-9$%.,'"\-\s]/g, " ").replace(/\s+/g, " ").trim();
+
+// A quote passes when every ellipsis-separated segment of 3+ words occurs, in
+// order, on the cited page (or anywhere when the page is missing/out of range).
+function quoteFound(quote: string, page: number, layer: TextLayer, normPages: string[]): boolean {
+  const q = String(quote ?? "").trim();
+  if (q.split(/\s+/).length < 3) return false;
+  const segs = q.split(/\.{3}|\u2026/).map(normText).filter(s => s.split(" ").length >= 3);
+  if (!segs.length) return false;
+  const pool = page >= 1 && page <= normPages.length
+    ? [normPages[page - 1], (normPages[page - 2] ?? "") + " " + normPages[page - 1] + " " + (normPages[page] ?? "")]
+    : [normPages.join(" ")];
+  return pool.some(hay => {
+    let at = 0;
+    for (const s of segs) { const i = hay.indexOf(s, at); if (i === -1) return false; at = i + s.length; }
+    return true;
+  });
+}
+
+// Walks the extracted facts and stamps every quoted node with verified:
+//   true   quote found in the text layer
+//   false  quote missing or not found -> kept for audit, never rendered
+//   null   no usable text layer (scanned) -> unverifiable, rendered labeled
+function verifyFacts(facts: Record<string, unknown>, layer: TextLayer): { checked: number; passed: number } {
+  const normPages = layer.pages.map(normText);
+  let checked = 0, passed = 0;
+  const visit = (node: unknown) => {
+    if (Array.isArray(node)) { node.forEach(visit); return; }
+    if (!node || typeof node !== "object") return;
+    const o = node as Record<string, unknown>;
+    if ("quote" in o) {
+      const hasValue = ["value", "date", "name", "applies"].some(k => {
+        const v = o[k]; return v !== undefined && v !== null && v !== "" && v !== false && v !== 0;
+      });
+      if (hasValue) {
+        if (layer.status !== "ok") o.verified = null;
+        else { checked++; o.verified = quoteFound(String(o.quote ?? ""), Number(o.page) || 0, layer, normPages); if (o.verified) passed++; }
+      } else o.verified = false;
+    }
+    for (const [k, v] of Object.entries(o)) if (k !== "quote") visit(v);
+  };
+  visit(facts);
+  return { checked, passed };
+}
+
+const shown = (n: unknown) => !!n && typeof n === "object" && (n as Record<string, unknown>).verified !== false;
+const valOf = (n: unknown) => n && typeof n === "object" ? String((n as Record<string, unknown>).value ?? "") : "";
+
+function dedupeList(list: unknown): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const it of Array.isArray(list) ? list as Record<string, unknown>[] : []) {
+    if (!it) continue;
+    const key = normText(String(it.value ?? it.name ?? it.quote ?? "")).replace(/\b(the|a|an|and|of)\b/g, "").replace(/\s+/g, " ").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key); out.push(it);
+  }
+  return out;
+}
+
+const isoDay = (s: unknown) => { const d = toDate(s); return d ? d.toISOString().slice(0, 10) : ""; };
+
+function factDate(facts: Record<string, unknown>, type: string): Date | null {
+  for (const d of (facts.dates as Record<string, unknown>[]) ?? []) {
+    if (d && d.event_type === type && shown(d)) { const t = toDate(d.date); if (t) return t; }
+  }
+  return null;
+}
+
+// ── v3 stage: from every milestone, by rule ───────────────────────────────
+type StageV3 = { code: "locked" | "open" | "closing" | "proposals_in" | "award_pending" | "awarded" | "contract_live" | "unknown";
+                 basis: string; days_to_due: number | null; computed_at: string };
+
+function awardEvidence(winner: Record<string, unknown> | null): boolean {
+  if (!winner) return false;
+  if (winner.award) return true;
+  return ((winner.candidates as Record<string, unknown>[]) ?? [])
+    .some(c => c && (c.confidence === "high" || c.confidence === "medium"));
+}
+
+function computeStageV3(meta: Record<string, unknown>, title: string, facts: Record<string, unknown>,
+                        due: Date | null, winner: Record<string, unknown> | null, now: Date): StageV3 {
+  const at = now.toISOString();
+  const lockText = [meta.selection_method_description, meta.ad_type, meta.notice_type,
+                    meta.type_of_notice_description, title].map(v => String(v ?? "")).join(" | ");
+  const days = due ? Math.ceil((due.getTime() - now.getTime()) / 86400000) : null;
+  const m = lockText.match(LOCKED_RE);
+  if (m) return { code: "locked", days_to_due: days, basis: `source record says "${m[0]}"`, computed_at: at };
+  if (days === null) return { code: "unknown", days_to_due: null, basis: "no proposal due date in the document or listing", computed_at: at };
+  if (days >= 0) return { code: days <= CLOSING_WINDOW_DAYS ? "closing" : "open", days_to_due: days, basis: `proposals due in ${days} day(s)`, computed_at: at };
+  const award = factDate(facts, "award");
+  const start = factDate(facts, "contract_start");
+  const evidenced = awardEvidence(winner);
+  if (evidenced && start && now >= start) return { code: "contract_live", days_to_due: days, basis: `award evidenced; contract start ${isoDay(start)} reached`, computed_at: at };
+  if (evidenced) return { code: "awarded", days_to_due: days, basis: "award evidenced by an award notice or source naming the winner", computed_at: at };
+  if (award && now >= award) return { code: "award_pending", days_to_due: days, basis: `tentative award date ${isoDay(award)} passed; no award notice found`, computed_at: at };
+  return { code: "proposals_in", days_to_due: days, basis: `proposals were due ${-days} day(s) ago; award not yet due`, computed_at: at };
+}
+
+// Sales plays are configured against the v2 stage codes.
+const playStageOf = (c: StageV3["code"]) =>
+  c === "open" || c === "closing" || c === "locked" || c === "unknown" ? c : "closed";
+
+// Legacy opportunity_intel.stage values the current UI understands.
+const legacyStageOf = (c: StageV3["code"]) => ({
+  locked: "closed", open: "open", closing: "open", proposals_in: "proposals_in",
+  award_pending: "proposals_in", awarded: "awarded", contract_live: "contract_live", unknown: "",
+} as Record<string, string>)[c];
+
+function restrictedStatus(facts: Record<string, unknown>, winner: Record<string, unknown> | null, now: Date) {
+  const rp = (facts.restricted_period ?? {}) as Record<string, unknown>;
+  if (!rp.applies || !shown(rp)) return { applies: false, active: false, basis: "" };
+  const end = toDate(rp.end_date);
+  const condition = String(rp.condition || rp.end_event || "").replace(/^\s*until\s+/i, "");
+  const needsApproval = /approv/i.test(condition);
+  const evidenced = awardEvidence(winner);
+  let active = true, basis = "no end date stated; treated as active";
+  if (end && now > end && (!needsApproval || evidenced)) { active = false; basis = `ended ${isoDay(end)}`; }
+  else if (end && now > end && needsApproval) basis = `stated date ${isoDay(end)} passed but the period runs until "${condition}", which is not yet confirmed`;
+  else if (!end && needsApproval && evidenced) { active = false; basis = "award evidenced; confirm contract approval before contacting staff"; }
+  else if (end) basis = `active until ${isoDay(end)}`;
+  return { applies: true, active, basis, condition,
+           designated: ((rp.designated_contacts as unknown[]) ?? []).map(String).filter(Boolean) };
+}
+
+// Compliance is rendered by code from cited facts — never written by the LLM.
+function renderCompliance(facts: Record<string, unknown>, stage: StageV3, rs: ReturnType<typeof restrictedStatus>): string[] {
+  const out: string[] = [];
+  const rp = (facts.restricted_period ?? {}) as Record<string, unknown>;
+  if (stage.code === "locked") out.push(`Not a competitive opportunity: ${stage.basis}.`);
+  if (rs.applies) {
+    const cite = rp.page ? ` (solicitation p.${rp.page})` : "";
+    const who = rs.designated && rs.designated.length ? ` Designated contacts: ${rs.designated.join(", ")}.` : "";
+    out.push(rs.active
+      ? `Restricted communication period in effect — ${rs.basis}. It runs until: ${rs.condition || "the end stated in the solicitation"}${cite}. Contact only the designated contacts about this procurement.${who}`
+      : `Restricted communication period: ${rs.basis}${cite}.`);
+  }
+  if (stage.code === "open" || stage.code === "closing") {
+    for (const g of dedupeList(facts.gates).filter(shown).slice(0, 6)) out.push(`Participation requirement: ${valOf(g)}${g.page ? ` (p.${g.page})` : ""}.`);
+  }
+  return out;
+}
+
+// ── v3 per-OIP synthesis: claims must cite verified facts ─────────────────
+type FactRef = { id: string; text: string; quote?: string };
+
+function factCatalog(facts: Record<string, unknown>, decision_makers: Record<string, unknown>[],
+                     winner: Record<string, unknown> | null, incumbent: Record<string, unknown> | null): FactRef[] {
+  const out: FactRef[] = [];
+  const add = (id: string, text: string, node?: Record<string, unknown>) => {
+    if (!text.trim()) return;
+    const flag = node && node.verified === null ? " [unverified: scanned document]" : "";
+    out.push({ id, text: text + flag, quote: node ? String(node.quote ?? "") : "" });
+  };
+  const idn = (facts.identity ?? {}) as Record<string, Record<string, unknown>>;
+  for (const k of ["issuing_agency", "buyer", "solicitation_number", "title"]) if (shown(idn[k]) && valOf(idn[k])) add(`identity.${k}`, `${k.replace("_", " ")}: ${valOf(idn[k])}`, idn[k]);
+  const seenType: Record<string, number> = {};
+  for (const d of ((facts.dates as Record<string, unknown>[]) ?? []).filter(shown)) {
+    const t = String(d.event_type || "other"); const n = seenType[t] = (seenType[t] ?? -1) + 1;
+    add(`date.${t}${n ? `.${n}` : ""}`, `${d.label || t.replace(/_/g, " ")}: ${d.date}${d.time ? ` ${d.time}` : ""}${d.tentative ? " (tentative)" : ""}`, d);
+  }
+  if (shown(facts.dates_tentative) && (facts.dates_tentative as Record<string, unknown>).value) add("dates_tentative", "the solicitation says its schedule is tentative / subject to change", facts.dates_tentative as Record<string, unknown>);
+  const lists: [string, unknown][] = [["scope_included", facts.scope_included], ["scope_excluded", facts.scope_excluded],
+    ["buyer_role.direct", (facts.buyer_role as Record<string, unknown>)?.direct], ["buyer_role.via_partners", (facts.buyer_role as Record<string, unknown>)?.via_partners],
+    ["gates", facts.gates], ["submission_requirements", facts.submission_requirements], ["insurance", facts.insurance], ["criteria", facts.criteria]];
+  const label: Record<string, string> = { scope_included: "in scope", scope_excluded: "performed by others / excluded",
+    "buyer_role.direct": "buyer purchases directly under this contract", "buyer_role.via_partners": "buyer obtains through partner agencies",
+    gates: "participation requirement", submission_requirements: "proposal must include", insurance: "insurance required", criteria: "evaluation criterion" };
+  for (const [key, list] of lists) dedupeList(list).filter(shown).forEach((it, i) => add(`${key}.${i}`, `${label[key]}: ${valOf(it)}`, it));
+  const c = (facts.contract ?? {}) as Record<string, Record<string, unknown>>;
+  for (const k of ["term", "renewals", "value", "pricing"]) if (shown(c[k]) && valOf(c[k])) add(`contract.${k}`, `contract ${k}: ${valOf(c[k])}`, c[k]);
+  if (shown(facts.award_method) && valOf(facts.award_method)) add("award_method", `award method: ${valOf(facts.award_method)}`, facts.award_method as Record<string, unknown>);
+  const rp = (facts.restricted_period ?? {}) as Record<string, unknown>;
+  if (rp.applies && shown(rp)) add("restricted_period", `restricted communication period: ends on "${rp.condition || rp.end_event || "not stated"}"${rp.end_date ? `, stated date ${rp.end_date}` : ""}; designated contacts: ${((rp.designated_contacts as unknown[]) ?? []).join(", ") || "none named"}`, rp);
+  ((facts.contacts as Record<string, unknown>[]) ?? []).filter(shown).forEach((p, i) => add(`contact.${i}`, `procurement contact: ${p.name}${p.title ? `, ${p.title}` : ""} (${p.role || "listed"})`, p));
+  decision_makers.forEach((p, i) => add(`dm.${i}`, `decision-maker (web, ${hostOf(String(p.source_url ?? ""))}): ${p.name}${p.title ? `, ${p.title}` : ""}`));
+  if (winner && awardEvidence(winner)) add("winner", `winner: ${JSON.stringify(winner.award ?? winner.candidates).slice(0, 400)}`);
+  if (incumbent && incumbent.vendor) add("incumbent", `previous contract holder (${incumbent.confidence}): ${incumbent.vendor}`);
+  if (facts.summary) add("summary", `summary (narrative, not quoted): ${facts.summary}`);
+  return out;
+}
+
+const MONTHS: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+// Every date a claim mentions must be one of the facts' dates (or today).
+function datesOk(text: string, allowedIso: Set<string>, allowedMd: Set<string>): boolean {
+  for (const m of text.matchAll(/\b(20\d{2})-(\d{2})-(\d{2})\b/g)) if (!allowedIso.has(m[0])) return false;
+  for (const m of text.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/g)) if (!allowedIso.has(`${m[3]}-${pad2(+m[1])}-${pad2(+m[2])}`)) return false;
+  for (const m of text.matchAll(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?![a-z])\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(20\d{2}))?\b/gi)) {
+    const md = `${pad2(MONTHS[m[1].toLowerCase().slice(0, 3)])}-${pad2(+m[2])}`;
+    if (m[3] ? !allowedIso.has(`${m[3]}-${md}`) : !allowedMd.has(md)) return false;
+  }
+  return true;
+}
+
+const ABSENCE_RE = /\b(no|not|never|without)\b[^.]{0,40}\b(stated|specified|provided|disclosed|listed|mentioned|given|included)\b|\bdoes not (state|specify|mention|include|list)\b/i;
+const ACTIVE_RE  = /\bactively (procuring|evaluating|soliciting|seeking|accepting)\b|\bcurrently (accepting|open|soliciting)\b|\bstill open\b|\bsubmit (a|your) (proposal|bid|response)\b|\brespond to (the|this) (rfp|solicitation)\b/i;
+const CONTACT_RE = /\b(contact|call|email|e-mail|reach out|meet|meeting|schedule|introduc|pitch|approach)\w*/i;
+
+type Claim = Record<string, unknown>;
+type ValidateCtx = {
+  ids: Set<string>; catalog: FactRef[]; allowedIso: Set<string>; allowedMd: Set<string>; factText: string;
+  stageCode: string; coverageComplete: boolean; rs: ReturnType<typeof restrictedStatus>;
+  staffNames: string[]; tenantName: string; profileText: string; todayIso: string; dropped: { text: string; reason: string }[];
+};
+
+function fixTenantName(s: string, name: string): string {
+  if (!name) return s;
+  return s.replace(/\b(SLED|SAM|OIP)'s\b/g, `${name}'s`).replace(/\bthe tenant('s)?\b/gi, (_m, p) => `${name}${p ?? ""}`);
+}
+
+function violatesRestricted(text: string, flagged: boolean, ctx: ValidateCtx): boolean {
+  if (!ctx.rs.active) return false;
+  const t = text.toLowerCase();
+  const namesStaff = ctx.staffNames.some(n => n && t.includes(n.toLowerCase()));
+  const procurementStaff = /\b(procurement|purchasing|contracting) (staff|office|officer|team|department)\b/i.test(text);
+  if (!(flagged || ((namesStaff || procurementStaff) && CONTACT_RE.test(text)))) return false;
+  const designatedOnly = (ctx.rs.designated ?? []).some(n => n && t.includes(n.toLowerCase()));
+  return !designatedOnly;
+}
+
+function validateClaim(c: Claim, ctx: ValidateCtx, kind: string): Claim | null {
+  const drop = (reason: string) => { ctx.dropped.push({ text: String(c?.text ?? c?.action ?? "").slice(0, 200), reason: `${kind}: ${reason}` }); return null; };
+  if (!c || typeof c !== "object") return null;
+  const body = String(c.text ?? c.action ?? "").trim();
+  if (!body) return null;
+  const refs = ((c.refs as unknown[]) ?? []).map(String).filter(r => ctx.ids.has(r));
+  const inference = c.inference === true && !refs.length;
+  if (!refs.length && !inference) return drop("no valid fact reference and not marked inference");
+  const all = [body, String(c.why ?? "")].join(" ");
+  if (!datesOk(all, ctx.allowedIso, ctx.allowedMd)) return drop("mentions a date not in the facts");
+  for (const m of all.matchAll(/\$\s?[\d,]+(?:\.\d+)?\s?(?:k|m|million|billion)?/gi)) {
+    if (!ctx.factText.includes(normText(m[0]).replace(/\s/g, ""))) return drop(`dollar figure ${m[0]} not in the facts`);
+  }
+  if (!["open", "closing"].includes(ctx.stageCode) && ACTIVE_RE.test(all)) return drop(`open-bid wording at stage ${ctx.stageCode}`);
+  if (ABSENCE_RE.test(all) && !ctx.coverageComplete) return drop("claims absence while document coverage is partial");
+  if (ABSENCE_RE.test(all) && refs.some(r => ctx.catalog.find(f => f.id === r)?.text)) {
+    // an absence claim may not cite a populated fact
+    if (!/\b(other|partner|separately)\b/i.test(all)) return drop("absence claim cites a populated fact");
+  }
+  if (inference && /\b(case stud|client|portfolio|work (with|for)|brands? like)\w*/i.test(all)) {
+    const m = all.match(/\b(?:such as|including|like|e\.g\.,?)\s+([^.;:]+)/i);
+    if (m) {
+      const names = m[1].split(/,|\band\b|\bor\b/).map(s => s.trim()).filter(s => /^[A-Z]/.test(s) && s.length >= 3);
+      if (names.some(n => !ctx.profileText.includes(n.toLowerCase()))) return drop("names tenant assets not in the profile");
+    }
+  }
+  const out: Claim = { ...c, refs, inference };
+  if (c.text !== undefined) out.text = fixTenantName(String(c.text), ctx.tenantName);
+  if (c.action !== undefined) out.action = fixTenantName(String(c.action), ctx.tenantName);
+  if (c.why !== undefined) out.why = fixTenantName(String(c.why), ctx.tenantName);
+  return out;
+}
+
+function validateStep(s: Claim, ctx: ValidateCtx): Claim | null {
+  const when = String(s?.when ?? "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(when) && when < ctx.todayIso) {
+    ctx.dropped.push({ text: String(s.action ?? "").slice(0, 200), reason: `next_step: dated ${when}, before today` }); return null;
+  }
+  if (violatesRestricted(`${s?.action ?? ""} ${s?.why ?? ""}`, s?.contacts_agency_staff === true, ctx)) {
+    ctx.dropped.push({ text: String(s.action ?? "").slice(0, 200), reason: "next_step: contacts agency staff during the restricted period" }); return null;
+  }
+  return validateClaim(s, ctx, "next_step");
 }
 
 // ── Board-meeting mode ────────────────────────────────────────────────────
@@ -755,79 +1107,165 @@ Deno.serve(async (req: Request) => {
       return json({ status: "enriched", ...row });
     }
 
-    // ── 1. Find the solicitation document ──
-    let docUrl = "";
-    let docTitle = "";
-    const srcUrl = String(sig.doc_url ?? "");
-    if (srcUrl && isPdfUrl(srcUrl)) { docUrl = srcUrl; docTitle = "Solicitation document (source)"; }
-    let searchHits: Hit[] = [];
-    if (!docUrl) {
-      const buyer = (descLead.match(/^([A-Z][\w&.,' -]{3,80}?) (is|are) (seeking|requesting|soliciting)/) || [])[1] || "";
-      const q = `"${agency}"${buyer ? ` "${buyer}"` : ""} "${title}" RFP${ident ? ` ${ident}` : ""}`;
-      queries.push(q);
-      searchHits = (await tavily(q, { raw: true, max: 8 }))
-        .filter(h => mentionsAgency(`${h.title} ${h.url} ${h.content} ${h.raw ?? ""}`, aTokens, acronym));
-      for (const h of searchHits) {
-        if (isPdfUrl(h.url) && urlTooOld(h.url)) {
-          sources.push({ title: `Rejected: ${h.title || h.url}`, url: h.url, used_for: "rejected — outdated (upload date in URL)" });
+    // ══ v3 procurement path ═══════════════════════════════════════════════
+    // Notice-level facts are tenant-blind and shared by every OIP on the
+    // notice (notice_facts). Only the synthesis below is per OIP.
+    const now = new Date();
+    const todayIso = now.toISOString().slice(0, 10);
+    const identity = `${agency} — ${title}${ident ? ` (#${ident})` : ""}` + (descLead ? `. Description: ${descLead}` : "");
+    const latestFactDate = (f: Record<string, unknown> | null): Date | null => {
+      const ds = ((f?.dates as { date?: string }[]) ?? []).map(t => toDate(t.date)).filter((d): d is Date => !!d);
+      return ds.length ? new Date(Math.max(...ds.map(d => d.getTime()))) : null;
+    };
+
+    const { data: nfCached } = await sb.from("notice_facts").select("*").eq("signal_id", signal_id).maybeSingle();
+    const nfFresh = !!nfCached && nfCached.facts_version === FACTS_VERSION && !force &&
+      (!nfCached.next_refresh_at || new Date(nfCached.next_refresh_at) > now);
+
+    let nf: Record<string, unknown>;
+    if (nfFresh) {
+      nf = nfCached as Record<string, unknown>;
+    } else {
+      const nSources: { title: string; url: string; used_for: string }[] = [];
+      const nQueries: string[] = [];
+
+      // ── 1. Find the solicitation document (unchanged search + guards) ──
+      let docUrl = "", docTitle = "";
+      const srcUrl = String(sig.doc_url ?? "");
+      if (srcUrl && isPdfUrl(srcUrl)) { docUrl = srcUrl; docTitle = "Solicitation document (source)"; }
+      let searchHits: Hit[] = [];
+      if (!docUrl) {
+        const buyer = (descLead.match(/^([A-Z][\w&.,' -]{3,80}?) (is|are) (seeking|requesting|soliciting)/) || [])[1] || "";
+        const q = `"${agency}"${buyer ? ` "${buyer}"` : ""} "${title}" RFP${ident ? ` ${ident}` : ""}`;
+        nQueries.push(q);
+        searchHits = (await tavily(q, { raw: true, max: 8 }))
+          .filter(h => mentionsAgency(`${h.title} ${h.url} ${h.content} ${h.raw ?? ""}`, aTokens, acronym));
+        for (const h of searchHits) if (isPdfUrl(h.url) && urlTooOld(h.url))
+          nSources.push({ title: `Rejected: ${h.title || h.url}`, url: h.url, used_for: "rejected — outdated (upload date in URL)" });
+        searchHits = searchHits.filter(h => !(isPdfUrl(h.url) && urlTooOld(h.url)));
+        const pdf = searchHits.find(h => isPdfUrl(h.url));
+        if (pdf) { docUrl = pdf.url; docTitle = pdf.title; }
+      }
+
+      // ── 2-4. Text layer, blind extraction, quote verification ──
+      let facts: Record<string, unknown> | null = null;
+      let layer: TextLayer = { pages: [], status: "none" };
+      let truncated = false, docHash = "", usedDoc = false, fromListings = false;
+      if (docUrl) {
+        try {
+          const r = await fetch(docUrl, { headers: { "User-Agent": "Mozilla/5.0 (WinQuest opportunity intelligence)" } });
+          const buf = r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+          if (buf && buf.byteLength > 0 && buf.byteLength <= MAX_PDF_BYTES) {
+            docHash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", buf)))
+              .map(b => b.toString(16).padStart(2, "0")).join("");
+            layer = await pdfTextLayer(buf);
+            const ex = await extractV3FromPdf(encodeBase64(buf), identity);
+            facts = ex.json; truncated = ex.truncated;
+            const sp = (facts?.same_procurement ?? {}) as Record<string, unknown>;
+            if (facts && sp.match !== true) {
+              nSources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — ${String(sp.reason ?? "not this procurement").slice(0, 120)}` });
+              facts = null;
+            }
+            const latest = latestFactDate(facts);
+            if (facts && latest && latest < oldestOk) {
+              nSources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — outdated (latest date in document ${latest.toISOString().slice(0, 10)})` });
+              facts = null;
+            }
+            if (facts) { usedDoc = true; nSources.push({ title: docTitle || "Solicitation document", url: docUrl, used_for: "document" }); }
+          }
+        } catch (e) { console.error("pdf fetch/read failed", docUrl, e); }
+      }
+      if (!facts && searchHits.length) {
+        const material = searchHits.map((h, i) => `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.raw || h.content}`).join("\n\n").slice(0, 18000);
+        const ex = await extractV3FromText(material, identity);
+        facts = ex.json; truncated = ex.truncated;
+        const sp = (facts?.same_procurement ?? {}) as Record<string, unknown>;
+        const latestT = latestFactDate(facts);
+        if (facts && (sp.match !== true || (latestT && latestT < oldestOk))) facts = null;
+        else if (facts) {
+          fromListings = true;
+          // page = result number; the text layer is the results themselves.
+          layer = { pages: searchHits.map(h => `${h.title}\n${h.raw || h.content}`), status: "ok" };
+          for (const h of searchHits) nSources.push({ title: h.title, url: h.url, used_for: "listing" });
         }
       }
-      searchHits = searchHits.filter(h => !(isPdfUrl(h.url) && urlTooOld(h.url)));
-      const pdf = searchHits.find(h => isPdfUrl(h.url));
-      if (pdf) { docUrl = pdf.url; docTitle = pdf.title; }
+      facts = facts ?? {};
+      const check = verifyFacts(facts, layer);
+      for (const k of ["scope_included", "scope_excluded", "gates", "submission_requirements", "insurance", "criteria"])
+        facts[k] = dedupeList(facts[k]);
+      const pagesTotal = usedDoc ? layer.pages.length || null : null;
+      const coverageComplete = usedDoc && layer.status === "ok" && !truncated && (pagesTotal ?? 0) > 0 && (pagesTotal ?? 0) <= 100;
+
+      // ── 5. Resolve listing vs document: the document wins, conflicts kept ──
+      const conflicts: Record<string, unknown>[] = [];
+      const docDue = factDate(facts, "proposal_due");
+      const listDue = toDate(dueStr);
+      if (docDue && listDue && isoDay(docDue) !== isoDay(listDue))
+        conflicts.push({ field: "proposal_due", listing_value: isoDay(listDue), document_value: isoDay(docDue), resolved_to: "document" });
+      const docIssued = factDate(facts, "issued");
+      const listIssued = toDate(meta.issue_date);
+      if (docIssued && listIssued && isoDay(docIssued) !== isoDay(listIssued))
+        conflicts.push({ field: "issued", listing_value: isoDay(listIssued), document_value: isoDay(docIssued), resolved_to: "document" });
+      const resolvedDue = docDue ?? listDue;
+      facts.resolved = {
+        proposal_due: resolvedDue ? isoDay(resolvedDue) : "", proposal_due_source: docDue ? "document" : (listDue ? "listing" : ""),
+        issued: (docIssued ?? listIssued) ? isoDay(docIssued ?? listIssued) : "", issued_source: docIssued ? "document" : (listIssued ? "listing" : ""),
+      };
+
+      // ── Winner, once the award (or due) date has passed — notice level ──
+      const awardDate = factDate(facts, "award");
+      let winner = (nfCached?.winner ?? cached?.winner ?? null) as Record<string, unknown> | null;
+      const winnerTime = awardDate ? now >= awardDate : (resolvedDue ? now >= resolvedDue : false);
+      const winnerStale = !winner || (winner.method === "none" && winner.searched_at &&
+        (now.getTime() - new Date(String(winner.searched_at)).getTime()) > NO_WINNER_RETRY_DAYS * 86400000);
+      if (winnerTime && (winnerStale || force)) {
+        winner = { ...(await findWinner(agency, title, String(meta.pin || ""), String((awardDate ?? resolvedDue ?? now).getFullYear()))),
+                   searched_at: now.toISOString() };
+      }
+
+      const milestones = [factDate(facts, "finalists_notified"), awardDate, factDate(facts, "contract_start"), resolvedDue]
+        .filter((d): d is Date => !!d && d > now).sort((a, b) => a.getTime() - b.getTime());
+      let nRefresh: string | null = milestones.length ? addDays(milestones[0], 1).toISOString() : null;
+      if (!nRefresh && winnerTime && !awardEvidence(winner)) nRefresh = addDays(now, NO_WINNER_RETRY_DAYS).toISOString();
+
+      nf = {
+        signal_id, facts_version: FACTS_VERSION,
+        status: usedDoc ? "ok" : (fromListings ? "partial" : "no_document"),
+        doc_url: usedDoc ? docUrl : null, doc_title: usedDoc ? (docTitle || null) : null, doc_hash: docHash || null,
+        pages_total: pagesTotal, pages_read: usedDoc ? Math.min(pagesTotal ?? 0, 100) : null,
+        text_layer: usedDoc ? layer.status : (fromListings ? "listing" : "none"),
+        coverage_complete: coverageComplete,
+        facts: { ...facts, verification: { ...check, truncated } },
+        conflicts, winner, sources: nSources, queries: nQueries, error: null,
+        extracted_at: now.toISOString(), next_refresh_at: nRefresh,
+        refresh_count: ((nfCached?.refresh_count as number) ?? -1) + 1,
+      };
     }
 
-    // ── 2. Read it (PDF) or extract from search results ──
-    let facts: Record<string, unknown> | null = null;
-    let document: Record<string, string> | null = null;
-    if (docUrl) {
-      try {
-        const r = await fetch(docUrl, { headers: { "User-Agent": "Mozilla/5.0 (WinQuest opportunity intelligence)" } });
-        const buf = r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
-        if (buf && buf.byteLength > 0 && buf.byteLength <= MAX_PDF_BYTES) {
-          facts = await extractFromPdf(encodeBase64(buf), notice, tenant);
-          const sp = (facts?.same_procurement ?? {}) as Record<string, unknown>;
-          if (facts && sp.match !== true) {
-            console.log("document rejected (not this procurement):", docUrl, sp.reason);
-            sources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — ${String(sp.reason ?? "not this procurement").slice(0, 120)}` });
-            facts = null;
-          }
-          const latest = latestDocDate(facts);
-          if (facts && latest && latest < oldestOk) {
-            console.log("document rejected (outdated):", docUrl, latest.toISOString());
-            sources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl,
-              used_for: `rejected — outdated (latest date in document ${latest.toISOString().slice(0, 10)})` });
-            facts = null;
-          }
-          if (facts) {
-            document = { url: docUrl, title: docTitle, source: hostOf(docUrl) };
-            sources.push({ title: docTitle || "Solicitation document", url: docUrl, used_for: "document" });
-          }
-        }
-      } catch (e) { console.error("pdf fetch/read failed", docUrl, e); }
+    // Stage is recomputed on every call (cheap, date-dependent), cached or not.
+    const facts = (nf.facts ?? {}) as Record<string, unknown>;
+    const resolved = (facts.resolved ?? {}) as Record<string, unknown>;
+    const dueDate = toDate(resolved.proposal_due);
+    const winner = (nf.winner ?? null) as Record<string, unknown> | null;
+    const stage = computeStageV3(meta, String(sig.title ?? ""), facts, dueDate, winner, now);
+    nf.stage = stage;
+    {
+      const nfRows = [nf, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id).map(id => ({ ...nf, signal_id: id }))];
+      const { error } = await sb.from("notice_facts").upsert(nfRows, { onConflict: "signal_id" });
+      if (error) console.error("upsert notice_facts", error);
     }
-    if (!facts && searchHits.length) {
-      const material = searchHits.map((h, i) =>
-        `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.raw || h.content}`).join("\n\n").slice(0, 18000);
-      facts = await extractFromText(material, notice, tenant);
-      const sp = (facts?.same_procurement ?? {}) as Record<string, unknown>;
-      const latestT = latestDocDate(facts);
-      if (facts && (sp.match !== true || (latestT && latestT < oldestOk))) facts = null;
-      else for (const h of searchHits) sources.push({ title: h.title, url: h.url, used_for: "listing" });
-    }
-    facts = facts ?? {};
+    const rs = restrictedStatus(facts, winner, now);
 
-    // ── 3a. Decision-makers ──
+    // ── 6. Per-OIP: decision-makers (sentinel template) ──
     const dmQuery = dmTemplate.replaceAll("{agency}", agency);
     queries.push(dmQuery);
     const dmHits = await tavily(dmQuery, { max: 5 });
-    let decision_makers: unknown[] = [];
+    let decision_makers: Record<string, unknown>[] = [];
     if (dmHits.length) {
       const src = dmHits.map((h, i) => `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.content}`).join("\n\n");
       const out = await claudeJSON([{ type: "text", text:
 `From these results, list people at ${agency} who would own or influence a purchase like: ${title}.
 Use ONLY names and titles stated in the results. Note departures or new appointments if stated.
-TENANT (for relevance): ${tenant.slice(0, 1200)}
 
 ${src}
 
@@ -838,131 +1276,162 @@ Return ONLY JSON: {"people":[{"name":"","title":"","note":"","source_url":""}]}`
       for (const h of dmHits) sources.push({ title: h.title, url: h.url, used_for: "decision_makers" });
     }
 
-    // ── 3b. Winner, once the award date has passed (or due date when no award date) ──
-    const timeline = (facts.timeline as { event?: string; date?: string }[]) ?? [];
-    const now = new Date();
-    const dueDate   = toDate(dueStr) ?? findEvent(timeline, /proposal|bid|response|due/i);
-    const awardDate = findEvent(timeline, /award/i);
-    let winner = cached?.winner ?? null;
-    const winnerTime = awardDate ? now >= awardDate : (dueDate ? now >= dueDate : false);
-    const winnerStale = !winner || (winner.method === "none" && winner.searched_at &&
-      (now.getTime() - new Date(winner.searched_at).getTime()) > NO_WINNER_RETRY_DAYS * 86400000);
-    if (winnerTime && (winnerStale || force)) {
-      winner = { ...(await findWinner(agency, title, String(meta.pin || ""), String((awardDate ?? dueDate ?? now).getFullYear()))),
-                 searched_at: now.toISOString() };
-    }
-
-    // ── 3c. Computed stage + tenant sales plays ──
-    const cStage = computeStage(meta, String(sig.title ?? ""), dueDate, now);
+    // ── Plays + incumbent (per OIP, as v2) ──
+    const playStage = playStageOf(stage.code);
     const plays = salesPlaysFor(pc);
-    const allowedPlays = plays.filter(p => p.stages.includes(cStage.code));
+    const allowedPlays = plays.filter(p => p.stages.includes(playStage));
     const guidance = String(pc.sales_play_guidance ?? "").trim();
-
-    // ── 3d. Incumbent, for opportunities still before the due date ──
-    // Kept from the cached play once found, so refreshes do not re-search.
-    // Opt out per sentinel with pull_config.enrichment_incumbent_lookup=false.
     const cachedPlay = (cached?.play ?? null) as Record<string, unknown> | null;
     let incumbent = (cachedPlay?.incumbent ?? null) as Record<string, unknown> | null;
-    if (plays.length && (cStage.code === "open" || cStage.code === "closing")
+    if (plays.length && (stage.code === "open" || stage.code === "closing")
         && pc.enrichment_incumbent_lookup !== false && !(incumbent && incumbent.vendor)) {
       const inc = await findIncumbent(agency, title, (dueDate ?? now).getUTCFullYear());
       queries.push(...inc.queries);
       incumbent = { vendor: inc.vendor, confidence: inc.confidence, evidence: inc.evidence,
                     source_url: inc.source_url, searched_at: now.toISOString() };
-      if (inc.source_url) sources.push({ title: `Incumbent evidence`, url: inc.source_url, used_for: "incumbent" });
+      if (inc.source_url) sources.push({ title: "Incumbent evidence", url: inc.source_url, used_for: "incumbent" });
     }
 
+    // ── 7. Synthesize for the tenant: cite fact ids or mark inference ──
+    const tenantName = String(oip?.name ?? "the tenant");
+    const catalog = factCatalog(facts, decision_makers, winner, incumbent);
+    const designatedLine = rs.applies && rs.designated && rs.designated.length ? ` Designated contacts: ${rs.designated.join(", ")}.` : "";
     const playBlock = plays.length
-      ? `\nCOMPUTED STAGE (by rule, authoritative — do not override): ${cStage.code} (${cStage.basis})
-INCUMBENT (previous contract holder, if found): ${JSON.stringify(incumbent)}
-SALES PLAYS ALLOWED AT THIS STAGE — choose exactly one by name:
-${(allowedPlays.length ? allowedPlays : plays).map(p => `- ${p.name}: ${p.definition}`).join("\n")}`
+      ? `\nSALES PLAYS ALLOWED AT THIS STAGE — choose exactly one by name:\n${(allowedPlays.length ? allowedPlays : plays).map(p => `- ${p.name}: ${p.definition}`).join("\n")}`
       : "";
     const howTenantWins = guidance
-      ? `How the tenant wins business here: ${guidance}`
-      : `How the tenant wins business here: if the tenant cannot or would not bid as prime, the play is to partner with likely bidders before the award and with the WINNING vendor after it (derived demand: the winner may need the tenant's offering to deliver).`;
+      ? `How ${tenantName} wins business here: ${guidance}`
+      : `How ${tenantName} wins business here: if it cannot or would not bid as prime, the play is to partner with likely bidders before the award and with the WINNING vendor after it (derived demand: the winner may need ${tenantName}'s offering to deliver).`;
     const playSchema = plays.length
-      ? `,\n "play": {"play":"<one allowed play name>","who":"who to approach — the incumbent, likely bidders, the winner, or the buyer — named where the facts name them","next_step":"one concrete action","teaming":"M/WBE / SDVOB or partnering angle, or empty","timing":"when to act, tied to the dates above"}`
+      ? `,\n "play": {"play":"<one allowed play name>","who":"who to approach — named only if a fact names them, otherwise the role","next_step":"one concrete action","teaming":"M/WBE / SDVOB or partnering angle, or empty","timing":"when to act, tied to fact dates","refs":[""]}`
       : "";
-
-    // ── 4. Synthesize for the tenant ──
-    const synth = await claudeJSON([{ type: "text", text:
-`You advise ${oip?.name ?? "the tenant"} on a public-sector opportunity. Today is ${now.toISOString().slice(0, 10)}.
+    const synthOut = await claudeJSONx([{ type: "text", text:
+`You advise ${tenantName} on a public-sector opportunity. Today is ${todayIso}.
 
 TENANT PROFILE: ${tenant}
 
-OPPORTUNITY: ${notice}
-AUTHORITATIVE FACTS (from the official source record — these override anything below): ${JSON.stringify(authoritative)}
-FACTS (from the solicitation document or listings): ${JSON.stringify(facts).slice(0, 9000)}
-DECISION-MAKERS: ${JSON.stringify(decision_makers)}
-WINNER: ${JSON.stringify(winner)}${playBlock}
+OPPORTUNITY: ${identity}
+COMPUTED STAGE (by rule, authoritative — do not override): ${stage.code} — ${stage.basis}
+RESTRICTED COMMUNICATION: ${rs.applies ? (rs.active ? `ACTIVE — ${rs.basis}.` : `ended — ${rs.basis}.`) : "none stated in the solicitation."}${designatedLine}
+DOCUMENT COVERAGE: ${nf.coverage_complete ? "complete" : "PARTIAL — never claim the solicitation lacks something"}
+
+VERIFIED FACTS (cite by id in refs):
+${catalog.map(f => `[${f.id}] ${f.text}`).join("\n") || "(none — the solicitation document was not found or could not be read)"}
+${playBlock}
 
 ${howTenantWins}
 
 Return ONLY JSON:
 {
- "stage": "open|intent_closed|questions_closed|proposals_in|finalists|awarded|contract_live|closed",
- "angle": "2-3 sentences: why this matters to the tenant, citing the solicitation's own words where possible",
- "next_steps": [{"when":"YYYY-MM-DD or a window","action":"","why":""}],
- "compliance": [""]${playSchema}
+ "angle": [{"text":"","refs":[""],"inference":false}],
+ "tenant_signals": [{"text":"why this fact matters to ${tenantName}","refs":[""]}],
+ "next_steps": [{"when":"YYYY-MM-DD or a window","action":"","why":"","refs":[""],"inference":false,"contacts_agency_staff":false}]${playSchema}
 }
-Rules: stage must be consistent with the authoritative due date — a procurement whose due date has passed is NOT open. If the source record says sole source / exempt from advertising / noncompetitive, say so in angle and do not suggest bidding.
-next_steps in date order, 3-6 items, concrete and dated from the timeline. If a restricted communication period applies, NEVER suggest contacting agency staff other than the designated contacts before it ends, and list that in compliance. Do not invent names, dates, or facts not present above.${plays.length ? `
-The play must be one of the allowed names above and consistent with the COMPUTED STAGE. next_steps must carry out that play. Only name a person or vendor in "who" if it appears above; otherwise describe the role (e.g. "agencies that bid on prior SUNY media contracts").` : ""}` }], 1800);
+Rules:
+- Every claim lists the fact ids it rests on in refs. A claim that no fact id supports must set inference=true and read as a judgment ("likely", "may"), never as something the solicitation says.
+- Never state a date, dollar amount, term or requirement that is not in a cited fact. Never put words in quotation marks.
+- angle: 1-3 claims on why this matters to ${tenantName}. If what ${tenantName} sells appears under "performed by others / excluded" or "buyer obtains through partner agencies", say plainly the buyer obtains it through those partners and point ${tenantName} at them; never claim the solicitation requires it.
+- tenant_signals: up to 5 facts that most bear on ${tenantName}, each with why.
+- next_steps: 3-6, in date order, carrying out the play. Set contacts_agency_staff=true for any step that contacts staff of the issuing agency. While restricted communication is ACTIVE, the only permitted agency contact is a designated contact, about the procurement itself.
+- Stage is ${stage.code}: unless it is open or closing, do not suggest bidding and do not describe the buyer as actively procuring or evaluating.
+- Refer to the tenant as ${tenantName}. Name only clients, case studies or products of ${tenantName} that appear in the TENANT PROFILE.` }], 2500);
+    const synth = (synthOut.json ?? {}) as Record<string, unknown>;
 
-    // Stage guard: never "open"-type once the authoritative due date passed.
-    let stage = String(synth?.stage ?? "");
-    const preDue = new Set(["open", "intent_closed", "questions_closed", ""]);
-    if (dueDate && now > dueDate && preDue.has(stage)) {
-      const w = winner as Record<string, unknown> | null;
-      stage = (w && (w.award || ((w.candidates as unknown[]) ?? []).length)) ? "awarded" : "proposals_in";
-    }
+    // ── 8. Validate before saving (code) ──
+    const allowedIso = new Set<string>([todayIso]);
+    for (const d of ((facts.dates as Record<string, unknown>[]) ?? []).filter(shown)) { const x = isoDay(d.date); if (x) allowedIso.add(x); }
+    for (const v of Object.values(resolved)) if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) allowedIso.add(String(v));
+    const rpEnd = isoDay(((facts.restricted_period ?? {}) as Record<string, unknown>).end_date);
+    if (rpEnd) allowedIso.add(rpEnd);
+    const ctx: ValidateCtx = {
+      ids: new Set(catalog.map(f => f.id)), catalog, allowedIso,
+      allowedMd: new Set([...allowedIso].map(d => d.slice(5))),
+      factText: normText(catalog.map(f => `${f.text} ${f.quote ?? ""}`).join(" ")).replace(/\s/g, ""),
+      stageCode: stage.code, coverageComplete: !!nf.coverage_complete, rs,
+      staffNames: [...decision_makers.map(p => String(p.name ?? "")),
+                   ...((facts.contacts as Record<string, unknown>[]) ?? []).map(p => String(p.name ?? ""))].filter(Boolean),
+      tenantName, profileText: JSON.stringify(profile ?? {}).toLowerCase(), todayIso, dropped: [],
+    };
+    const angle = ((synth.angle as Claim[]) ?? []).map(c => validateClaim(c, ctx, "angle")).filter((c): c is Claim => !!c);
+    const tenant_signals = ((synth.tenant_signals as Claim[]) ?? []).map(c => validateClaim(c, ctx, "tenant_signal")).filter((c): c is Claim => !!c).slice(0, 5);
+    const next_steps = ((synth.next_steps as Claim[]) ?? []).map(s => validateStep(s, ctx)).filter((c): c is Claim => !!c)
+      .sort((a, b) => String(a.when ?? "").localeCompare(String(b.when ?? ""))).slice(0, 6);
 
-    // ── 5. Next refresh, from the opportunity's own milestones ──
-    const milestones = [findEvent(timeline, /finalist/i), awardDate, findEvent(timeline, /contract start|start date/i), dueDate]
-      .filter((d): d is Date => !!d && d > now).sort((a, b) => a.getTime() - b.getTime());
-    let next_refresh_at: string | null = milestones.length ? addDays(milestones[0], 1).toISOString() : null;
-    if (!next_refresh_at && winnerTime && (!winner || winner.method === "none")) {
-      next_refresh_at = addDays(now, NO_WINNER_RETRY_DAYS).toISOString();
-    }
-
-    // Play: keep only an allowed name; the stage code and incumbent travel with it.
     let play: Record<string, unknown> | null = null;
     if (plays.length) {
-      const sp = (synth?.play ?? {}) as Record<string, unknown>;
+      const sp = (synth.play ?? {}) as Record<string, unknown>;
       const allowedNames = new Set((allowedPlays.length ? allowedPlays : plays).map(p => p.name));
       const name = String(sp.play ?? "");
-      if (!allowedNames.has(name)) console.log("play rejected (not allowed at stage)", cStage.code, name);
+      if (!allowedNames.has(name)) console.log("play rejected (not allowed at stage)", stage.code, name);
+      let nextStep = fixTenantName(String(sp.next_step ?? ""), tenantName);
+      let who = fixTenantName(String(sp.who ?? ""), tenantName);
+      if (violatesRestricted(`${who} ${nextStep}`, false, ctx) || !datesOk(`${nextStep} ${sp.timing ?? ""}`, ctx.allowedIso, ctx.allowedMd)) {
+        ctx.dropped.push({ text: nextStep.slice(0, 200), reason: "play: restricted-period contact or unsupported date" });
+        nextStep = ""; who = "";
+      }
       play = {
-        play: allowedNames.has(name) ? name : null,
-        who: String(sp.who ?? ""), next_step: String(sp.next_step ?? ""),
+        play: allowedNames.has(name) ? name : null, who, next_step: nextStep,
         teaming: String(sp.teaming ?? ""), timing: String(sp.timing ?? ""),
-        computed_stage: cStage.code, stage_basis: cStage.basis, days_to_due: cStage.days_to_due,
+        computed_stage: playStage, stage_code: stage.code, stage_basis: stage.basis, days_to_due: stage.days_to_due,
         incumbent,
       };
     }
 
+    // ── 9. Code-rendered compliance + legacy shapes for the current UI ──
+    const compliance = renderCompliance(facts, stage, rs);
+    const quoteOf = (id: string) => catalog.find(f => f.id === id)?.quote ?? "";
+    const pretty = (t: string) => t.replace(/_/g, " ").replace(/\b\w/g, m => m.toUpperCase());
+    const c = (facts.contract ?? {}) as Record<string, Record<string, unknown>>;
+    const rp = (facts.restricted_period ?? {}) as Record<string, unknown>;
+    const legacyFacts = {
+      mode: "procurement", facts_version: FACTS_VERSION,
+      coverage: { complete: !!nf.coverage_complete, pages_total: nf.pages_total, text_layer: nf.text_layer, status: nf.status },
+      conflicts: nf.conflicts ?? [],
+      contacts: ((facts.contacts as Record<string, unknown>[]) ?? []).filter(shown)
+        .map(p => ({ name: p.name, title: p.title, organization: p.organization, email: p.email, phone: p.phone, role: p.role })),
+      timeline: ((facts.dates as Record<string, unknown>[]) ?? []).filter(shown)
+        .map(d => ({ event: String(d.label || pretty(String(d.event_type ?? ""))), date: d.date, time: d.time ?? "", tentative: !!d.tentative }))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date))),
+      gates: dedupeList(facts.gates).filter(shown).map(valOf),
+      submission_requirements: dedupeList(facts.submission_requirements).filter(shown).map(valOf),
+      insurance: dedupeList(facts.insurance).filter(shown).map(valOf),
+      scope_included: dedupeList(facts.scope_included).filter(shown).map(valOf),
+      scope_excluded: dedupeList(facts.scope_excluded).filter(shown).map(valOf),
+      restricted_period: rs.applies ? { applies: true, basis: String(rp.condition || rp.end_event || ""), until: String(rp.end_date ?? ""), active: rs.active, status: rs.basis } : { applies: false },
+      award_method: shown(facts.award_method) ? valOf(facts.award_method) : "",
+      criteria: dedupeList(facts.criteria).filter(shown).map(valOf),
+      commercials: {
+        term: [shown(c.term) ? valOf(c.term) : "", shown(c.renewals) && valOf(c.renewals) ? `renewals: ${valOf(c.renewals)}` : ""].filter(Boolean).join("; "),
+        budget: shown(c.value) ? valOf(c.value) : "", goals: "", subcontracting: "",
+      },
+      tenant_signals: tenant_signals.map(t => ({ quote: quoteOf(String(((t.refs as string[]) ?? [])[0] ?? "")), why: String(t.text ?? "") })),
+      summary: String(facts.summary ?? ""),
+    };
+    const angleText = angle.map(a => `${a.inference ? "(Assessment) " : ""}${a.text}`).join(" ");
+    const docRow = nf.doc_url ? { url: String(nf.doc_url), title: String(nf.doc_title ?? ""), source: hostOf(String(nf.doc_url)) } : null;
+    if (ctx.dropped.length) console.log("v3 validator dropped", JSON.stringify(ctx.dropped));
+
+    // ── 10. Save (per OIP), copied to also_signal_ids ──
     const row = {
       signal_id, oip_id,
-      status: (document || Object.keys(facts).length) ? "ok" : "partial",
-      stage,
-      document, facts, decision_makers, winner,
-      angle: String(synth?.angle ?? ""),
-      next_steps: (synth?.next_steps as unknown[]) ?? [],
-      compliance: (synth?.compliance as unknown[]) ?? [],
-      sources, queries, error: null,
-      enriched_at: now.toISOString(),
-      next_refresh_at,
+      status: nf.status === "ok" ? "ok" : "partial",
+      stage: legacyStageOf(stage.code),
+      document: docRow, facts: legacyFacts, decision_makers, winner,
+      angle: angleText,
+      next_steps: next_steps.map(s => ({ when: s.when ?? "", action: s.action ?? "", why: s.why ?? "", refs: s.refs, inference: s.inference })),
+      compliance,
+      sources: [...((nf.sources as unknown[]) ?? []), ...sources], queries: [...((nf.queries as unknown[]) ?? []), ...queries],
+      error: null, enriched_at: now.toISOString(),
+      next_refresh_at: nf.next_refresh_at ?? null,
       refresh_count: (cached?.refresh_count ?? -1) + 1,
-      play,
-      intel_version: INTEL_VERSION,
+      play, intel_version: INTEL_VERSION, notice_facts_version: FACTS_VERSION,
+      synthesis: { angle, tenant_signals, next_steps, dropped: ctx.dropped, truncated: synthOut.truncated },
     };
     const rows = [row, ...(also_signal_ids as string[]).filter(id => id && id !== signal_id)
       .map(id => ({ ...row, signal_id: id }))];
     const { error } = await sb.from("opportunity_intel").upsert(rows, { onConflict: "signal_id,oip_id" });
     if (error) console.error("upsert opportunity_intel", error);
-    return json({ status: "enriched", ...row });
-
+    return json({ ...row, stage_v3: stage, notice_status: nf.status });
   } catch (err) {
     console.error("enrich-opportunity error:", err);
     return json({ error: String(err) }, 500);
