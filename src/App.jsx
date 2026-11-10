@@ -35,6 +35,7 @@ import { loadUtilityLinks, CROSS_LANE, relatedTitle } from './lib/utilityLinks'
 import { exportDrawerPdf } from './lib/briefPdf'
 import ProfilePage from './pages/ProfilePage'
 import TradesGate from './components/trades/TradesGate'
+import TenantTypeGate from './components/profile/TenantTypeGate'
 import { Block, SectionLoader, HelpIcon } from './components/ui/shared'
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -250,6 +251,7 @@ function Layout() {
         )}
       </nav>
 
+      <TenantTypeGate />
       <Outlet />
 
       <footer className="confidentiality-footer">
@@ -7230,6 +7232,11 @@ function SettingsPage() {
       <div className="detail-eyebrow">Settings</div>
       <h2 className="detail-title">Account, team, and OIP configuration</h2>
       <div className="us-grid" style={{ marginTop: 24 }}>
+        <Link to="/profile" className="us-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="us-eyebrow">Company</div>
+          <div className="us-title">Company type</div>
+          <div className="us-body">Product, service or media seller. Set on your Profile; shapes Derived Demand scoring.</div>
+        </Link>
         <Link to="/settings/team" className="us-card" style={{ textDecoration: 'none', color: 'inherit' }}>
           <div className="us-eyebrow">Team</div>
           <div className="us-title">Members & invites</div>

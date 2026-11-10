@@ -8,6 +8,7 @@ import { useOip } from '../lib/oip'
 import { exportElementPdf } from '../lib/briefPdf'
 import { Block, SectionLoader, HelpIcon } from '../components/ui/shared'
 import CompetitorsBlock from '../components/profile/CompetitorsBlock'
+import TenantTypeBlock from '../components/profile/TenantTypeBlock'
 
 // ────────────────────────────────────────────────────────────────────────────
 // PROFILE — view + edit
@@ -79,6 +80,18 @@ export default function ProfilePage() {
   const saveAsNewVersion = async () => {
     setSaving(true)
     const newVersion = (profile.version || 0) + 1
+    // tenant_type and the competitor keys are edited by their own blocks,
+    // which write straight to the row — the draft may be older than those
+    // saves. Carry the freshest values over so a new version never drops them.
+    let toSave = draft
+    {
+      const { data: fresh } = await supabase.from('profiles').select('data').eq('id', profile.id).single()
+      const fd = fresh?.data || {}
+      toSave = { ...draft }
+      for (const k of ['tenant_type', 'tenant_type_updated_at', 'competitors', 'capability_terms', 'competitors_updated_at']) {
+        if (k in fd) toSave[k] = fd[k]
+      }
+    }
     // The worker reads the TENANT-CANONICAL row (get_canonical_profile_row),
     // not the active one. If the row being replaced is canonical, the flag
     // must move to the new version — otherwise the worker keeps reading the
@@ -112,7 +125,7 @@ export default function ProfilePage() {
         version: newVersion,
         is_active: true,
         is_tenant_canonical: wasCanonical,
-        data: draft,
+        data: toSave,
       })
     setSaving(false)
     if (insErr) {
@@ -150,6 +163,9 @@ export default function ProfilePage() {
           : data.description}
         </p>
       )}
+
+      {/* Company type — product / service / media seller. Banner when unset. */}
+      {!editing && <TenantTypeBlock oipId={selectedOip.id} canEdit={canEditCompetitors} onSaved={loadProfile} />}
 
       {/* States in Action — pulled from active oip_subscriptions */}
       <Block label="States in Action">
