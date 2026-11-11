@@ -14,6 +14,13 @@ function oipLandingPath(_oip) {
   return '/market'
 }
 
+// Run-stamp dates are always shown in Eastern time (the schedule is defined
+// in ET and timestamps are stored UTC), regardless of the viewer's timezone.
+function formatDateET(dateStr, opts) {
+  if (!dateStr) return null
+  return new Date(dateStr).toLocaleDateString('en-US', { timeZone: 'America/New_York', ...opts })
+}
+
 export function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, latestRun }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const navigate = useNavigate()
@@ -35,11 +42,11 @@ export function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelec
     navigate(landingFor(oips.find(o => o.id === id)))
   }
 
-  const lastRunStr = latestRun?.finished_at
-    ? new Date(latestRun.finished_at).toLocaleString('en-US', {
-        month: 'short', day: 'numeric', year: 'numeric'
-      })
-    : '—'
+  // Run stamp: "Active · Last updated Fri, Nov 7 · Next Sat, Nov 14"
+  const stampOpts = { weekday: 'short', month: 'short', day: 'numeric' }
+  const lastUpdatedStr = formatDateET(latestRun?.finished_at, stampOpts)
+  const nextUpdateStr = formatDateET(latestRun?.next_update, stampOpts)
+  const showStamp = latestRun?.status === 'active'
 
   return (
     <header className="topbar">
@@ -106,9 +113,10 @@ export function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelec
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-        {latestRun && (
+        {showStamp && (
           <div className="run-stamp">
-            Last run · {lastRunStr}
+            Active · {lastUpdatedStr ? `Last updated ${lastUpdatedStr}` : 'Not yet updated'}
+            {nextUpdateStr && ` · Next ${nextUpdateStr}`}
           </div>
         )}
         <div style={{ position: 'relative' }}>
@@ -188,9 +196,10 @@ export function MobileTopbar({ onSignOut, userEmail = '', oips = [], selectedOip
     setOpen(false)
     window.dispatchEvent(new CustomEvent('open-help', { detail: { prefill: '' } }))
   }
-  const lastRunStr = latestRun?.finished_at
-    ? new Date(latestRun.finished_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    : null
+  const shortOpts = { month: 'short', day: 'numeric' }
+  const lastRunStr = formatDateET(latestRun?.finished_at, shortOpts)
+  const nextRunStr = formatDateET(latestRun?.next_update, shortOpts)
+  const showStamp = latestRun?.status === 'active'
 
   return (
     <>
@@ -244,7 +253,12 @@ export function MobileTopbar({ onSignOut, userEmail = '', oips = [], selectedOip
             </nav>
             <div className="mt-sheet-foot">
               <span>{userEmail}</span>
-              {lastRunStr && <span>Updated {lastRunStr}</span>}
+              {showStamp && (
+                <span>
+                  Active · {lastRunStr ? `Updated ${lastRunStr}` : 'Not yet updated'}
+                  {nextRunStr && ` · Next ${nextRunStr}`}
+                </span>
+              )}
             </div>
           </div>
         </div>

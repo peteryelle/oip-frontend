@@ -142,23 +142,29 @@ function Layout() {
     try { localStorage.setItem('wq-demo-blur', demoBlur ? '1' : '0') } catch {}
   }, [demoBlur])
 
-  // Pull the most recent successful scrape_run for the run-stamp display
+  // Per-OIP freshness for the run stamp: last successful job + next scheduled
+  // run, from the oip_last_updated RPC (tenant-scoped, SECURITY DEFINER).
+  // Replaces the old vertical-wide scrape_runs lookup, which showed every
+  // tenant on a shared vertical the same date.
   useEffect(() => {
-    if (!selectedOip) return
+    if (!selectedOip) { setLatestRun(null); return }
     let cancelled = false
+    setLatestRun(null)
     ;(async () => {
-      const { data } = await supabase
-        .from('scrape_runs')
-        .select('finished_at, state, status, state_groupings:state_grouping_id (name, scrape_cron)')
-        .eq('vertical_id', selectedOip.vertical_id)
-        .eq('status', 'success')
-        .order('finished_at', { ascending: false })
-        .limit(1)
+      const { data, error } = await supabase.rpc('oip_last_updated', { p_oip_id: selectedOip.id })
       if (cancelled) return
-      setLatestRun(data?.[0] ?? null)
+      if (error) {
+        console.error('oip_last_updated:', error)
+        setLatestRun(null)
+        return
+      }
+      const row = data?.[0]
+      setLatestRun(row
+        ? { finished_at: row.last_updated, next_update: row.next_update, status: row.status }
+        : null)
     })()
     return () => { cancelled = true }
-  }, [selectedOip])
+  }, [selectedOip?.id])
 
   if (loading) return <FullPageLoader />
   if (oips.length === 0) {
