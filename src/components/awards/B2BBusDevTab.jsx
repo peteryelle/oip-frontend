@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAwards } from "../../hooks/useAwards";
 import AwardTable from "./AwardTable";
+import PrimeGroupTable, { primeKey } from "./PrimeGroupTable";
 import B2BBusDevReport from "./B2BBusDevReport";
 import DemandGrid from "../demand/DemandGrid";
 import "./awards.css";
@@ -32,6 +33,13 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
   const [subscriberName, setSubscriberName] = useState(null);
   const [pocket, setPocket] = useState(null);
   const listRef = useRef(null);
+  // Opportunities (one row per contract) | Primes (grouped by winning prime,
+  // the DD equivalent of SLED's Entities tab). Always opens on Opportunities,
+  // not remembered, same as SLED.
+  const [view, setView] = useState("opportunities");
+  useEffect(() => {
+    setView("opportunities");
+  }, [oipId]);
 
   // When a demand-grid cell is clicked, scope the list and scroll to it.
   useEffect(() => {
@@ -183,6 +191,32 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
         </div>
       )}
 
+      <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "2px solid var(--rule)" }}>
+        {[
+          { key: "opportunities", label: "Opportunities" },
+          { key: "primes", label: "Primes" },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setView(tab.key)}
+            style={{
+              padding: "10px 20px",
+              background: "none",
+              border: "none",
+              borderBottom: view === tab.key ? "2px solid var(--primary)" : "2px solid transparent",
+              marginBottom: -2,
+              color: view === tab.key ? "var(--primary)" : "var(--ink-fade)",
+              fontWeight: view === tab.key ? 600 : 400,
+              cursor: "pointer",
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 13,
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       <div className="wq-awards-controls">
         <select value={sort} onChange={(e) => setSort(e.target.value)}>
           <option value="recompete">Sort: Recompete soonest</option>
@@ -261,6 +295,13 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
       <div className="wq-awards-count">
         {loading
           ? "Loading…"
+          : view === "primes"
+          ? (() => {
+              const n = new Set(shownAwards.map(primeKey)).size;
+              return `${n} prime${n === 1 ? "" : "s"} · ${shownAwards.length} contract${
+                shownAwards.length === 1 ? "" : "s"
+              }${capped ? ` (top ${shownAwards.length} by Fit)` : ""}`;
+            })()
           : capped
           ? `Top ${shownAwards.length} by Fit`
           : `${awards.length}${awards.length !== total ? ` of ${total}` : ""} award${
@@ -293,7 +334,17 @@ export default function B2BBusDevTab({ oipId, isDerived }) {
         </div>
       )}
 
-      {!loading && !error && awards.length > 0 && (
+      {!loading && !error && awards.length > 0 && view === "primes" && (
+        <PrimeGroupTable
+          awards={shownAwards}
+          sort={sort}
+          onRowClick={setOpenAward}
+          recompeteDays={windows.recompeteDays}
+          awardDays={windows.awardDays}
+        />
+      )}
+
+      {!loading && !error && awards.length > 0 && view === "opportunities" && (
         <AwardTable
           awards={shownAwards}
           onRowClick={setOpenAward}
