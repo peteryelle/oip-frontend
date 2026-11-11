@@ -469,14 +469,10 @@ function viewLabel(section) {
 // TOPBAR — brand, OIP switcher, run stamp, user menu
 // ────────────────────────────────────────────────────────────────────────────
 
-// On OIP change, drop the user on that lane's results landing page.
+// On OIP change, always drop the user on Market Review, for every lane.
 // Shared by the desktop Topbar and the phone MobileTopbar.
-function oipLandingPath(oip) {
-  const slug = oip?.slug || ''
-  if (slug.endsWith('-recompete')) return '/radar'      // Recompete → Recompete Direct
-  if (slug.endsWith('-derived'))   return '/demand'     // Derived  → Derived Demand
-  if (oip?.verticals?.slug === 'sam') return '/market'  // Direct SAM → B2G Opportunities
-  return '/'                                             // SLED / other → Dashboard
+function oipLandingPath(_oip) {
+  return '/market'
 }
 
 function Topbar({ onSignOut, userEmail, oips = [], selectedOipId, onSelectOip, latestRun }) {
