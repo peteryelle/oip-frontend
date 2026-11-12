@@ -70,6 +70,9 @@ import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 
 const SUPABASE_URL  = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+// The worker's key (Railway SUPABASE_SERVICE_ROLE_KEY, now an sb_secret_ key),
+// stored as a function secret because the built-in copy may differ.
+const WORKER_KEY    = Deno.env.get("WORKER_KEY") ?? "";
 const TAVILY_KEY    = Deno.env.get("TAVILY_API_KEY") ?? "";
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 
@@ -84,7 +87,7 @@ const MODEL         = "claude-haiku-4-5-20251001";
 //      code-rendered compliance, milestone stage
 const INTEL_VERSION = 3;
 // notice_facts.facts_version: bump when the extraction schema changes.
-const FACTS_VERSION = 3;
+const FACTS_VERSION = 4;
 const CROL_URL      = "https://data.cityofnewyork.us/resource/tfbu-zbd2.json";
 const MAX_PDF_BYTES = 12 * 1024 * 1024;
 const NO_WINNER_RETRY_DAYS = 14;
@@ -114,6 +117,21 @@ function json(body: unknown, status = 200) {
 const clean = (s: unknown) => String(s ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const blocked = (u: string) => BLOCKED_HOSTS.some(h => hostOf(u).endsWith(h));
+// Search results sometimes come back as "view-source:https://..." — strip it.
+const normUrl = (u: unknown) => String(u ?? "").trim().replace(/^view-source:/i, "");
+const urlKey = (u: string) => normUrl(u).replace(/#.*$/, "").replace(/\/+$/, "").toLowerCase();
+function dedupeSources<T extends { url?: string }>(list: T[]): T[] {
+  const seen = new Set<string>(); const out: T[] = [];
+  for (const x of list) {
+    const k = urlKey(String(x?.url ?? ""));
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push({ ...x, url: normUrl(x.url) });
+  }
+  return out;
+}
+// Default decision-maker query for procurements. Plain words only: Tavily
+// does not honor boolean OR, so OR-chains return generic title-match news.
+const PROC_DM_TEMPLATE = '"{agency}" {title} director';
 const isPdfUrl = (u: string) => /\.pdf(\?|#|$)/i.test(u);
 
 // NYC City Record lists agencies by short names that are too generic to
@@ -170,7 +188,7 @@ async function tavily(query: string, opts: { raw?: boolean; max?: number } = {})
     const d = await r.json();
     return (d.results ?? [])
       .map((x: Record<string, unknown>) => ({
-        title: clean(x.title), url: String(x.url ?? ""),
+        title: clean(x.title), url: normUrl(x.url),
         content: clean(x.content).slice(0, 1500),
         raw: x.raw_content ? String(x.raw_content).slice(0, 6000) : undefined,
       }))
@@ -351,7 +369,7 @@ const EXTRACT_SPEC_V3 = `Return ONLY JSON, no preamble. Every field object has "
  "summary": ""
 }
 Rules:
-FIRST decide same_procurement: match=true ONLY if the document is about THIS procurement — same issuing agency (or its parent) AND the same scope/title or solicitation number. If match=false, leave every other field empty.
+FIRST decide same_procurement: match=true ONLY if the document is about THIS procurement — same issuing agency AND same buyer AND same scope/title. When the procurement names a specific buyer (a campus, college or unit under a parent system), a document from a DIFFERENT campus or unit under the same parent is NOT a match, even with an identical title. When the procurement gives a solicitation number and the document shows a different solicitation number, match=false. If match=false, leave every other field empty.
 Use only what the document states. If something is not in the document, leave the field empty ("" / [] / null) — never guess, never infer, never fill from general knowledge.
 quote: exact characters from the document so it can be found by text search. Never combine sentences. Never quote a sentence that does not exist.
 dates: EVERY dated event in the schedule, each with its own event_type. "proposal_due" is ONLY the deadline for submitting proposals/bids/responses — never the finalist notice, award or ad end. tentative=true if the document calls that date tentative/estimated/subject to change.
@@ -1014,9 +1032,35 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
   try {
-    const { signal_id, oip_id, cache_only = false, force = false, also_signal_ids = [] } = await req.json();
+    // ── Caller check: the worker (service key) or a member of the OIP's tenant ──
+    const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+    if (!token) return json({ error: "unauthorized" }, 401);
+    const isService = (!!SERVICE_KEY && token === SERVICE_KEY) || (!!WORKER_KEY && token === WORKER_KEY);
+
+    const body = await req.json();
+    const { signal_id, oip_id, cache_only = false, force = false } = body;
+    // Only the worker may fan facts out to other signals (writes shared notice_facts).
+    const also_signal_ids: string[] = isService && Array.isArray(body.also_signal_ids) ? body.also_signal_ids : [];
     if (!signal_id || !oip_id) return json({ error: "signal_id and oip_id required" }, 400);
     const sb = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    if (!isService) {
+      const { data: u } = await sb.auth.getUser(token);
+      const uid = u?.user?.id;
+      if (!uid) return json({ error: "unauthorized" }, 401);
+      const { data: own } = await sb.from("oips").select("tenant_id").eq("id", oip_id).maybeSingle();
+      if (!own) return json({ error: "oip not found" }, 404);
+      const [{ data: mem }, { data: adm }] = await Promise.all([
+        sb.from("tenant_members").select("user_id").eq("user_id", uid).eq("tenant_id", own.tenant_id).limit(1),
+        sb.from("platform_admins").select("user_id").eq("user_id", uid).limit(1),
+      ]);
+      if (!(mem ?? []).length && !(adm ?? []).length) return json({ error: "forbidden" }, 403);
+      // The signal must belong to this OIP, so a member cannot spend Tavily /
+      // Anthropic credits enriching arbitrary signal ids under their own OIP.
+      const { data: link } = await sb.from("oip_signals").select("signal_id")
+        .eq("oip_id", oip_id).eq("signal_id", signal_id).limit(1);
+      if (!(link ?? []).length) return json({ error: "signal not in this OIP" }, 403);
+    }
 
     const { data: cached } = await sb.from("opportunity_intel")
       .select("*").eq("signal_id", signal_id).eq("oip_id", oip_id).maybeSingle();
@@ -1041,6 +1085,26 @@ Deno.serve(async (req: Request) => {
       + (descLead ? `. Description: ${descLead}` : "");
     const acronym = (agency.match(/\(([A-Z]{3,})\)/) || [])[1] || "";
     const aTokens = agencyTokens(agency);
+    // The specific buyer under a parent system, from the title's agency part:
+    // "State University of New York (SUNY) (University at Albany) — ..." -> "University at Albany".
+    // Without it, any campus of the parent matches (SUNY Fredonia for Albany).
+    const agencyPart = String(sig.title ?? "").split(" — ")[0];
+    const campus = [...agencyPart.matchAll(/\(([^()]{3,80})\)/g)].map(m => m[1].trim())
+      .filter(x => !/^[A-Z&+.]{2,10}$/.test(x) && !agency.toLowerCase().includes(x.toLowerCase())).pop() ?? "";
+    const descBuyer = (descLead.match(/^([A-Z][\w&.,' -]{3,80}?) (is|are) (seeking|requesting|soliciting)/) || [])[1] || "";
+    const buyerName = campus || descBuyer;
+    const cTokens = campus ? agencyTokens(campus) : [];
+    // Relevant = mentions the agency AND, when a campus is known, that campus.
+    const relevant = (text: string) =>
+      mentionsAgency(text, aTokens, acronym) && (!cTokens.length || mentionsAgency(text, cTokens, ""));
+    // A buyer/agency value that names some OTHER unit under the parent.
+    const otherUnit = (v: string) => {
+      if (!campus || !v.trim()) return false;
+      if (mentionsAgency(v, cTokens, "")) return false;
+      const parentWords = new Set([...aTokens, acronym.toLowerCase()]);
+      const rest = agencyTokens(v).filter(w => !parentWords.has(w) && !["university", "college", "campus", "system", "administration"].includes(w));
+      return rest.length > 0;
+    };
     // Facts from the source record itself. These outrank anything found online.
     const authoritative: Record<string, unknown> = {};
     for (const k of ["response_deadline", "due_date", "ad_end_date", "issue_date", "pin", "cr_number",
@@ -1066,9 +1130,14 @@ Deno.serve(async (req: Request) => {
       return ds.length ? new Date(Math.max(...ds.map(d => d.getTime()))) : null;
     };
 
-    const { data: oip } = await sb.from("oips").select("name, slug").eq("id", oip_id).single();
+    const { data: oip } = await sb.from("oips").select("name, slug, tenant_id").eq("id", oip_id).single();
+    // The tenant's company name, not the OIP name (several OIPs are just "SLED").
+    const { data: tenantRow } = oip?.tenant_id
+      ? await sb.from("tenants").select("name").eq("id", oip.tenant_id).maybeSingle()
+      : { data: null };
+    const tenantName = String(tenantRow?.name || oip?.name || "the tenant");
     const { data: profile } = await sb.rpc("get_canonical_profile", { p_oip_id: oip_id });
-    const tenant = `${oip?.name ?? ""}: ${JSON.stringify(profile ?? {}).slice(0, 3500)}`;
+    const tenant = `${tenantName}: ${JSON.stringify(profile ?? {}).slice(0, 3500)}`;
 
     const { data: sen } = await sb.from("sentinels").select("pull_config")
       .eq("oip_id", oip_id).eq("is_active", true).limit(1).maybeSingle();
@@ -1082,7 +1151,7 @@ Deno.serve(async (req: Request) => {
     // ── Regulatory mode: utility proceedings before the DPU ──
     if (String(sig.source ?? "") === "puc") {
       const row = await enrichRegulatorySignal({
-        sb, sig, signal_id, oip_id, tenant, oipName: String(oip?.name ?? ""),
+        sb, sig, signal_id, oip_id, tenant, oipName: tenantName,
         dmTemplate: pc.enrichment_decision_maker_query ? dmTemplate : REG_DM_TEMPLATE, cached,
       });
       const stamped = { ...row, intel_version: INTEL_VERSION };
@@ -1096,7 +1165,7 @@ Deno.serve(async (req: Request) => {
     // ── Board-meeting mode: agendas / minutes are not procurements ──
     if (isBoardSignal(sig)) {
       const row = await enrichBoardSignal({
-        sb, sig, signal_id, oip_id, tenant, oipName: String(oip?.name ?? ""),
+        sb, sig, signal_id, oip_id, tenant, oipName: tenantName,
         dmTemplate, cached,
       });
       const stamped = { ...row, intel_version: INTEL_VERSION };
@@ -1112,7 +1181,7 @@ Deno.serve(async (req: Request) => {
     // notice (notice_facts). Only the synthesis below is per OIP.
     const now = new Date();
     const todayIso = now.toISOString().slice(0, 10);
-    const identity = `${agency} — ${title}${ident ? ` (#${ident})` : ""}` + (descLead ? `. Description: ${descLead}` : "");
+    const identity = `${agency}${buyerName ? ` — buyer: ${buyerName}` : ""} — ${title}${ident ? ` (solicitation #${ident})` : ""}` + (descLead ? `. Description: ${descLead}` : "");
     const latestFactDate = (f: Record<string, unknown> | null): Date | null => {
       const ds = ((f?.dates as { date?: string }[]) ?? []).map(t => toDate(t.date)).filter((d): d is Date => !!d);
       return ds.length ? new Date(Math.max(...ds.map(d => d.getTime()))) : null;
@@ -1121,6 +1190,23 @@ Deno.serve(async (req: Request) => {
     const { data: nfCached } = await sb.from("notice_facts").select("*").eq("signal_id", signal_id).maybeSingle();
     const nfFresh = !!nfCached && nfCached.facts_version === FACTS_VERSION && !force &&
       (!nfCached.next_refresh_at || new Date(nfCached.next_refresh_at) > now);
+
+    // Code-side identity gate (the model's same_procurement is not enough):
+    // a different solicitation number, or a different unit under the parent,
+    // rejects the material.
+    const digits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+    const identityMismatch = (f: Record<string, unknown> | null): string => {
+      if (!f) return "";
+      const idn = (f.identity ?? {}) as Record<string, Record<string, unknown>>;
+      const num = digits(idn.solicitation_number?.value), want = digits(ident);
+      if (num.length >= 4 && want.length >= 4 && !num.includes(want) && !want.includes(num))
+        return `solicitation # ${String(idn.solicitation_number?.value)} is not ${ident}`;
+      for (const k of ["buyer", "issuing_agency"]) {
+        const v = String(idn[k]?.value ?? "");
+        if (otherUnit(v)) return `${k.replace("_", " ")} "${v.slice(0, 60)}" is not ${campus}`;
+      }
+      return "";
+    };
 
     let nf: Record<string, unknown>;
     if (nfFresh) {
@@ -1135,11 +1221,10 @@ Deno.serve(async (req: Request) => {
       if (srcUrl && isPdfUrl(srcUrl)) { docUrl = srcUrl; docTitle = "Solicitation document (source)"; }
       let searchHits: Hit[] = [];
       if (!docUrl) {
-        const buyer = (descLead.match(/^([A-Z][\w&.,' -]{3,80}?) (is|are) (seeking|requesting|soliciting)/) || [])[1] || "";
-        const q = `"${agency}"${buyer ? ` "${buyer}"` : ""} "${title}" RFP${ident ? ` ${ident}` : ""}`;
+        const q = `"${agency}"${buyerName ? ` "${buyerName}"` : ""} "${title}" RFP${ident ? ` ${ident}` : ""}`;
         nQueries.push(q);
         searchHits = (await tavily(q, { raw: true, max: 8 }))
-          .filter(h => mentionsAgency(`${h.title} ${h.url} ${h.content} ${h.raw ?? ""}`, aTokens, acronym));
+          .filter(h => relevant(`${h.title} ${h.url} ${h.content} ${h.raw ?? ""}`));
         for (const h of searchHits) if (isPdfUrl(h.url) && urlTooOld(h.url))
           nSources.push({ title: `Rejected: ${h.title || h.url}`, url: h.url, used_for: "rejected — outdated (upload date in URL)" });
         searchHits = searchHits.filter(h => !(isPdfUrl(h.url) && urlTooOld(h.url)));
@@ -1166,6 +1251,18 @@ Deno.serve(async (req: Request) => {
               nSources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — ${String(sp.reason ?? "not this procurement").slice(0, 120)}` });
               facts = null;
             }
+            const mm = identityMismatch(facts);
+            if (facts && mm) {
+              nSources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — ${mm}`.slice(0, 140) });
+              facts = null;
+            }
+            // A document whose proposal deadline is >30 days before a still-open
+            // listing deadline is an earlier procurement with a reused title.
+            const pdfDue = facts ? factDate(facts, "proposal_due") : null, lDue = toDate(dueStr);
+            if (facts && pdfDue && lDue && pdfDue < now && lDue >= now && (lDue.getTime() - pdfDue.getTime()) > 30 * 86400000) {
+              nSources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — earlier procurement (due ${isoDay(pdfDue)}, listing due ${isoDay(lDue)})` });
+              facts = null;
+            }
             const latest = latestFactDate(facts);
             if (facts && latest && latest < oldestOk) {
               nSources.push({ title: `Rejected: ${docTitle || docUrl}`, url: docUrl, used_for: `rejected — outdated (latest date in document ${latest.toISOString().slice(0, 10)})` });
@@ -1181,7 +1278,13 @@ Deno.serve(async (req: Request) => {
         facts = ex.json; truncated = ex.truncated;
         const sp = (facts?.same_procurement ?? {}) as Record<string, unknown>;
         const latestT = latestFactDate(facts);
-        if (facts && (sp.match !== true || (latestT && latestT < oldestOk))) facts = null;
+        // Snippets never outrank the source record: a due date that disagrees
+        // with the listing means the snippets describe a different procurement.
+        const snipDue = facts ? factDate(facts, "proposal_due") : null, lDue = toDate(dueStr);
+        const dueClash = !!(snipDue && lDue && isoDay(snipDue) !== isoDay(lDue));
+        const mm = identityMismatch(facts);
+        if (facts && (mm || dueClash)) console.log("listing facts rejected", signal_id, mm || `due ${isoDay(snipDue)} vs listing ${isoDay(lDue)}`);
+        if (facts && (sp.match !== true || (latestT && latestT < oldestOk) || mm || dueClash)) facts = null;
         else if (facts) {
           fromListings = true;
           // page = result number; the text layer is the results themselves.
@@ -1198,18 +1301,21 @@ Deno.serve(async (req: Request) => {
 
       // ── 5. Resolve listing vs document: the document wins, conflicts kept ──
       const conflicts: Record<string, unknown>[] = [];
-      const docDue = factDate(facts, "proposal_due");
+      // Only an actual solicitation file may override the listing; web
+      // snippets fill gaps but never win a conflict.
+      const docDue = usedDoc ? factDate(facts, "proposal_due") : null;
       const listDue = toDate(dueStr);
       if (docDue && listDue && isoDay(docDue) !== isoDay(listDue))
         conflicts.push({ field: "proposal_due", listing_value: isoDay(listDue), document_value: isoDay(docDue), resolved_to: "document" });
-      const docIssued = factDate(facts, "issued");
+      const docIssued = usedDoc ? factDate(facts, "issued") : null;
       const listIssued = toDate(meta.issue_date);
       if (docIssued && listIssued && isoDay(docIssued) !== isoDay(listIssued))
         conflicts.push({ field: "issued", listing_value: isoDay(listIssued), document_value: isoDay(docIssued), resolved_to: "document" });
-      const resolvedDue = docDue ?? listDue;
+      const resolvedDue = docDue ?? listDue ?? factDate(facts, "proposal_due");
       facts.resolved = {
-        proposal_due: resolvedDue ? isoDay(resolvedDue) : "", proposal_due_source: docDue ? "document" : (listDue ? "listing" : ""),
-        issued: (docIssued ?? listIssued) ? isoDay(docIssued ?? listIssued) : "", issued_source: docIssued ? "document" : (listIssued ? "listing" : ""),
+        proposal_due: resolvedDue ? isoDay(resolvedDue) : "", proposal_due_source: docDue ? "document" : (listDue ? "listing" : (resolvedDue ? "web" : "")),
+        issued: (docIssued ?? listIssued ?? factDate(facts, "issued")) ? isoDay(docIssued ?? listIssued ?? factDate(facts, "issued")) : "",
+        issued_source: docIssued ? "document" : (listIssued ? "listing" : (factDate(facts, "issued") ? "web" : "")),
       };
 
       // ── Winner, once the award (or due) date has passed — notice level ──
@@ -1257,23 +1363,30 @@ Deno.serve(async (req: Request) => {
     const rs = restrictedStatus(facts, winner, now);
 
     // ── 6. Per-OIP: decision-makers (sentinel template) ──
-    const dmQuery = dmTemplate.replaceAll("{agency}", agency);
+    const dmWho = buyerName || agency;
+    const dmQuery = String(pc.enrichment_decision_maker_query || PROC_DM_TEMPLATE)
+      .replaceAll("{agency}", dmWho).replaceAll("{buyer}", dmWho).replaceAll("{title}", title);
     queries.push(dmQuery);
-    const dmHits = await tavily(dmQuery, { max: 5 });
+    // Keep only results about this buyer (drops generic title-match news).
+    const dmHits = (await tavily(dmQuery, { max: 5 })).filter(h => relevant(`${h.title} ${h.url} ${h.content}`));
     let decision_makers: Record<string, unknown>[] = [];
     if (dmHits.length) {
       const src = dmHits.map((h, i) => `[${i + 1}] ${h.title}\nURL: ${h.url}\n${h.content}`).join("\n\n");
       const out = await claudeJSON([{ type: "text", text:
-`From these results, list people at ${agency} who would own or influence a purchase like: ${title}.
+`From these results, list people at ${dmWho} who would own or influence a purchase like: ${title}.
+Only people who work at ${dmWho} itself — not at other campuses, units or companies.
 Use ONLY names and titles stated in the results. Note departures or new appointments if stated.
 
 ${src}
 
 Return ONLY JSON: {"people":[{"name":"","title":"","note":"","source_url":""}]}` }], 800);
-      const urls = new Set(dmHits.map(h => h.url));
+      const urls = new Set(dmHits.map(h => urlKey(h.url)));
       decision_makers = ((out?.people as Record<string, unknown>[]) ?? [])
-        .filter(p => p && p.name && urls.has(String(p.source_url ?? ""))).slice(0, 6);
-      for (const h of dmHits) sources.push({ title: h.title, url: h.url, used_for: "decision_makers" });
+        .filter(p => p && String(p.name ?? "").trim().split(/\s+/).length >= 2 && urls.has(urlKey(String(p.source_url ?? ""))))
+        .map(p => ({ ...p, source_url: normUrl(p.source_url) })).slice(0, 6);
+      // Cite only the pages that actually produced a kept person.
+      const usedUrls = new Set(decision_makers.map(p => urlKey(String(p.source_url))));
+      for (const h of dmHits) if (usedUrls.has(urlKey(h.url))) sources.push({ title: h.title, url: h.url, used_for: "decision_makers" });
     }
 
     // ── Plays + incumbent (per OIP, as v2) ──
@@ -1293,7 +1406,6 @@ Return ONLY JSON: {"people":[{"name":"","title":"","note":"","source_url":""}]}`
     }
 
     // ── 7. Synthesize for the tenant: cite fact ids or mark inference ──
-    const tenantName = String(oip?.name ?? "the tenant");
     const catalog = factCatalog(facts, decision_makers, winner, incumbent);
     const designatedLine = rs.applies && rs.designated && rs.designated.length ? ` Designated contacts: ${rs.designated.join(", ")}.` : "";
     const playBlock = plays.length
@@ -1420,7 +1532,7 @@ Rules:
       angle: angleText,
       next_steps: next_steps.map(s => ({ when: s.when ?? "", action: s.action ?? "", why: s.why ?? "", refs: s.refs, inference: s.inference })),
       compliance,
-      sources: [...((nf.sources as unknown[]) ?? []), ...sources], queries: [...((nf.queries as unknown[]) ?? []), ...queries],
+      sources: dedupeSources([...((nf.sources as { url?: string }[]) ?? []), ...sources]), queries: [...((nf.queries as unknown[]) ?? []), ...queries],
       error: null, enriched_at: now.toISOString(),
       next_refresh_at: nf.next_refresh_at ?? null,
       refresh_count: (cached?.refresh_count ?? -1) + 1,

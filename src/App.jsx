@@ -2304,11 +2304,16 @@ function isRecentlyClosed(s) {
 const FIND_WINNER_URL = 'https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/find-likely-winner'
 
 async function callFindWinner(body) {
+  // The function checks the caller belongs to the OIP's tenant and that the
+  // signal is in that OIP, so send the signed-in user's session token.
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) throw new Error('Not signed in')
   const r = await fetch(FIND_WINNER_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${session.access_token}`,
     },
     body: JSON.stringify(body),
   })
@@ -3693,14 +3698,12 @@ function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, keywordT
       || signals.find(s => s.signal_tier === 'tier1')
       || signals[0]
     if (!best) { setContactLoading(false); return }
-    fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/find-signal-contact', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-      body: JSON.stringify({ signal_id: best.signal_id, oip_id: oipId }),
+    // functions.invoke sends the signed-in user's session; the function
+    // checks tenant membership and that the signal is in this OIP.
+    supabase.functions.invoke('find-signal-contact', {
+      body: { signal_id: best.signal_id, oip_id: oipId },
     })
-    .then(r => r.ok ? r.json() : null)
-    .then(d => { if (d?.contacts?.length) setContact(d) })
+    .then(({ data: d, error }) => { if (!error && d?.contacts?.length) setContact(d) })
     .catch(() => {})
     .finally(() => setContactLoading(false))
   }, [entityName])
@@ -4769,16 +4772,12 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
     }
     setContactInfo(null)
     setContactLoading(true)
-    fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/find-signal-contact', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({ signal_id: os.signal_id, oip_id: os.oip_id }),
+    // functions.invoke sends the signed-in user's session; the function
+    // checks tenant membership and that the signal is in this OIP.
+    supabase.functions.invoke('find-signal-contact', {
+      body: { signal_id: os.signal_id, oip_id: os.oip_id },
     })
-    .then(r => r.ok ? r.json() : null)
-    .then(d => { if (d?.contacts?.length) setContactInfo(d) })
+    .then(({ data: d, error }) => { if (!error && d?.contacts?.length) setContactInfo(d) })
     .catch(() => {})
     .finally(() => setContactLoading(false))
   }, [os.signal_id])

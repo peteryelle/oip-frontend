@@ -20,7 +20,8 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+// New secret key first; legacy service_role only as a fallback until legacy keys are disabled.
+const SERVICE_KEY  = Deno.env.get("WQ_SECRET_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const TAVILY_KEY   = Deno.env.get("TAVILY_API_KEY") ?? "";
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 
@@ -29,7 +30,7 @@ const CROL_URL = "https://data.cityofnewyork.us/resource/tfbu-zbd2.json";
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, apikey",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 function json(body: unknown, status = 200) {
@@ -166,7 +167,42 @@ Respond ONLY with JSON, no preamble:
   }
 }
 
-// ── Handler ────────────────────────────────────────────────────────────────
+// ── Caller check ─────────────────────────────────────────────────────────────
+// Allowed: the server's own key (worker/admin scripts), or a signed-in user who
+// is a tenant_members row for the OIP's tenant (or a platform admin) AND the
+// signal is actually in that OIP (an oip_signals row). The public anon key
+// carries no user id, so it is rejected. Returns null when allowed.
+const SERVER_KEYS = [
+  Deno.env.get("WQ_SECRET_KEY"),
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+].filter((k): k is string => !!k);
+
+async function authorizeCaller(
+  req: Request, sb: ReturnType<typeof createClient>, oipId: string, signalId: string,
+  respond: (body: unknown, status: number) => Response,
+): Promise<Response | null> {
+  const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) return respond({ error: "unauthorized" }, 401);
+  if (SERVER_KEYS.includes(token)) return null;
+
+  const { data: claimsData, error: claimsErr } = await sb.auth.getClaims(token);
+  const uid = claimsData?.claims?.sub as string | undefined;
+  if (claimsErr || !uid) return respond({ error: "unauthorized" }, 401);
+
+  const { data: own } = await sb.from("oips").select("tenant_id").eq("id", oipId).maybeSingle();
+  if (!own) return respond({ error: "oip not found" }, 404);
+
+  const [{ data: mem }, { data: adm }, { data: link }] = await Promise.all([
+    sb.from("tenant_members").select("user_id").eq("user_id", uid).eq("tenant_id", own.tenant_id).limit(1),
+    sb.from("platform_admins").select("user_id").eq("user_id", uid).limit(1),
+    sb.from("oip_signals").select("signal_id").eq("oip_id", oipId).eq("signal_id", signalId).limit(1),
+  ]);
+  if (!(mem ?? []).length && !(adm ?? []).length) return respond({ error: "forbidden" }, 403);
+  if (!(link ?? []).length) return respond({ error: "signal not in this OIP" }, 403);
+  return null;
+}
+
+// ── Handler ────────────────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
@@ -175,6 +211,8 @@ Deno.serve(async (req: Request) => {
     if (!signal_id || !oip_id) return json({ error: "signal_id and oip_id required" }, 400);
 
     const sb = createClient(SUPABASE_URL, SERVICE_KEY);
+    const denied = await authorizeCaller(req, sb, String(oip_id), String(signal_id), json);
+    if (denied) return denied;
 
     // 1. Cache
     if (!force) {
