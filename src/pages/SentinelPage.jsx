@@ -93,7 +93,7 @@ export default function SentinelPage() {
   const [showArchived, setShowArchived] = useState(false)
   const { memberships } = useAuth()
   const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
-  const canEdit = ['owner', 'admin'].includes(myRole)
+  const canEdit = ['owner', 'admin', 'member'].includes(myRole)
 
   const loadAllSentinels = async (selectId = null) => {
     const { data: all } = await supabase

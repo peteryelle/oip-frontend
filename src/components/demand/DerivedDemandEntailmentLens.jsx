@@ -13,7 +13,7 @@ export default function DerivedDemandEntailmentLens({ oip, sentinel, onSave }) {
 
   // Check if current user is operator (owner)
   const membership = memberships?.find(m => m.tenant_id === oip?.tenant_id);
-  const isOperator = membership?.role === 'owner' || membership?.role === 'admin';
+  const isOperator = ['owner', 'admin', 'member'].includes(membership?.role);
 
   useEffect(() => {
     if (sentinel?.pull_config) {
@@ -57,7 +57,7 @@ export default function DerivedDemandEntailmentLens({ oip, sentinel, onSave }) {
 
   const handleUnlock = async () => {
     if (!isOperator) {
-      alert('Only an owner can unlock the lens.');
+      alert('Only a team member can unlock the lens.');
       return;
     }
 

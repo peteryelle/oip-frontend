@@ -25,10 +25,10 @@ export default function ProfilePage() {
   const [borrowed, setBorrowed] = useState(false) // profile resolved from tenant-canonical (no per-OIP row)
   const { memberships } = useAuth()
   const myRole = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
-  const canEdit = ['owner', 'admin'].includes(myRole) && !borrowed
+  const canEdit = ['owner', 'admin', 'member'].includes(myRole) && !borrowed
   // Competitors write straight to the tenant-canonical row, so owners/admins
   // can edit them even where the rest of the profile is borrowed (read-only).
-  const canEditCompetitors = ['owner', 'admin'].includes(myRole)
+  const canEditCompetitors = ['owner', 'admin', 'member'].includes(myRole)
   const isSam = selectedOip?.verticals?.slug === 'sam'
   const profileRef = useRef(null)
   const [exportingPdf, setExportingPdf] = useState(false)

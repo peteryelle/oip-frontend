@@ -103,7 +103,7 @@ export default function TenantTypeBlock({ oipId, canEdit, onSaved }) {
         </div>
         {canEdit ? picker : (
           <div style={{ fontSize: 14 }}>
-            An owner or admin on your team needs to set this. Ask them to open Setup → Profile.
+            Someone on your team needs to set this. Ask them to open Setup → Profile.
           </div>
         )}
       </div>

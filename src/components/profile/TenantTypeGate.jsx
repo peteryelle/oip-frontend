@@ -27,7 +27,7 @@ export default function TenantTypeGate() {
   const [refresh, setRefresh] = useState(0)
 
   const role = memberships.find(m => m.tenant_id === selectedOip?.tenant_id)?.role
-  const canEdit = ['owner', 'admin'].includes(role)
+  const canEdit = ['owner', 'admin', 'member'].includes(role)
 
   useEffect(() => {
     const onChange = () => setRefresh(n => n + 1)
