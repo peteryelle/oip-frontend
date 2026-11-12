@@ -3705,99 +3705,47 @@ function EntityDrawer({ entityName, entityKey, signals, oipId, onClose, keywordT
     .finally(() => setContactLoading(false))
   }, [entityName])
 
-  // Briefing fetch
+  // Briefing fetch — server-side via the entity-briefing edge function.
+  // The function authenticates the user, checks tenant membership, builds the
+  // prompt from the database (only ids are sent), and returns a cached
+  // briefing unless this entity's signals or the tenant profile changed.
+  // Refresh forces regeneration (server rate-limits it per entity).
+  const signalIdsKey = signals.map(s => s.signal_id).join(',')
+  const briefingForceRef = useRef(false)
+  const [briefingNonce, setBriefingNonce] = useState(0)
   useEffect(() => {
+    if (!oipId || !entityKey || signals.length === 0) {
+      setBriefing('')
+      setBriefingLoading(false)
+      return
+    }
     let cancelled = false
-    ;(async () => {
-      const summaries = signals.slice(0,12).map((s,i) =>
-        `${i+1}. [${s.signal_tier}] ${s.signals?.title || ''}\n   ${s.match_reason||''}`
-      ).join('\n')
-      const stageSummary = stageMap.map(g => `${g.stage}×${g.items.length}`).join(', ') || 'none staged'
-      const unstagedNote = unstagedSignals.length > 0 ? ` (${unstagedSignals.length} unstaged)` : ''
-
-      // Tenant's canonical profile — NOT oip_id-scoped. Fetched via the same
-      // RPC score_handler.py uses (_load_active_profile), which resolves the
-      // tenant's one canonical profile regardless of which sibling OIP is
-      // passed in. Tessco's profile is stored against tessco-sled but this
-      // correctly resolves it even when called with tessco-sled-boards's id.
-      // Without this, the brief had no access to the tenant's own product
-      // focus/compliance drivers (e.g. Tessco's IFC 510/ERRCS/Alyssa's Law
-      // thesis) and could only ever write generically — this is also why
-      // the fix generalizes to every tenant instead of hardcoding one
-      // tenant's regulatory language into a shared prompt.
-      let profileBlock = 'No profile on file.'
-      try {
-        const { data: profileData } = await supabase.rpc('get_canonical_profile', { p_oip_id: oipId })
-        if (profileData) {
-          const desc = profileData.description || ''
-          const drivers = (profileData.key_funding_programs || []).join('; ')
-          profileBlock = `${desc}\nKey funding/compliance drivers: ${drivers}`
-        }
-      } catch (e) { /* fall through to default profileBlock */ }
+    const force = briefingForceRef.current
+    briefingForceRef.current = false
+    setBriefingLoading(true)
+    supabase.functions.invoke('entity-briefing', {
+      body: {
+        oip_id: oipId,
+        entity_key: entityKey,
+        entity_name: entityName,
+        signal_ids: signals.map(s => s.signal_id),
+        force,
+      },
+    })
+    .then(({ data, error }) => {
       if (cancelled) return
-
-      const prompt = `You are a senior BD analyst. Based on these ${signals.length} procurement signals about ${entityName}, write an intelligence briefing.
-
-ORGANIZATION PROFILE:
-${profileBlock}
-
-LIFECYCLE STAGE MIX: ${stageSummary}${unstagedNote}
-
-GROUND RULES — do not violate these:
-- State only what the signal data directly supports. Never invent a reason for why
-  something is absent ("suggesting it's embedded in documents you haven't seen" is a
-  guess, not a fact) — either state the absence neutrally, or explain it using the
-  profile's compliance drivers if genuinely relevant (see rule below).
-- Opportunity is not limited to early lifecycle stages. A board actively bringing items
-  forward — at ANY stage — demonstrates real, live activity. Never declare a window
-  "closed." A later-stage signal still gets an actionable next step; the action changes
-  (request the scope directly), not whether one exists.
-- Any signal naming a specific facility AND specific scope matching the profile's focus
-  areas is the highest-value output this brief can produce. Always end it with: contact
-  the district directly and request the full specification.
-- Any signal describing a new standing governance or financing vehicle (authority,
-  corporation, master financing structure) always gets exactly two actions: (1) flag for
-  ongoing monitoring, (2) recommend requesting vendor-notification-list registration.
-- New construction or major renovation items that do NOT name a scope matching the
-  profile's compliance drivers are not a gap to speculate about — they are the highest-
-  value outreach target. Code-driven requirements are routinely not itemized at board
-  level; state that pattern once, factually, then recommend direct outreach to confirm
-  applicability and offer scoping help.
-
-SIGNALS:
-${summaries}
-
-Write three sections: EXECUTIVE SUMMARY, WHAT'S HAPPENING, WHERE TO ENGAGE.
-EXECUTIVE SUMMARY: 2-3 bullets — the single most decision-relevant facts only (total
-active dollar value, headline stage mix, count of concrete engagement opportunities below).
-No paragraph.
-WHAT'S HAPPENING: one bullet per distinct fact — stage counts, dollar figures, named
-facilities, financing vehicles. Use as many bullets as there are real facts. Do not
-compress into a paragraph and do not cap at 3.
-WHERE TO ENGAGE: one bullet per actionable item, each ending in a concrete
-instruction, ordered by concreteness (named facility + named scope first). Use as many
-bullets as there are real actionable items. Do not cap at 3.
-Every bullet is one line, specific, no filler — but not a teaser either, since
-there is no paragraph after it to supply the missing detail. No paragraphs anywhere
-in this brief; bullets carry the full content.
-
-Format: plain text, section headers in caps followed by a colon, bullets prefixed
-with •. No markdown, no word-count padding, no filler bullets to hit a count.`
-
-      fetch('https://pcxjkegktlhkvbtmybjk.supabase.co/functions/v1/ai-proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900, prompt })
-      })
-      .then(r => r.json())
-      .then(d => { if (!cancelled) setBriefing(d.content?.find(b => b.type==='text')?.text || '') })
-      .catch(() => { if (!cancelled) setBriefing('Unable to generate briefing.') })
-      .finally(() => { if (!cancelled) setBriefingLoading(false) })
-    })()
+      if (error || !data || data.error) setBriefing('Unable to generate briefing.')
+      else setBriefing(data.briefing || '')
+    })
+    .catch(() => { if (!cancelled) setBriefing('Unable to generate briefing.') })
+    .finally(() => { if (!cancelled) setBriefingLoading(false) })
     return () => { cancelled = true }
-  }, [entityName, oipId])
+  }, [entityKey, oipId, signalIdsKey, briefingNonce])
+
+  const refreshBriefing = () => {
+    briefingForceRef.current = true
+    setBriefingNonce(n => n + 1)
+  }
 
   const divider = <hr style={{ border:'none', borderTop:'1px solid var(--rule)', margin:'20px 0' }} />
   const lbl = (txt) => (
@@ -4182,7 +4130,17 @@ ${projectsHtml}
 
         {/* Intelligence Brief */}
         <div style={{ marginBottom:20 }}>
-          {lbl('Intelligence Briefing')}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
+            {lbl('Intelligence Briefing')}
+            {!briefingLoading && signals.length > 0 && (
+              <button onClick={refreshBriefing}
+                style={{ background:'none', border:'none', padding:0, cursor:'pointer',
+                  fontSize:11, fontFamily:"'IBM Plex Mono', monospace", color:'var(--ink-fade)',
+                  textTransform:'uppercase', letterSpacing:'.12em' }}>
+                Refresh
+              </button>
+            )}
+          </div>
           {briefingLoading
             ? <div style={{ fontSize:14, color:'var(--ink-fade)', fontStyle:'italic' }}>Generating briefing…</div>
             : <div style={{ fontSize:14, lineHeight:1.8 }}>{renderBriefing(briefing||'')}</div>
