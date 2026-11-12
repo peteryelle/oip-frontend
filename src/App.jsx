@@ -4712,8 +4712,6 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
   // Past-due flag on the due date (Fit Score discount backed out 2026-09-10 —
   // sorting by due date handles staleness instead; see MarketReviewPage).
   const isPastDue = isSam && !!meta.response_deadline && new Date(meta.response_deadline) < new Date()
-  const [aiSummary, setAiSummary] = useState(null)
-  const [aiLoading, setAiLoading] = useState(false)
   const [enriched, setEnriched] = useState(null)  // on-demand entity data
   const [contactInfo, setContactInfo] = useState(null)
   const [contactLoading, setContactLoading] = useState(false)
@@ -4786,65 +4784,6 @@ function SignalDrawer({ os, onClose, onUpdateStatus, onPursue, keywordTierMap = 
     return city && city !== top ? `${top} · ${city}` : top
   })()
 
-  useEffect(() => {
-    if (!isSam) return
-    setAiSummary(null)
-    // Use pre-scored worker summary if available — skip failing live API call
-    if (!isDib && scores.llm_reason) {
-      setAiSummary(scores.llm_reason)
-      setAiLoading(false)
-      return
-    }
-
-    setAiLoading(true)
-
-    const prompt = isDib
-      ? `You are a B2B sales analyst. Evaluate this DoD contractor as a sales prospect for SMC Infrastructure Solutions (SMCiS), a WOSB/HUBZone-certified telecom infrastructure firm offering structured cabling, fiber optic/OSP construction, in-building wireless (DAS/Small Cell), and managed network services.
-
-Company: ${meta.company_name || sig.title}
-Legal Name: ${meta.entity_legal_name || 'Unknown'}
-Website: ${meta.entity_website || 'Unknown'}
-Agency: ${meta.department_full || meta.department_name || 'Unknown'}
-Award Amount: $${meta.award_amount ? (meta.award_amount/1e6).toFixed(1) + 'M' : 'Unknown'}
-Award Date: ${meta.award_date || 'Unknown'}
-NAICS: ${meta.naics_code || 'Unknown'}
-Certifications: ${(meta.entity_certifications || []).join(', ') || 'Unknown'}
-ICP Fit: ${scores.icp_fit ?? scores.technical_fit ?? 'N/A'}/100
-Engagement Risk: ${scores.engagement_risk || scores.bid_risk || 'Unknown'}
-
-Write 2-4 sentences on why SMCiS should or should not pursue this company as a customer. Cover: alignment with SMCiS services, CMMC/compliance buying trigger, and the best outreach angle. Be direct and actionable.`
-      : `You are a federal business development analyst. Evaluate this SAM.gov opportunity for SMC Infrastructure Solutions (SMCiS), a WOSB/HUBZone-certified telecom infrastructure firm specializing in structured cabling, fiber optic/OSP construction, in-building wireless (DAS/Small Cell), and managed network services for federal and DoD clients.
-
-Opportunity:
-Title: ${sig.title}
-Type: ${meta.notice_type || 'Unknown'}
-Department: ${meta.department_full || meta.department_name || 'Unknown'}
-NAICS: ${meta.naics_code || 'Unknown'}
-Set-Aside: ${meta.set_aside_desc || meta.set_aside_code || 'None specified'}
-Due Date: ${meta.response_deadline ? new Date(meta.response_deadline).toLocaleDateString() : 'Unknown'}
-Matched Keywords: ${(os.matched_keywords || []).join(', ') || 'None'}
-Technical Fit: ${scores.technical_fit ?? 'N/A'}/100
-Bid Risk: ${scores.bid_risk || 'Unknown'}
-Recommendation: ${scores.recommendation || 'Unknown'}
-Evidence: ${(scores.evidence || []).join('; ') || 'None'}
-
-Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capability match, set-aside eligibility, and the single most important risk or opportunity. Be direct and actionable — no hedging.`
-
-    fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    })
-    .then(r => r.json())
-    .then(d => setAiSummary(d.content?.find(b => b.type === 'text')?.text || ''))
-    .catch(() => setAiSummary('Unable to generate summary.'))
-    .finally(() => setAiLoading(false))
-  }, [os.signal_id])
-
   // Contact fetch — SLED signals only (only SLED has a two-letter state code)
   useEffect(() => {
     if (!sig.state || sig.state.length !== 2 || isSam) return
@@ -4905,7 +4844,7 @@ Write 2-4 sentences evaluating whether SMCiS should pursue this. Cover: capabili
 
 
   const handleDownloadBrief = () => {    const analysis  = scores.llm_analysis
-    const summary   = aiSummary || scores.llm_reason || ''
+    const summary   = scores.llm_reason || ''
     const renderSection = (label, section) => {
       if (!section) return ''
       const bs = (section.bullets || []).map(b => `<li style="font-weight:600;margin-bottom:4px">${b}</li>`).join('')
@@ -5290,14 +5229,7 @@ ${analysisHtml}
                   </div>
                 )
               }
-              if (aiLoading) return (
-                <div style={{ padding: '14px 16px', background: 'var(--primary-soft)',
-                  borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
-                  fontSize: 14, color: 'var(--ink-fade)', fontStyle: 'italic' }}>
-                  Analyzing opportunity…
-                </div>
-              )
-              const fallback = aiSummary || scores.llm_reason
+              const fallback = scores.llm_reason
               return (
                 <div className="blurable" style={{ padding: '14px 16px', background: 'var(--primary-soft)',
                   borderLeft: '3px solid var(--primary)', borderRadius: '0 4px 4px 0',
